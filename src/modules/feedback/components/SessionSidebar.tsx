@@ -11,6 +11,7 @@ interface SessionSidebarProps {
   sessions: InterviewSession[]
   activeId: string | null
   onSelect: (session: InterviewSession) => void
+  onDelete?: (session: InterviewSession) => void
   onClose?: () => void
   searchQuery?: string
 }
@@ -33,7 +34,7 @@ function scoreBar(score: number) {
   )
 }
 
-export default function SessionSidebar({ sessions, activeId, onSelect, onClose, searchQuery }: SessionSidebarProps) {
+export default function SessionSidebar({ sessions, activeId, onSelect, onDelete, onClose, searchQuery }: SessionSidebarProps) {
   const isSearching = !!searchQuery?.trim()
 
   return (
@@ -92,32 +93,60 @@ export default function SessionSidebar({ sessions, activeId, onSelect, onClose, 
           sessions.map(s => {
             const isActive = s.id === activeId
             return (
-              <button
+              <div
                 key={s.id}
-                onClick={() => onSelect(s)}
-                className={`w-full text-left px-3 py-3 rounded-xl transition-all duration-200
+                className={`group relative w-full rounded-xl transition-all duration-200
                   ${isActive
                     ? 'bg-blue-50 border border-blue-200 shadow-sm'
                     : 'hover:bg-slate-50 border border-transparent'
                   }`}
               >
-                {/* 标题 */}
-                <p className={`text-[14px] font-medium leading-snug mb-1.5 truncate
-                  ${isActive ? 'text-blue-700' : 'text-slate-700'}`}>
-                  {s.title}
-                </p>
+                <button
+                  onClick={() => onSelect(s)}
+                  className="w-full text-left px-3 py-3"
+                >
+                  {/* 标题 */}
+                  <p className={`text-[14px] font-medium leading-snug mb-1.5 truncate pr-6
+                    ${isActive ? 'text-blue-700' : 'text-slate-700'}`}>
+                    {s.title}
+                  </p>
 
-                {/* 日期 + 时长 */}
-                <div className="flex items-center gap-3 text-[11px] text-slate-400 font-normal mb-2">
-                  <span>{s.date}</span>
-                  <span>{s.time}</span>
-                  <span className="text-slate-300">·</span>
-                  <span>{s.duration}</span>
-                </div>
+                  {/* 日期 + 时长 */}
+                  <div className="flex items-center gap-3 text-[11px] text-slate-400 font-normal mb-2">
+                    <span>{s.date}</span>
+                    <span>{s.time}</span>
+                    <span className="text-slate-300">·</span>
+                    <span>{s.duration}</span>
+                  </div>
 
-                {/* 综合评分条 */}
-                {scoreBar(s.overallScore)}
-              </button>
+                  {/* 综合评分条 */}
+                  {scoreBar(s.overallScore)}
+                </button>
+
+                {/* 删除按钮 — 鼠标悬浮时显示，悬停变红 */}
+                {onDelete && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onDelete(s)
+                    }}
+                    className="absolute top-2.5 right-2.5 w-6 h-6 rounded-lg
+                      text-slate-300 hover:text-red-500 hover:bg-red-50
+                      opacity-0 group-hover:opacity-100
+                      transition-all duration-200
+                      flex items-center justify-center"
+                    title="删除此记录"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <line x1="10" y1="11" x2="10" y2="17" />
+                      <line x1="14" y1="11" x2="14" y2="17" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             )
           })
         )}

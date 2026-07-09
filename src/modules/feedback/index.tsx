@@ -2,9 +2,10 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { InterviewSession } from './types'
-import { getSavedSessions } from '../shared/store/interviewStore'
+import { getSavedSessions, deleteSession } from '../shared/store/interviewStore'
 import SessionSidebar from './components/SessionSidebar'
 import SessionDetail from './components/SessionDetail'
+import ConfirmDialog from './components/ConfirmDialog'
 
 // ========================================
 // 反馈总结模块 (独立模块，可单独拆分)
@@ -35,8 +36,11 @@ export default function FeedbackPage() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  // 从 localStorage 读取已保存的面签记录
-  const allSessions = useMemo(() => getSavedSessions(), [])
+  // 从 localStorage 读取已保存的面签记录（用 state 以便删除后刷新）
+  const [allSessions, setAllSessions] = useState<InterviewSession[]>(() => getSavedSessions())
+
+  // 删除确认弹窗状态
+  const [deleteTarget, setDeleteTarget] = useState<InterviewSession | null>(null)
 
   // 如果从练习页跳转过来，高亮刚保存的记录
   const highlightId = (location.state as any)?.highlightSessionId as string | undefined
@@ -80,6 +84,30 @@ export default function FeedbackPage() {
   }, [])
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
+
+  // 请求删除 — 打开确认弹窗
+  const handleDeleteRequest = useCallback((session: InterviewSession) => {
+    setDeleteTarget(session)
+  }, [])
+
+  // 确认删除
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteTarget) return
+    deleteSession(deleteTarget.id)
+    // 刷新列表
+    const updated = getSavedSessions()
+    setAllSessions(updated)
+    // 如果删的是当前激活的记录，切换到下一条
+    if (activeSession?.id === deleteTarget.id) {
+      setActiveSession(updated[0] ?? null)
+    }
+    setDeleteTarget(null)
+  }, [deleteTarget, activeSession])
+
+  // 取消删除
+  const handleCancelDelete = useCallback(() => {
+    setDeleteTarget(null)
+  }, [])
 
   const toggleSearch = useCallback(() => {
     setSearchExpanded(v => {
@@ -254,6 +282,7 @@ export default function FeedbackPage() {
                   sessions={filteredSessions}
                   activeId={activeSession?.id ?? null}
                   onSelect={handleSelect}
+                  onDelete={handleDeleteRequest}
                   onClose={closeSidebar}
                   searchQuery={searchQuery}
                 />
@@ -285,6 +314,7 @@ export default function FeedbackPage() {
                   sessions={filteredSessions}
                   activeId={activeSession?.id ?? null}
                   onSelect={handleSelect}
+                  onDelete={handleDeleteRequest}
                   onClose={closeSidebar}
                   searchQuery={searchQuery}
                 />
@@ -324,6 +354,17 @@ export default function FeedbackPage() {
           )}
         </main>
       </div>
+
+      {/* 删除确认弹窗 */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="删除面签记录"
+        message={`确定要删除「${deleteTarget?.title ?? ''}」吗？删除后无法恢复。`}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+      />
     </div>
   )
 }

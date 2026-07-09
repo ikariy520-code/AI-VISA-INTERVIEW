@@ -48,6 +48,13 @@ export default function PracticePage() {
 
   const guardRedirected = useRef(false)
 
+  // ══════════════════════════════════════════════════
+  // ⚠️ GUARD_BYPASS — 临时跳过入口守卫（开发调试用）
+  //    true  = 无需从第一页选面签官，默认使用 standard 类型
+  //    false = 恢复守卫，无 officerType 时自动跳回 /voice
+  // ══════════════════════════════════════════════════
+  const GUARD_BYPASS = true
+
   // 面签官类型：从路由 state 读取，回退到 sessionStorage
   const officerType: OfficerType | null = useMemo(() => {
     const fromRoute = (location.state as any)?.officerType as OfficerType | undefined
@@ -59,11 +66,14 @@ export default function PracticePage() {
     if (fromStorage && ['pressure', 'standard', 'friendly', 'trump', 'custom'].includes(fromStorage)) {
       return fromStorage
     }
+    // 守卫绕过时默认返回 standard 类型
+    if (GUARD_BYPASS) return 'standard'
     return null
   }, [location.state])
 
   // 入口守卫：没有选择面签官类型 → 跳回第一部分
   useEffect(() => {
+    if (GUARD_BYPASS) return
     if (guardRedirected.current) return
     if (!officerType) {
       guardRedirected.current = true

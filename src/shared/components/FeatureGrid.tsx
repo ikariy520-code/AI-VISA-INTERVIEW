@@ -29,7 +29,7 @@ const features: FeatureCardData[] = [
     id: 'practice',
     title: '面签实战',
     description: '百战不殆。模拟真实面签环境反复练习，练到从容不迫、对答如流。',
-    route: '/voice',
+    route: '/practice', // TODO: 守卫恢复后改回 /voice
     accentClass: 'from-emerald-500 to-emerald-600',
     shadowClass: 'shadow-emerald-500/20',
     icon: (
