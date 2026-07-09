@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   Design System — AI 面签教练
+   色彩心理学：自信蓝 + 通过绿 + 温暖金
+   线条：全局结构性线条，清晰利落
+   ======================================== */
+
+:root {
+  --blue-500: #3B82F6;
+  --blue-400: #60A5FA;
+  --blue-50: #EFF6FF;
+  --emerald-500: #10B981;
+  --emerald-50: #ECFDF5;
+  --amber-500: #F59E0B;
+  --amber-50: #FFFBEB;
+  --slate-900: #0F172A;
+  --slate-700: #334155;
+  --slate-500: #64748B;
+  --slate-300: #CBD5E1;
+  --slate-200: #E2E8F0;
+  --slate-100: #F1F5F9;
+  --slate-50: #F8FAFC;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  background: #F8FAFC;
+  color: #0F172A;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0.01em;
+  line-height: 1.6;
+}
+
+/* ========================================
+   Lines — 全局线条系统
+   所有结构分割都通过精细线条表达
+   ======================================== */
+
+hr {
+  border: none;
+  border-top: 1px solid #E2E8F0;
+}
+
+/* ========================================
+   Typography — 字体层级
+   中文为主，英文为辅，克制使用
+   ======================================== */
+
+h1, h2, h3, h4 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+/* ========================================
+   Scrollbar — 轻量滚动条
+   ======================================== */
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+/* ========================================
+   Selection
+   ======================================== */
+
+::selection {
+  background: rgba(59, 130, 246, 0.15);
+  color: #0F172A;
+}
+
+/* ========================================
+   Utility: card with clean lines
+   ======================================== */
+
+.card-line {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  transition: all 0.3s cubic-bezier(0.25, 0.1, 0, 1);
+}
+
+.card-line:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+}
+
+/* ========================================
+   Utility: gradient text (blue)
+   ======================================== */
+
+.gradient-text {
+  background: linear-gradient(135deg, #2563EB, #3B82F6, #60A5FA);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
