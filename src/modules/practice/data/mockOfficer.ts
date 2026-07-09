@@ -3,7 +3,7 @@
 //
 // 模拟 AI 面签官的对话行为：
 //   · 分析阶段 — 根据不同签证类型返回分析策略
-//   · 对话阶段 — 根据上下文返回自然对话 + 情绪
+//   · 对话阶段 — F1 使用面签状态机引擎
 //
 // 无 API key 时的完整 demo 体验
 // ========================================
@@ -12,6 +12,25 @@ import type {
   VisaType, UserContext, AIAnalysisResult,
 } from '../types'
 import type { OfficerType } from '../../voice/types'
+import { createInterviewFlow } from '../services/interviewFlow'
+
+// ---- 状态机实例（F1 专用，按面试生命周期管理） ----
+
+let flowInstance: ReturnType<typeof createInterviewFlow> | null = null
+let lastQuestionId: string | null = null
+
+function ensureFlow(context: UserContext) {
+  if (!flowInstance) {
+    flowInstance = createInterviewFlow(context)
+  }
+  return flowInstance
+}
+
+/** 重置状态机（新面试开始时调用） */
+export function resetInterviewFlow() {
+  flowInstance = null
+  lastQuestionId = null
+}
 
 // ---- 分析阶段：按签证类型返回策略 ----
 
@@ -62,24 +81,21 @@ What's the purpose of your trip to the United States?`,
     F1: {
       visaType: 'F1',
       riskPoints: [
-        '学习计划的真实性和合理性',
-        '毕业后是否有归国意愿',
-        '经济能力是否足够支持学业',
-        '所选学校与专业的匹配度',
+        '学术计划的真实性和合理性',
+        '毕业后是否有移民倾向',
+        '经济能力是否充分',
+        '国内约束力是否足够',
       ],
       suggestedQuestions: [
-        '为什么选择这所学校/专业',
-        '学业完成后的计划',
-        '学费和生活费来源',
-        '之前的学习与工作经历',
-        '对美国教育的了解程度',
+        '学校与专业选择理由',
+        '学术背景匹配度',
+        '资金能力与来源',
+        '家庭状况与国内约束',
+        '毕业后归国计划',
+        '过往旅行与签证记录',
       ],
-      strategy: '验证留学动机的真实性，评估学业完成后的归国意愿。F1 签证需注意申请人是否有清晰的职业规划与中国国内的就业前景。',
-      greeting: `你好，欢迎来面签。请把护照和 I-20 给我。
-
-Good morning. Please give me your passport and I-20 form.
-
-So, which university will you be attending?`,
+      strategy: 'F1 学生签证面签将使用真实面签逻辑：从基础身份 → 学校专业 → 学术计划 → 资金 → 家庭 → 回国计划逐步深入，根据回答质量动态追问，穿插材料请求。重点评估学术真实性、资金充分性、回国意愿。',
+      greeting: '', // F1 使用 flow 引擎动态生成，此处留空
     },
     H1B: {
       visaType: 'H1B',
@@ -129,267 +145,105 @@ Tell me about your current role at the company and what you'll be doing in the U
   return patterns[context.visaType]
 }
 
-// ---- 对话阶段：模拟面签官回应 ----
+// ---- 对话阶段：Mock 面签官回应 ----
 
 interface MockResponse {
   text: string
   emotion: 'neutral' | 'friendly' | 'stern' | 'curious' | 'reassuring' | 'thoughtful'
 }
 
-// 不同签证类型 × 对话轮次的回复模版
-// 每轮有几组变体，避免重复
-
-const responseTemplates: Record<VisaType, MockResponse[][]> = {
+// 非 F1 的回退模板（保留原有简单轮次系统）
+const fallbackTemplates: Record<string, MockResponse[][]> = {
   B2: [
-    // 第 1 轮 — 问出行目的
-    [
-      { text: 'I see. So you\'re planning to visit as a tourist. Which cities are you planning to visit?', emotion: 'neutral' },
-      { text: 'A tourist visit. How long do you plan to stay in the United States?', emotion: 'curious' },
-      { text: 'Okay, traveling for leisure. Have you been to the United States before?', emotion: 'neutral' },
-    ],
-    // 第 2 轮 — 问工作/国内约束
-    [
-      { text: 'And what do you do for a living here in China? Tell me about your job.', emotion: 'neutral' },
-      { text: 'Tell me about your current employment. How long have you been working there?', emotion: 'curious' },
-      { text: 'I\'d like to know more about your ties to China. What do you do for work?', emotion: 'neutral' },
-    ],
-    // 第 3 轮 — 问家庭
-    [
-      { text: 'Do you have family here? Are you married? Any children?', emotion: 'friendly' },
-      { text: 'Tell me about your family situation. Married? Kids?', emotion: 'neutral' },
-      { text: 'Who are you traveling with? And who will be staying back home?', emotion: 'curious' },
-    ],
-    // 第 4 轮 — 问经济
-    [
-      { text: 'How do you plan to fund this trip? What\'s your budget?', emotion: 'stern' },
-      { text: 'And financially — who is covering the expenses for this trip?', emotion: 'neutral' },
-      { text: 'Traveling to the US can be expensive. How are you financing this trip?', emotion: 'curious' },
-    ],
-    // 第 5 轮 — 收尾
-    [
-      { text: 'Alright. Do you have any other travel history — Europe, Asia, anywhere else?', emotion: 'neutral' },
-      { text: 'One more question — have you traveled internationally before?', emotion: 'friendly' },
-      { text: 'I want to make sure I understand — what do you plan to do to ensure you return to China after your visit?', emotion: 'stern' },
-    ],
+    [{ text: 'I see. So you\'re planning to visit as a tourist. Which cities are you planning to visit?', emotion: 'neutral' }],
+    [{ text: 'And what do you do for a living here in China? Tell me about your job.', emotion: 'neutral' }],
+    [{ text: 'Do you have family here? Are you married? Any children?', emotion: 'friendly' }],
+    [{ text: 'How do you plan to fund this trip? What\'s your budget?', emotion: 'stern' }],
+    [{ text: 'Alright. Do you have any other travel history — Europe, Asia, anywhere else?', emotion: 'neutral' }],
   ],
   B1: [
-    [
-      { text: 'I see — a business trip. Which company is inviting you, and what\'s your relationship with them?', emotion: 'neutral' },
-      { text: 'Business visit. Can you tell me more about the company you\'ll be meeting with?', emotion: 'curious' },
-    ],
-    [
-      { text: 'And what exactly will you be doing during these business meetings? What\'s the agenda?', emotion: 'neutral' },
-      { text: 'Tell me specifically what you\'ll be discussing or presenting during your visit.', emotion: 'stern' },
-    ],
-    [
-      { text: 'How long have you been with your current employer? And what\'s your position there?', emotion: 'curious' },
-      { text: 'Let\'s talk about your current role. What do you do, and how long have you been there?', emotion: 'neutral' },
-    ],
-    [
-      { text: 'Does your company have an office or operations in the United States?', emotion: 'stern' },
-      { text: 'Is there a US branch of your company? Will you be working there during your visit?', emotion: 'neutral' },
-    ],
-    [
-      { text: 'Alright, last question — after this business trip, what do you have waiting for you back in China?', emotion: 'friendly' },
-      { text: 'And can you tell me why this trip needs to happen now, and not be handled remotely?', emotion: 'curious' },
-    ],
-  ],
-  F1: [
-    [
-      { text: 'Why this university? There are many great schools. What made you choose this one?', emotion: 'curious' },
-      { text: 'Interesting choice. What attracted you to this particular program?', emotion: 'friendly' },
-    ],
-    [
-      { text: 'And how do you plan to pay for your tuition and living expenses?', emotion: 'neutral' },
-      { text: 'Studying in the US is very expensive. Who is funding your education?', emotion: 'stern' },
-    ],
-    [
-      { text: 'What do you plan to do after you graduate? Will you return to China?', emotion: 'stern' },
-      { text: 'Let\'s talk about your plans after graduation. Where do you see yourself?', emotion: 'neutral' },
-    ],
-    [
-      { text: 'Have you applied to any universities in China? Why not pursue this degree at home?', emotion: 'curious' },
-      { text: 'There are good universities here in China too. Why is studying in the US important to you?', emotion: 'thoughtful' },
-    ],
-    [
-      { text: 'Alright. Can you tell me what you know about the city where the university is located?', emotion: 'friendly' },
-      { text: 'Last question — if your visa is approved, when do you plan to arrive in the US?', emotion: 'neutral' },
-    ],
+    [{ text: 'I see — a business trip. Which company is inviting you, and what\'s your relationship with them?', emotion: 'neutral' }],
+    [{ text: 'And what exactly will you be doing during these business meetings?', emotion: 'neutral' }],
+    [{ text: 'How long have you been with your current employer?', emotion: 'curious' }],
+    [{ text: 'Does your company have an office or operations in the United States?', emotion: 'stern' }],
+    [{ text: 'Alright, last question — after this business trip, what do you have waiting for you back in China?', emotion: 'friendly' }],
   ],
   H1B: [
-    [
-      { text: 'Tell me more about the role you\'ll be taking. What will your day-to-day responsibilities look like?', emotion: 'neutral' },
-      { text: 'Can you walk me through what the job entails? Be specific about your responsibilities.', emotion: 'curious' },
-    ],
-    [
-      { text: 'Your educational background — how does it relate to this position?', emotion: 'neutral' },
-      { text: 'I want to understand the connection between your degree and this job. Can you elaborate?', emotion: 'thoughtful' },
-    ],
-    [
-      { text: 'How did you find this job? Did you apply, or did the company reach out to you?', emotion: 'curious' },
-      { text: 'Tell me about the hiring process. How did you connect with this employer?', emotion: 'neutral' },
-    ],
-    [
-      { text: 'What do you know about the company? Their size, their main business?', emotion: 'stern' },
-      { text: 'Do you know who you\'ll be reporting to? And how big is the team?', emotion: 'neutral' },
-    ],
-    [
-      { text: 'Final question — where do you see your career in five years?', emotion: 'friendly' },
-      { text: 'And after your H1B term — what are your long-term plans?', emotion: 'thoughtful' },
-    ],
+    [{ text: 'Tell me more about the role you\'ll be taking. What will your day-to-day responsibilities look like?', emotion: 'neutral' }],
+    [{ text: 'Your educational background — how does it relate to this position?', emotion: 'neutral' }],
+    [{ text: 'How did you find this job? Did you apply, or did the company reach out to you?', emotion: 'curious' }],
+    [{ text: 'What do you know about the company? Their size, their main business?', emotion: 'stern' }],
+    [{ text: 'Final question — where do you see your career in five years?', emotion: 'friendly' }],
   ],
   L1: [
-    [
-      { text: 'How long have you been working for this company outside the US?', emotion: 'neutral' },
-      { text: 'Can you confirm your employment dates with the company? When did you start?', emotion: 'stern' },
-    ],
-    [
-      { text: 'Describe your current role. What do you manage or specialize in?', emotion: 'curious' },
-      { text: 'Tell me about your team — how many people report to you?', emotion: 'neutral' },
-    ],
-    [
-      { text: 'And in the US office — what will be different about your role there?', emotion: 'thoughtful' },
-      { text: 'Why does the US office need you specifically, as opposed to hiring locally?', emotion: 'stern' },
-    ],
-    [
-      { text: 'How are the two offices connected? What\'s the relationship between the China and US entities?', emotion: 'neutral' },
-      { text: 'Tell me about the corporate structure — who owns the US entity?', emotion: 'curious' },
-    ],
-    [
-      { text: 'Last question — once your assignment in the US is complete, what\'s next?', emotion: 'friendly' },
-      { text: 'And what do you think will be the biggest challenge in the US role?', emotion: 'thoughtful' },
-    ],
+    [{ text: 'How long have you been working for this company outside the US?', emotion: 'neutral' }],
+    [{ text: 'Describe your current role. What do you manage or specialize in?', emotion: 'curious' }],
+    [{ text: 'And in the US office — what will be different about your role there?', emotion: 'thoughtful' }],
+    [{ text: 'How are the two offices connected? What\'s the relationship between the China and US entities?', emotion: 'neutral' }],
+    [{ text: 'Last question — once your assignment in the US is complete, what\'s next?', emotion: 'friendly' }],
   ],
 }
 
-// 结束语
-const closingResponses: MockResponse[] = [
+const fallbackClosings = [
   { text: 'Alright, I think I have everything I need. Your visa is approved. You\'ll receive your passport back within a few days. Have a good trip.', emotion: 'friendly' },
   { text: 'Thank you for your time. Based on our conversation, I\'m approving your visa. You should receive your passport within 3-5 business days. Take care.', emotion: 'reassuring' },
   { text: 'Okay, I\'ve heard enough. Your visa will be processed. Wait for notification about your passport. Next!', emotion: 'neutral' },
 ]
-
-// 追问 / 需要更多信息
-const followUpResponses: MockResponse[] = [
-  { text: 'Could you be a bit more specific? I need more detail on that.', emotion: 'stern' },
-  { text: 'Hmm, I\'m not sure I follow. Can you explain that more clearly?', emotion: 'curious' },
-  { text: 'Let me ask again — I need a more direct answer please.', emotion: 'stern' },
-  { text: 'Okay, but I\'d like you to elaborate on that a little more.', emotion: 'neutral' },
-]
-
-// ---- 各类型的情绪概率分布 ----
-
-// 自定义类型的情绪权重（根据难度动态调整）
-function getCustomWeights(): Record<string, number> {
-  const raw = sessionStorage.getItem('visa_custom_difficulty')
-  const difficulty = raw ? parseInt(raw) : 3
-  if (difficulty <= 2) {
-    // 低难度：友好为主
-    return { friendly: 0.40, reassuring: 0.25, neutral: 0.20, curious: 0.10, thoughtful: 0.05, stern: 0 }
-  }
-  if (difficulty >= 4) {
-    // 高难度：严厉为主
-    return { stern: 0.40, curious: 0.25, neutral: 0.15, thoughtful: 0.10, friendly: 0.05, reassuring: 0.05 }
-  }
-  // 中等难度：均衡
-  return { neutral: 0.35, curious: 0.25, thoughtful: 0.20, friendly: 0.10, stern: 0.08, reassuring: 0.02 }
-}
-
-const baseWeights: Record<string, Record<string, number>> = {
-  pressure:   { stern: 0.45, curious: 0.30, neutral: 0.20, thoughtful: 0.05, friendly: 0, reassuring: 0 },
-  standard:   { neutral: 0.50, curious: 0.20, thoughtful: 0.15, friendly: 0.10, stern: 0.05, reassuring: 0 },
-  friendly:   { friendly: 0.40, reassuring: 0.25, thoughtful: 0.20, curious: 0.10, neutral: 0.05, stern: 0 },
-  trump:      { curious: 0.35, friendly: 0.25, stern: 0.20, neutral: 0.10, thoughtful: 0.10, reassuring: 0 },
-}
-
-/** 获取情绪权重（自定义类型按难度动态计算） */
-function getEmotionWeights(ot: OfficerType): Record<string, number> {
-  if (ot === 'custom') return getCustomWeights()
-  return baseWeights[ot] ?? baseWeights.standard
-}
-
-function pickWeightedEmotion(weights: Record<string, number>, fallback: string): string {
-  const r = Math.random()
-  let cumulative = 0
-  for (const [emotion, weight] of Object.entries(weights)) {
-    cumulative += weight
-    if (r <= cumulative) return emotion
-  }
-  return fallback
-}
-
-// 特朗普风格后处理
-function trumpify(text: string): string {
-  const prefixes = [
-    'OK, let me tell you — ', 'Look, ', 'Here\'s the thing — ',
-    'Believe me — ', 'I\'ll be honest with you — ',
-  ]
-  const suffixes = [
-    '. Tremendous, by the way', '. Really something', '',
-    '. We\'ll see, we\'ll see', '', '',
-  ]
-  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)]
-  const suffix = suffixes[Math.floor(Math.random() * suffixes.length)]
-  return prefix + text.charAt(0).toLowerCase() + text.slice(1) + suffix
-}
 
 // ---- 对话生成主函数 ----
 
 export function mockGenerateResponse(
   context: UserContext,
   history: Array<{ role: string; text: string }>,
-  _userJustSaid: string,
+  userJustSaid: string,
   officerType: OfficerType = 'standard',
-): { text: string; emotion: string } {
-  // 统计对话轮次（officer 说了几次）
+): { text: string; emotion: string; isClosing?: boolean; isDocumentRequest?: boolean } {
+  // ---- F1：使用状态机引擎 ----
+  if (context.visaType === 'F1') {
+    const flow = ensureFlow(context)
+
+    // 找到最近一个 officer 问的问题，用于评估回答
+    const lastOfficerMsg = [...history].reverse().find(m => m.role === 'officer')
+
+    // 评估用户回答
+    flow.evaluateAnswer(userJustSaid, null)
+
+    // 生成下一轮
+    const turn = flow.nextTurn(userJustSaid)
+
+    if (turn.isClosing) {
+      resetInterviewFlow()
+    }
+
+    return { text: turn.text, emotion: turn.emotion, isClosing: turn.isClosing, isDocumentRequest: turn.isDocumentRequest }
+  }
+
+  // ---- 非 F1：回退到简单轮次模板 ----
+  const templates = fallbackTemplates[context.visaType] ?? fallbackTemplates.B2
   const officerTurns = history.filter(m => m.role === 'officer').length
-  const templates = responseTemplates[context.visaType]
-  const weights = getEmotionWeights(officerType)
 
-  // 追问概率：压力型 50%，标准 30%，友好 15%，特朗普 35%，自定义按难度
-  function getCustomFollowUpChance(): number {
-    const raw = sessionStorage.getItem('visa_custom_difficulty')
-    const difficulty = raw ? parseInt(raw) : 3
-    // 难度 1→0.10  2→0.20  3→0.30  4→0.40  5→0.50
-    return +(difficulty * 0.10).toFixed(2)
-  }
-  const followUpChance: Record<string, number> = {
-    pressure: 0.50, standard: 0.30, friendly: 0.15, trump: 0.35,
-    custom: getCustomFollowUpChance(),
+  if (officerTurns >= templates.length) {
+    const closing = fallbackClosings[Math.floor(Math.random() * fallbackClosings.length)]
+    return { text: closing.text, emotion: closing.emotion }
   }
 
-  // 如果问了 5 轮以上，给结束语
-  if (officerTurns >= 5 || officerTurns >= templates.length) {
-    const closing = closingResponses[Math.floor(Math.random() * closingResponses.length)]
-    let text = closing.text
-    let emotion = pickWeightedEmotion(weights, closing.emotion)
-    if (officerType === 'trump') text = trumpify(text)
-    return { text, emotion }
-  }
-
-  // 偶尔追问
-  const fupChance = officerType === 'custom' ? getCustomFollowUpChance() : (followUpChance[officerType] ?? 0.3)
-  if (officerTurns > 0 && Math.random() < fupChance) {
-    const followUp = followUpResponses[Math.floor(Math.random() * followUpResponses.length)]
-    let text = followUp.text
-    let emotion = pickWeightedEmotion(weights, followUp.emotion)
-    if (officerType === 'trump') text = trumpify(text)
-    return { text, emotion }
-  }
-
-  // 从当前轮次的模版中随机选一条
   const roundTemplates = templates[officerTurns] ?? templates[templates.length - 1]
   const picked = roundTemplates[Math.floor(Math.random() * roundTemplates.length)]
-  let text = picked.text
-  let emotion = pickWeightedEmotion(weights, picked.emotion)
-  if (officerType === 'trump') text = trumpify(text)
-  return { text, emotion }
+  return { text: picked.text, emotion: picked.emotion }
 }
 
 // ---- 工具函数：生成开场白 ----
 
-export function getMockGreeting(visaType: VisaType): string {
-  const greetings: Record<VisaType, string> = {
+export function getMockGreeting(visaType: VisaType, context?: UserContext): string {
+  // F1：使用状态机生成开场白
+  if (visaType === 'F1' && context) {
+    const flow = ensureFlow(context)
+    const turn = flow.nextTurn() // 无用户回答 → 返回第一个问题
+    return turn.text
+  }
+
+  // 非 F1：固定开场白
+  const greetings: Record<string, string> = {
     B2: `你好，欢迎来面签。请把你的护照给我。
 
 Good morning. Please give me your passport.
@@ -401,12 +255,6 @@ So, what's the purpose of your trip to the United States?`,
 Good morning. Please give me your passport.
 
 What's the purpose of your trip to the United States?`,
-
-    F1: `你好，欢迎来面签。请把护照和 I-20 给我。
-
-Good morning. Please give me your passport and I-20 form.
-
-So, which university will you be attending?`,
 
     H1B: `你好，欢迎来面签。请把护照和 I-797 给我。
 
@@ -420,5 +268,5 @@ Good morning. Please give me your passport and L1 petition documents.
 
 Tell me about your current role at the company and what you'll be doing in the US office.`,
   }
-  return greetings[visaType]
+  return greetings[visaType] ?? greetings.B2
 }

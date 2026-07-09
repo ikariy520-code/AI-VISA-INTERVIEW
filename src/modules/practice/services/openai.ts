@@ -112,7 +112,7 @@ export async function generateOfficerResponse(
   conversationHistory: Array<{ role: string; text: string }>,
   userJustSaid: string,
   officerType: OfficerType = 'standard',
-): Promise<{ text: string; emotion: string }> {
+): Promise<{ text: string; emotion: string; isClosing?: boolean; isDocumentRequest?: boolean }> {
   if (USE_MOCK || !OPENAI_API_KEY) {
     return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
   }
