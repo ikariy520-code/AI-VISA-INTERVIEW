@@ -386,3 +386,166 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
     transcript,
   }
 }
+
+// ========================================
+// AI 评分（调用 /api/ai-score 代理）
+//
+// 每个 QA pair 发送到 DeepSeek 做多维度评分
+// API 不可用时自动降级到规则引擎
+// ========================================
+
+const AI_SCORE_ENDPOINT = '/api/ai-score'
+
+interface AIScoreResult {
+  content?: {
+    logic?: { score: number; comment: string }
+    specificity?: { score: number; comment: string }
+    persuasion?: { score: number; comment: string }
+    ties?: { score: number; comment: string }
+  }
+  voice?: {
+    confidence?: number
+    emotion?: string
+    description?: string
+  }
+  verdict?: string
+  summary?: string
+  suggestions?: string[]
+}
+
+/**
+ * 使用 AI 对单个 QA 进行评分
+ * 失败时返回 null，由调用方降级
+ */
+async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPair['feedback'] | null> {
+  try {
+    const response = await fetch(AI_SCORE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, answer }),
+      signal: AbortSignal.timeout(20000),
+    })
+
+    if (!response.ok) return null
+
+    const data = await response.json()
+    const content = data.choices?.[0]?.message?.content
+    if (!content) return null
+
+    const parsed: AIScoreResult = JSON.parse(content)
+
+    // 映射到现有类型
+    const voiceConfidence = parsed.voice?.confidence ?? 50
+    const wpm = Math.round(65 + voiceConfidence * 0.9)
+
+    const feedback: QAPair['feedback'] = {
+      verdict: (parsed.verdict as any) ?? 'neutral',
+      voice: {
+        metrics: {
+          wordsPerMinute: wpm,
+          longestPause: +(Math.max(0.2, 5.5 - voiceConfidence * 0.055)).toFixed(1),
+          fillerCount: 0,
+          fillers: [],
+          volumeStability: Math.max(1, Math.min(5, Math.round(1 + voiceConfidence * 0.04))),
+          paceStability: Math.max(1, Math.min(5, Math.round(1 + voiceConfidence * 0.04))),
+        },
+        emotion: {
+          primary: (parsed.voice?.emotion as any) ?? 'natural',
+          stability: Math.min(5, Math.round(2 + voiceConfidence * 0.03)),
+          description: parsed.voice?.description ?? '',
+        },
+        audioUrl: null,
+        duration: 0,
+      },
+      content: {
+        dimensions: [
+          {
+            label: '逻辑',
+            score: parsed.content?.logic?.score ?? 3,
+            comment: parsed.content?.logic?.comment ?? '',
+          },
+          {
+            label: '具体性',
+            score: parsed.content?.specificity?.score ?? 3,
+            comment: parsed.content?.specificity?.comment ?? '',
+          },
+          {
+            label: '说服力',
+            score: parsed.content?.persuasion?.score ?? 3,
+            comment: parsed.content?.persuasion?.comment ?? '',
+          },
+          {
+            label: '约束力',
+            score: parsed.content?.ties?.score ?? 3,
+            comment: parsed.content?.ties?.comment ?? '',
+          },
+        ],
+        summary: parsed.summary ?? '',
+        suggestions: parsed.suggestions ?? [],
+      },
+    }
+
+    return feedback
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 使用 AI 分析全部面签记录（异步版本）
+ *
+ * 流程：
+ *   1. 逐个 QA pair 发送到 AI 评分
+ *   2. AI 不可用或失败时，降级到规则引擎
+ *   3. 返回完整的 InterviewSession
+ */
+export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<InterviewSession> {
+  const pairs = extractQAPairs(record.messages)
+
+  // 并行处理所有 QA pairs（每个独立评分）
+  const results = await Promise.all(
+    pairs.map(async ({ id, question, answer, timestamp }) => {
+      // 尝试 AI 评分
+      const aiFeedback = await scoreQAPairWithAI(question, answer)
+
+      if (aiFeedback) {
+        return { id, question, answer, timestamp, feedback: aiFeedback }
+      }
+
+      // AI 不可用 → 降级到规则引擎
+      const voice = analyzeVoice(answer)
+      const content = analyzeContent(answer, question)
+      const verdict = getVerdict(voice, content)
+      const feedback: AnswerFeedback = { verdict, voice, content }
+      return { id, question, answer, timestamp, feedback }
+    }),
+  )
+
+  // 综合评分
+  let totalScore = 0
+  let dimensionCount = 0
+  for (const qa of results) {
+    for (const dim of qa.feedback.content.dimensions) {
+      totalScore += dim.score
+      dimensionCount++
+    }
+  }
+  const overallScore = dimensionCount > 0 ? +(totalScore / dimensionCount).toFixed(1) : 3.0
+
+  // 标题
+  const visaLabel: Record<string, string> = {
+    B2: 'B2 旅游签证', B1: 'B1 商务签证', F1: 'F1 学生签证',
+    H1B: 'H1B 工作签证', L1: 'L1 跨国经理',
+  }
+  const title = `${visaLabel[record.visaType] ?? record.visaType} · ${record.userContext.purpose || '面签练习'}`
+
+  return {
+    id: record.id,
+    date: record.date,
+    time: record.time,
+    duration: record.duration,
+    title,
+    overallScore,
+    transcript: results,
+  }
+}

@@ -1,13 +1,12 @@
 // ========================================
-// OpenAI API 服务层
+// AI 服务层（Provider 无关）
 //
-// 当前为占位实现 — 无 API key 时使用 mock 模式
-// 接入步骤：
-//   1. 在下方 OPENAI_API_KEY 填入你的 key
-//   2. 将 USE_MOCK 改为 false
-//   3. 取消注释真实 API 调用代码
+// 对话生成、用户分析全部走 /api/ai-chat 代理：
+//   · 本地开发 → Vite 插件转发到 DeepSeek API
+//   · 生产部署 → Netlify Function 转发到 DeepSeek API
 //
-// 面签官类型从第一部分选择 → 通过 officerType 参数注入 systemPrompt
+// 自动降级：API 不可用时回退到 mock 模式
+// TTS / STT 暂用浏览器原生 API
 // ========================================
 
 import type {
@@ -18,10 +17,10 @@ import type { OfficerType } from '../../voice/types'
 import { officerTypes } from '../../voice/data/officerTypes'
 import { mockAnalyzeUser, mockGenerateResponse } from '../data/mockOfficer'
 
-// ---- 配置区 — 后续填入真实 API key ----
+// ---- 配置 ----
 
-const OPENAI_API_KEY = ''   // ← 在这里填入你的 OpenAI API Key
-const USE_MOCK = true        // ← 无 key 时自动走 mock，填 key 后改为 false
+const AI_CHAT_ENDPOINT = '/api/ai-chat'
+const REQUEST_TIMEOUT_MS = 15000
 
 const BASE_SYSTEM_PROMPT = `You are a US visa officer conducting an interview. Your core rules:
 - Ask one question at a time, wait for the answer
@@ -32,7 +31,6 @@ const BASE_SYSTEM_PROMPT = `You are a US visa officer conducting an interview. Y
 
 // 根据面签官类型拼接不同的 system prompt
 function buildSystemPrompt(officerType: OfficerType): string {
-  // 自定义类型：从 sessionStorage 读取用户生成的 system prompt
   if (officerType === 'custom') {
     const custom = sessionStorage.getItem('visa_custom_system_prompt')
     if (custom) return `${BASE_SYSTEM_PROMPT}\n\n${custom}`
@@ -43,68 +41,126 @@ function buildSystemPrompt(officerType: OfficerType): string {
 }
 
 const defaultConfig: OpenAIConfig = {
-  apiKey: OPENAI_API_KEY,
-  model: 'gpt-4o',
-  voice: 'alloy', // 兜底值；实际 voice 由 TTS 服务层根据 officerType 映射
+  apiKey: '',
+  model: 'deepseek-chat',
+  voice: 'alloy',
   systemPrompt: buildSystemPrompt('standard'),
 }
 
-// ---- 类型：API 响应 ----
+// ---- API 调用缓存 ----
 
-interface AIAnalysisResponse {
-  analysis: AIAnalysisResult
+let apiAvailable: boolean | null = null // null=未检测, true=可用, false=不可用
+
+/** 检测 API 是否可用（首次调用时自动检测，之后缓存结果） */
+async function checkApiAvailable(): Promise<boolean> {
+  if (apiAvailable !== null) return apiAvailable
+  try {
+    const response = await fetch(AI_CHAT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'Hi' }],
+        max_tokens: 10,
+      }),
+      signal: AbortSignal.timeout(5000),
+    })
+    apiAvailable = response.ok
+    if (apiAvailable) console.log('[AI] API connected — using DeepSeek')
+    return apiAvailable
+  } catch {
+    apiAvailable = false
+    console.log('[AI] API unavailable — using mock mode')
+    return false
+  }
 }
 
-interface AIChatResponse {
-  message: string
-  emotion: string
-  followUpExpected: boolean
+/** 重置 API 状态（从设置页切换时可用） */
+export function resetApiStatus() {
+  apiAvailable = null
+}
+
+// ---- 通用 AI 调用 ----
+
+interface AICallOptions {
+  messages: Array<{ role: string; content: string }>
+  temperature?: number
+  maxTokens?: number
+  responseFormat?: { type: string }
+}
+
+async function callAI(options: AICallOptions): Promise<string> {
+  const response = await fetch(AI_CHAT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: options.messages,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 256,
+      response_format: options.responseFormat,
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error || `API error: ${response.status}`)
+  }
+
+  const data = await response.json()
+  const content = data.choices?.[0]?.message?.content
+  if (!content) throw new Error('Empty AI response')
+  return content
 }
 
 // ============================================================
-// 主接口：分析用户背景 → 输出面签策略
+// 分析用户背景 → 输出面签策略
 // ============================================================
 
 export async function analyzeUserContext(
   context: UserContext,
 ): Promise<AIAnalysisResult> {
-  if (USE_MOCK || !OPENAI_API_KEY) {
-    // Mock 模式：预设分析结果
+  // 检测 API 可用性
+  const available = await checkApiAvailable()
+  if (!available) return mockAnalyzeUser(context)
+
+  const prompt = `${buildSystemPrompt('standard')}
+
+You are now in ANALYSIS mode. Given the applicant's background below, output a JSON object:
+
+{
+  "analysis": {
+    "visaType": "B2" | "B1" | "F1" | "H1B" | "L1",
+    "riskPoints": ["risk 1", "risk 2", ...],
+    "suggestedQuestions": ["question area 1", "question area 2", ...],
+    "strategy": "brief interview strategy in Chinese",
+    "greeting": "a natural opening greeting as the visa officer in English"
+  }
+}
+
+Applicant background:
+${JSON.stringify(context, null, 2)}`
+
+  try {
+    const content = await callAI({
+      messages: [
+        { role: 'system', content: 'You are a US visa officer. Always respond with valid JSON only.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      maxTokens: 600,
+      responseFormat: { type: 'json_object' },
+    })
+
+    const parsed = JSON.parse(content)
+    return parsed.analysis ?? parsed
+  } catch (err) {
+    console.warn('[AI] analyzeUserContext failed, falling back to mock:', err)
     return mockAnalyzeUser(context)
   }
-
-  // ---- 真实 API 调用（后续取消注释） ----
-  /*
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: defaultConfig.model,
-      messages: [
-        { role: 'system', content: buildAnalysisPrompt() },
-        { role: 'user', content: JSON.stringify(context) },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.7,
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`OpenAI API error: ${response.status}`)
-  }
-
-  const data: AIAnalysisResponse = await response.json()
-  return data.analysis
-  */
-
-  throw new Error('API not configured')
 }
 
 // ============================================================
-// 主接口：AI 对话生成（语音对话中的文字内容）
+// AI 对话生成
 // ============================================================
 
 export async function generateOfficerResponse(
@@ -113,89 +169,94 @@ export async function generateOfficerResponse(
   userJustSaid: string,
   officerType: OfficerType = 'standard',
 ): Promise<{ text: string; emotion: string; isClosing?: boolean; isDocumentRequest?: boolean }> {
-  if (USE_MOCK || !OPENAI_API_KEY) {
+  const available = await checkApiAvailable()
+  if (!available) {
     return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
   }
 
-  // ---- 真实 API 调用（后续取消注释） ----
-  /*
-  const messages = [
-    { role: 'system', content: buildConversationPrompt(context) },
-    ...conversationHistory.map(m => ({
-      role: m.role === 'officer' ? 'assistant' as const : 'user' as const,
-      content: m.text,
-    })),
-    { role: 'user', content: userJustSaid },
+  const systemPrompt = buildSystemPrompt(officerType)
+
+  // 构建消息历史
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'system', content: systemPrompt },
   ]
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: defaultConfig.model,
-      messages,
-      temperature: 0.9,
-      max_tokens: 150,
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`OpenAI API error: ${response.status}`)
+  // 注入面试上下文（第一轮）
+  if (conversationHistory.length <= 1) {
+    messages.push({
+      role: 'system',
+      content: `Current interview context:
+- Visa type: ${context.visaType}
+- Purpose: ${context.purpose}
+- Destination: ${context.destination}
+- Occupation: ${context.occupation}
+- Previous US visa: ${context.previousVisa ? 'Yes' : 'No'}
+- Major (if student): ${context.major || 'N/A'}`,
+    })
   }
 
-  const data: AIChatResponse = await response.json()
-  return { text: data.message, emotion: data.emotion }
-  */
+  // 注入对话历史（最近 10 轮避免过长）
+  const recentHistory = conversationHistory.slice(-20)
+  for (const m of recentHistory) {
+    messages.push({
+      role: m.role === 'officer' ? 'assistant' : 'user',
+      content: m.text,
+    })
+  }
 
-  throw new Error('API not configured')
+  // 确保最后一条用户消息被包含
+  if (userJustSaid && (recentHistory.length === 0 || recentHistory[recentHistory.length - 1]?.role !== 'user')) {
+    messages.push({ role: 'user', content: userJustSaid })
+  }
+
+  messages.push({
+    role: 'system',
+    content: `Continue the conversation naturally as the visa officer. Ask only ONE question. Output valid JSON:
+{ "text": "<your next question or statement as the officer>", "emotion": "<neutral|friendly|stern|curious|reassuring|thoughtful>", "isClosing": <true|false> }`,
+  })
+
+  try {
+    const content = await callAI({
+      messages,
+      temperature: 0.85,
+      maxTokens: 200,
+    })
+
+    const parsed = JSON.parse(content)
+    return {
+      text: parsed.text || '',
+      emotion: parsed.emotion || 'neutral',
+      isClosing: parsed.isClosing || false,
+      isDocumentRequest: parsed.isDocumentRequest || false,
+    }
+  } catch (err) {
+    console.warn('[AI] generateOfficerResponse failed, falling back to mock:', err)
+    return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
+  }
 }
 
 // ============================================================
 // 语音合成（TTS）
-//
-// 声音一致性架构（Provider 无关）：
-//   OfficerTypeConfig.voiceProfile 描述"什么样的声音"
-//   → Web Speech：直接用 gender/pitch/rate
-//   → 豆包 / OpenAI：在下方 PROVIDER_VOICE_MAP 映射 voice ID
-//
-// 切换 Provider：改 ACTIVE_TTS_PROVIDER + 填入对应 API key
 // ============================================================
 
 type TTSProvider = 'webspeech' | 'doubao' | 'openai'
 
 const ACTIVE_TTS_PROVIDER: TTSProvider = 'webspeech'
 
-/** 各 Provider 的面签官 voice ID 映射（Web Speech 不需要，直接用 voiceProfile） */
 const PROVIDER_VOICE_MAP: Record<Exclude<TTSProvider, 'webspeech'>, Record<OfficerType, string>> = {
   doubao: {
-    // TODO: 接入豆包 TTS 后替换为实际 voice ID
-    pressure:  '',   // ← 豆包深沉男声
-    standard:  '',   // ← 豆包中性男声
-    friendly:  '',   // ← 豆包温暖女声
-    trump:     '',   // ← 豆包特质男声
-    custom:    '',   // ← 豆包自定义
+    pressure:  '', standard:  '', friendly:  '', trump:     '', custom:    '',
   },
   openai: {
-    pressure:  'onyx',
-    standard:  'alloy',
-    friendly:  'nova',
-    trump:     'echo',
-    custom:    'alloy',
+    pressure:  'onyx', standard:  'alloy', friendly:  'nova', trump:     'echo', custom:    'alloy',
   },
 }
 
-export async function textToSpeech(
-  text: string,
-  officerType: OfficerType = 'standard',
-): Promise<void> {
+export async function textToSpeech(text: string, officerType: OfficerType = 'standard'): Promise<void> {
   const config = officerTypes.find(o => o.id === officerType)
   if (!config) return
 
   if (ACTIVE_TTS_PROVIDER === 'webspeech') {
-    // 浏览器原生 TTS（免费）— 从 voiceProfile 读取参数，保证同一类型每次发音一致
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel()
       const utterance = new SpeechSynthesisUtterance(text)
@@ -220,50 +281,21 @@ export async function textToSpeech(
     return
   }
 
-  // ---- 远程 TTS（豆包 / OpenAI）— 后续接入 ----
   const voiceId = PROVIDER_VOICE_MAP[ACTIVE_TTS_PROVIDER][officerType]
   console.log(`[TTS] Provider=${ACTIVE_TTS_PROVIDER} voice=${voiceId} text=${text.slice(0, 60)}...`)
-  // TODO: 调用豆包/OpenAI TTS API
-  // const audioBuffer = await fetchTTS(text, voiceId, ACTIVE_TTS_PROVIDER)
-  // playAudio(audioBuffer)
 }
 
 // ============================================================
-// 语音转文字（STT — 后续接入）
+// 语音转文字（STT）
 // ============================================================
 
-export async function speechToText(
-  audioBlob: Blob,
-): Promise<string | null> {
-  if (USE_MOCK || !OPENAI_API_KEY) {
-    return null
-  }
-
-  // ---- 真实 Whisper API 调用（后续取消注释） ----
-  /*
-  const formData = new FormData()
-  formData.append('file', audioBlob, 'recording.webm')
-  formData.append('model', 'whisper-1')
-  formData.append('language', 'en')
-
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-    body: formData,
-  })
-
-  if (!response.ok) {
-    throw new Error(`Whisper API error: ${response.status}`)
-  }
-
-  const data = await response.json()
-  return data.text
-  */
-
+export async function speechToText(audioBlob: Blob): Promise<string | null> {
+  // 当前使用浏览器 SpeechRecognition（见 useVoiceInput hook）
+  // 此函数为未来云端 STT 预留
   return null
 }
 
-// ---- Prompt 构建（辅助函数） ----
+// ---- Prompt 构建 ----
 
 function buildAnalysisPrompt(): string {
   return `${defaultConfig.systemPrompt}
@@ -294,4 +326,4 @@ Continue the conversation naturally. Keep responses to 1-3 sentences.
 Output JSON: { "message": "...", "emotion": "neutral|friendly|stern|curious|reassuring|thoughtful", "followUpExpected": true|false }`
 }
 
-export { defaultConfig, OPENAI_API_KEY, USE_MOCK }
+export { defaultConfig }

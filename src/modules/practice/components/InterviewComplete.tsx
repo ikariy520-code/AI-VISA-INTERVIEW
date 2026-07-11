@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import type { ChatMessage, UserContext, AIAnalysisResult, InterviewRecord } from '../types'
-import { analyzeInterview } from '../../shared/store/analysisEngine'
+import { analyzeInterview, analyzeInterviewWithAI } from '../../shared/store/analysisEngine'
 import { saveSession, generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
 
 // ========================================
@@ -54,12 +54,18 @@ export default function InterviewComplete({ messages, context, analysis, duratio
       aiAnalysis: analysis,
     }
 
-    try {
-      const session = analyzeInterview(record)
-      saveSession(session)
-    } catch (err) {
-      console.warn('[InterviewComplete] Failed to save session:', err)
-    }
+    // 优先 AI 评分，失败则降级到规则引擎
+    analyzeInterviewWithAI(record)
+      .then(session => saveSession(session))
+      .catch(err => {
+        console.warn('[InterviewComplete] AI scoring failed, using rule engine:', err)
+        try {
+          const session = analyzeInterview(record)
+          saveSession(session)
+        } catch (err2) {
+          console.warn('[InterviewComplete] Failed to save session:', err2)
+        }
+      })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 跳转反馈页
