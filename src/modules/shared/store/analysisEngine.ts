@@ -13,6 +13,8 @@
 // ========================================
 
 import type { InterviewRecord, ChatMessage } from '../../practice/types'
+import { requireSupabase } from '../../../lib/supabase'
+import { AuthenticationRequiredError, InviteRequiredError } from '../../practice/services/openai'
 import type {
   InterviewSession, QAPair,
   VoiceAnalysis, VoiceMetrics, VoiceEmotion,
@@ -419,16 +421,25 @@ interface AIScoreResult {
  */
 async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPair['feedback'] | null> {
   try {
+    const { data: sessionData } = await requireSupabase().auth.getSession()
+    const token = sessionData.session?.access_token
+    if (!token) throw new AuthenticationRequiredError('请先登录。')
+
     const response = await fetch(AI_SCORE_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({ question, answer }),
       signal: AbortSignal.timeout(20000),
     })
 
+    if (response.status === 401) throw new AuthenticationRequiredError('登录状态已失效，请重新登录。')
+    if (response.status === 403) throw new InviteRequiredError('请输入邀请码解锁 AI 总结。')
     if (!response.ok) return null
 
-    const data = await response.json()
+    const data = await response.json() as any
     const content = data.choices?.[0]?.message?.content
     if (!content) return null
 
@@ -486,7 +497,8 @@ async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPa
     }
 
     return feedback
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthenticationRequiredError || error instanceof InviteRequiredError) throw error
     return null
   }
 }

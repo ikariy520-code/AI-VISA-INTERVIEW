@@ -80,7 +80,7 @@ export function getSessionCount(): number {
  * 格式：local-{timestamp}，与 mock 数据 session-1/2/3 区分
  */
 export function generateSessionId(): string {
-  return `local-${Date.now()}`
+  return crypto.randomUUID()
 }
 
 /**

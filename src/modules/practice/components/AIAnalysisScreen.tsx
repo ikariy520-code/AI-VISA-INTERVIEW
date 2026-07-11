@@ -25,6 +25,8 @@ const thinkingSteps = [
 export default function AIAnalysisScreen({ context, onComplete }: Props) {
   const [currentStep, setCurrentStep] = useState(0)
   const [doneSteps, setDoneSteps] = useState<number[]>([])
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     // 逐步展示思考过程
@@ -42,20 +44,13 @@ export default function AIAnalysisScreen({ context, onComplete }: Props) {
       try {
         const analysis = await analyzeUserContext(context)
         setTimeout(() => onComplete(analysis), 400)
-      } catch {
-        // 分析失败也继续（mock 模式不会失败）
-        setTimeout(() => onComplete({
-          visaType: context.visaType,
-          riskPoints: [],
-          suggestedQuestions: [],
-          strategy: '',
-          greeting: 'Hello, how can I help you today?',
-        }), 400)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'AI 分析暂时不可用，请稍后重试。')
       }
     }, 600 * (thinkingSteps.length + 1)))
 
     return () => timers.forEach(clearTimeout)
-  }, [context, onComplete])
+  }, [context, onComplete, attempt])
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh]">
@@ -131,6 +126,14 @@ export default function AIAnalysisScreen({ context, onComplete }: Props) {
       >
         这通常需要 3-5 秒 · 接入 OpenAI API 后实时分析
       </motion.p>
+      {error && (
+        <div className="mt-5 max-w-sm rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-center">
+          <p className="text-[12px] text-red-600">{error}</p>
+          <button onClick={() => { setError(''); setAttempt(value => value + 1) }} className="mt-2 text-[12px] font-semibold text-red-700 hover:text-red-800">
+            重新尝试
+          </button>
+        </div>
+      )}
     </div>
   )
 }

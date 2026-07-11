@@ -2,10 +2,17 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { InterviewSession } from './types'
-import { getSavedSessions, deleteSession } from '../shared/store/interviewStore'
 import SessionSidebar from './components/SessionSidebar'
 import SessionDetail from './components/SessionDetail'
 import ConfirmDialog from './components/ConfirmDialog'
+import InviteGate from '../../access/InviteGate'
+import { useAccess } from '../../access/AccessContext'
+import {
+  deleteCloudSession,
+  getLegacySessionCount,
+  importLegacySessions,
+  listCloudSessions,
+} from '../../services/sessionService'
 
 // ========================================
 // 反馈总结模块 (独立模块，可单独拆分)
@@ -35,9 +42,13 @@ function sessionMatchesQuery(session: InterviewSession, query: string): boolean 
 export default function FeedbackPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { hasAccess, loading: accessLoading } = useAccess()
 
-  // 从 localStorage 读取已保存的面签记录（用 state 以便删除后刷新）
-  const [allSessions, setAllSessions] = useState<InterviewSession[]>(() => getSavedSessions())
+  const [allSessions, setAllSessions] = useState<InterviewSession[]>([])
+  const [recordsLoading, setRecordsLoading] = useState(false)
+  const [recordsError, setRecordsError] = useState('')
+  const [legacyCount, setLegacyCount] = useState(() => getLegacySessionCount())
+  const [importing, setImporting] = useState(false)
 
   // 删除确认弹窗状态
   const [deleteTarget, setDeleteTarget] = useState<InterviewSession | null>(null)
@@ -46,12 +57,35 @@ export default function FeedbackPage() {
   const highlightId = (location.state as any)?.highlightSessionId as string | undefined
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeSession, setActiveSession] = useState<InterviewSession | null>(
-    // 优先选高亮记录 → 最新本地记录 → 第一条 mock
-    (highlightId ? allSessions.find(s => s.id === highlightId) : null)
-    ?? allSessions[0]
-    ?? null
-  )
+  const [activeSession, setActiveSession] = useState<InterviewSession | null>(null)
+
+  const loadSessions = useCallback(async () => {
+    if (!hasAccess) {
+      setAllSessions([])
+      setActiveSession(null)
+      return
+    }
+    setRecordsLoading(true)
+    setRecordsError('')
+    try {
+      const sessions = await listCloudSessions()
+      setAllSessions(sessions)
+      setActiveSession(current => {
+        if (highlightId) return sessions.find(session => session.id === highlightId) ?? sessions[0] ?? null
+        if (current) return sessions.find(session => session.id === current.id) ?? sessions[0] ?? null
+        return sessions[0] ?? null
+      })
+    } catch (error) {
+      setRecordsError(error instanceof Error ? error.message : '读取记录失败，请稍后重试。')
+    } finally {
+      setRecordsLoading(false)
+    }
+  }, [hasAccess, highlightId])
+
+  useEffect(() => {
+    if (accessLoading) return
+    void loadSessions()
+  }, [accessLoading, loadSessions])
 
   // 清除 location state（避免重复高亮）
   useEffect(() => {
@@ -91,18 +125,32 @@ export default function FeedbackPage() {
   }, [])
 
   // 确认删除
-  const handleConfirmDelete = useCallback(() => {
+  const handleConfirmDelete = useCallback(async () => {
     if (!deleteTarget) return
-    deleteSession(deleteTarget.id)
-    // 刷新列表
-    const updated = getSavedSessions()
-    setAllSessions(updated)
-    // 如果删的是当前激活的记录，切换到下一条
-    if (activeSession?.id === deleteTarget.id) {
-      setActiveSession(updated[0] ?? null)
+    try {
+      await deleteCloudSession(deleteTarget.id)
+      const updated = allSessions.filter(session => session.id !== deleteTarget.id)
+      setAllSessions(updated)
+      if (activeSession?.id === deleteTarget.id) setActiveSession(updated[0] ?? null)
+      setDeleteTarget(null)
+    } catch (error) {
+      setRecordsError(error instanceof Error ? error.message : '删除失败，请稍后再试。')
     }
-    setDeleteTarget(null)
-  }, [deleteTarget, activeSession])
+  }, [deleteTarget, activeSession, allSessions])
+
+  const handleImportLegacy = useCallback(async () => {
+    setImporting(true)
+    setRecordsError('')
+    try {
+      await importLegacySessions()
+      setLegacyCount(0)
+      await loadSessions()
+    } catch (error) {
+      setRecordsError(error instanceof Error ? error.message : '本机记录同步失败，请稍后重试。')
+    } finally {
+      setImporting(false)
+    }
+  }, [loadSessions])
 
   // 取消删除
   const handleCancelDelete = useCallback(() => {
@@ -325,7 +373,19 @@ export default function FeedbackPage() {
 
         {/* 右侧内容区 */}
         <main className="flex-1 overflow-hidden flex flex-col">
-          {activeSession ? (
+          {!hasAccess ? (
+            <div className="flex-1 overflow-y-auto px-4">
+              <InviteGate
+                title="解锁专属反馈总结"
+                description="登录用户可以浏览反馈中心。输入邀请码后，才会加载并展示你账号下的 AI 总结内容。"
+                onUnlocked={() => void loadSessions()}
+              />
+            </div>
+          ) : recordsLoading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : activeSession ? (
             <SessionDetail session={activeSession} />
           ) : (
             <motion.div
@@ -355,6 +415,27 @@ export default function FeedbackPage() {
         </main>
       </div>
 
+      {hasAccess && legacyCount > 0 && (
+        <div className="fixed bottom-5 left-1/2 z-50 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-2xl border border-blue-100 bg-white p-4 shadow-2xl shadow-slate-300/50">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[13px] font-semibold text-slate-800">检测到 {legacyCount} 条本机旧记录</p>
+              <p className="mt-1 text-[11px] text-slate-500">确认这些记录属于当前账号后，可以安全同步到云端。</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setLegacyCount(0)} className="rounded-lg px-3 py-2 text-[12px] text-slate-500 hover:bg-slate-100">暂不导入</button>
+              <button disabled={importing} onClick={() => void handleImportLegacy()} className="rounded-lg bg-blue-500 px-3 py-2 text-[12px] font-semibold text-white disabled:opacity-60">{importing ? '同步中…' : '导入当前账号'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recordsError && (
+        <div className="fixed bottom-5 right-5 z-50 max-w-sm rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-[12px] text-red-600 shadow-lg">
+          {recordsError}
+        </div>
+      )}
+
       {/* 删除确认弹窗 */}
       <ConfirmDialog
         open={deleteTarget !== null}
@@ -362,7 +443,7 @@ export default function FeedbackPage() {
         message={`确定要删除「${deleteTarget?.title ?? ''}」吗？删除后无法恢复。`}
         confirmLabel="删除"
         cancelLabel="取消"
-        onConfirm={handleConfirmDelete}
+        onConfirm={() => void handleConfirmDelete()}
         onCancel={handleCancelDelete}
       />
     </div>

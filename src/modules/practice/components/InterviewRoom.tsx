@@ -64,6 +64,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
   const [officerEmotion, setOfficerEmotion] = useState<OfficerEmotion>('friendly')
   const [officerName] = useState(() => getRandomOfficerName())
   const [showIntro, setShowIntro] = useState(true)
+  const [aiError, setAiError] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<ReturnType<typeof setInterval>>()
   const processingRef = useRef(false)
@@ -132,6 +133,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
 
     setMessages(prev => [...prev, userMsg])
     setStatus('processing')
+    setAiError('')
 
     const history = messages.map(m => ({ role: m.role, text: m.text }))
 
@@ -170,9 +172,10 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
         processingRef.current = false
         setStatus('idle') // 等待用户下一轮录音
       }
-    } catch {
+    } catch (error) {
       processingRef.current = false
       setStatus('idle')
+      setAiError(error instanceof Error ? error.message : 'AI 暂时无法回答，请稍后重试。')
     }
   }, [messages, context, elapsed, officerType, onComplete])
 
@@ -319,6 +322,11 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
         </div>
 
         {/* ---- 底部：语音控制 ---- */}
+        {aiError && (
+          <div className="mx-4 mb-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[12px] text-red-600">
+            {aiError}
+          </div>
+        )}
         <VoiceControls
           status={status}
           elapsed={formatElapsed(elapsed)}

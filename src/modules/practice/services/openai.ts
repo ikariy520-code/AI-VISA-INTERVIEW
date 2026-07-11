@@ -16,6 +16,7 @@ import type {
 import type { OfficerType } from '../../voice/types'
 import { officerTypes } from '../../voice/data/officerTypes'
 import { mockAnalyzeUser, mockGenerateResponse } from '../data/mockOfficer'
+import { requireSupabase } from '../../../lib/supabase'
 
 // ---- 配置 ----
 
@@ -47,36 +48,11 @@ const defaultConfig: OpenAIConfig = {
   systemPrompt: buildSystemPrompt('standard'),
 }
 
-// ---- API 调用缓存 ----
+export class AuthenticationRequiredError extends Error {}
+export class InviteRequiredError extends Error {}
 
-let apiAvailable: boolean | null = null // null=未检测, true=可用, false=不可用
-
-/** 检测 API 是否可用（首次调用时自动检测，之后缓存结果） */
-async function checkApiAvailable(): Promise<boolean> {
-  if (apiAvailable !== null) return apiAvailable
-  try {
-    const response = await fetch(AI_CHAT_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: 'Hi' }],
-        max_tokens: 10,
-      }),
-      signal: AbortSignal.timeout(5000),
-    })
-    apiAvailable = response.ok
-    if (apiAvailable) console.log('[AI] API connected — using DeepSeek')
-    return apiAvailable
-  } catch {
-    apiAvailable = false
-    console.log('[AI] API unavailable — using mock mode')
-    return false
-  }
-}
-
-/** 重置 API 状态（从设置页切换时可用） */
 export function resetApiStatus() {
-  apiAvailable = null
+  // 保留兼容接口。鉴权后的请求不再缓存“API 可用性”，避免 401/403 被当成离线模式。
 }
 
 // ---- 通用 AI 调用 ----
@@ -89,9 +65,16 @@ interface AICallOptions {
 }
 
 async function callAI(options: AICallOptions): Promise<string> {
+  const { data: sessionData } = await requireSupabase().auth.getSession()
+  const token = sessionData.session?.access_token
+  if (!token) throw new AuthenticationRequiredError('请先登录。')
+
   const response = await fetch(AI_CHAT_ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({
       messages: options.messages,
       temperature: options.temperature ?? 0.7,
@@ -102,12 +85,14 @@ async function callAI(options: AICallOptions): Promise<string> {
   })
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
+    const err = await response.json().catch(() => ({})) as any
+    if (response.status === 401) throw new AuthenticationRequiredError('登录状态已失效，请重新登录。')
+    if (response.status === 403) throw new InviteRequiredError('请输入邀请码解锁 AI 功能。')
     throw new Error(err.error || `API error: ${response.status}`)
   }
 
-  const data = await response.json()
-  const content = data.choices?.[0]?.message?.content
+  const responseData = await response.json() as any
+  const content = responseData.choices?.[0]?.message?.content
   if (!content) throw new Error('Empty AI response')
   return content
 }
@@ -119,10 +104,6 @@ async function callAI(options: AICallOptions): Promise<string> {
 export async function analyzeUserContext(
   context: UserContext,
 ): Promise<AIAnalysisResult> {
-  // 检测 API 可用性
-  const available = await checkApiAvailable()
-  if (!available) return mockAnalyzeUser(context)
-
   const prompt = `${buildSystemPrompt('standard')}
 
 You are now in ANALYSIS mode. Given the applicant's background below, output a JSON object:
@@ -154,6 +135,7 @@ ${JSON.stringify(context, null, 2)}`
     const parsed = JSON.parse(content)
     return parsed.analysis ?? parsed
   } catch (err) {
+    if (err instanceof AuthenticationRequiredError || err instanceof InviteRequiredError) throw err
     console.warn('[AI] analyzeUserContext failed, falling back to mock:', err)
     return mockAnalyzeUser(context)
   }
@@ -169,11 +151,6 @@ export async function generateOfficerResponse(
   userJustSaid: string,
   officerType: OfficerType = 'standard',
 ): Promise<{ text: string; emotion: string; isClosing?: boolean; isDocumentRequest?: boolean }> {
-  const available = await checkApiAvailable()
-  if (!available) {
-    return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
-  }
-
   const systemPrompt = buildSystemPrompt(officerType)
 
   // 构建消息历史
@@ -230,6 +207,7 @@ export async function generateOfficerResponse(
       isDocumentRequest: parsed.isDocumentRequest || false,
     }
   } catch (err) {
+    if (err instanceof AuthenticationRequiredError || err instanceof InviteRequiredError) throw err
     console.warn('[AI] generateOfficerResponse failed, falling back to mock:', err)
     return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
   }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import type { VisaType, UserContext, InterviewStep, AIAnalysisResult, ChatMessage } from './types'
@@ -9,6 +9,8 @@ import UserContextForm from './components/UserContextForm'
 import AIAnalysisScreen from './components/AIAnalysisScreen'
 import InterviewRoom from './components/InterviewRoom'
 import InterviewComplete from './components/InterviewComplete'
+import InviteGate from '../../access/InviteGate'
+import { useAccess } from '../../access/AccessContext'
 
 // ========================================
 // 面签实战 — 主页面
@@ -45,15 +47,7 @@ export default function PracticePage() {
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [duration, setDuration] = useState('')
-
-  const guardRedirected = useRef(false)
-
-  // ══════════════════════════════════════════════════
-  // ⚠️ GUARD_BYPASS — 临时跳过入口守卫（开发调试用）
-  //    true  = 无需从第一页选面签官，默认使用 standard 类型
-  //    false = 恢复守卫，无 officerType 时自动跳回 /voice
-  // ══════════════════════════════════════════════════
-  const GUARD_BYPASS = true
+  const { hasAccess } = useAccess()
 
   // 面签官类型：从路由 state 读取，回退到 sessionStorage
   const officerType: OfficerType | null = useMemo(() => {
@@ -66,20 +60,9 @@ export default function PracticePage() {
     if (fromStorage && ['pressure', 'standard', 'friendly', 'trump', 'custom'].includes(fromStorage)) {
       return fromStorage
     }
-    // 守卫绕过时默认返回 standard 类型
-    if (GUARD_BYPASS) return 'standard'
-    return null
+    // 允许登录用户直接浏览第二部分，未从第一部分进入时使用标准型面签官。
+    return 'standard'
   }, [location.state])
-
-  // 入口守卫：没有选择面签官类型 → 跳回第一部分
-  useEffect(() => {
-    if (GUARD_BYPASS) return
-    if (guardRedirected.current) return
-    if (!officerType) {
-      guardRedirected.current = true
-      navigate('/voice', { replace: true })
-    }
-  }, [officerType, navigate])
 
   // officerType 未就绪时不渲染（等待守卫跳转）
   const officerConfig = useMemo(
@@ -151,7 +134,12 @@ export default function PracticePage() {
         </span>
 
         {/* 步骤进度指示 */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <span className={`hidden sm:inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium ${hasAccess ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${hasAccess ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+            {hasAccess ? 'AI 已解锁' : 'AI 待解锁'}
+          </span>
+          <div className="flex items-center gap-1.5">
           {(['select-type', 'context-form', 'ai-analysis', 'interview', 'complete'] as InterviewStep[]).map((s, i) => (
             <span
               key={s}
@@ -164,6 +152,7 @@ export default function PracticePage() {
               }`}
             />
           ))}
+          </div>
         </div>
       </div>
 
@@ -185,10 +174,15 @@ export default function PracticePage() {
               )}
 
               {step === 'ai-analysis' && userContext && (
-                <AIAnalysisScreen
-                  context={userContext}
-                  onComplete={handleAnalysisComplete}
-                />
+                <InviteGate
+                  title="解锁 AI 分析与面签对话"
+                  description="你可以浏览面签设置。输入邀请码后，AI 将分析你的背景并开始实时面签。"
+                >
+                  <AIAnalysisScreen
+                    context={userContext}
+                    onComplete={handleAnalysisComplete}
+                  />
+                </InviteGate>
               )}
 
               {step === 'interview' && userContext && analysis && (
