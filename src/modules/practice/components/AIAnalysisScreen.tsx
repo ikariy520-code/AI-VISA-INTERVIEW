@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import type { AIAnalysisResult } from '../types'
 import { analyzeUserContext } from '../services/openai'
 import type { UserContext } from '../types'
+import { useAccess } from '../../../access/AccessContext'
 
 // ========================================
 // Step 3: AI 分析中
@@ -23,6 +24,7 @@ const thinkingSteps = [
 ]
 
 export default function AIAnalysisScreen({ context, onComplete }: Props) {
+  const { beginInterview } = useAccess()
   const [currentStep, setCurrentStep] = useState(0)
   const [doneSteps, setDoneSteps] = useState<number[]>([])
   const [error, setError] = useState('')
@@ -42,6 +44,7 @@ export default function AIAnalysisScreen({ context, onComplete }: Props) {
     // 最后一步后触发 AI 分析
     timers.push(setTimeout(async () => {
       try {
+        await beginInterview()
         const analysis = await analyzeUserContext(context)
         setTimeout(() => onComplete(analysis), 400)
       } catch (err) {
@@ -50,7 +53,7 @@ export default function AIAnalysisScreen({ context, onComplete }: Props) {
     }, 600 * (thinkingSteps.length + 1)))
 
     return () => timers.forEach(clearTimeout)
-  }, [context, onComplete, attempt])
+  }, [context, onComplete, attempt, beginInterview])
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh]">

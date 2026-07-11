@@ -1,6 +1,5 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../../auth/AuthContext'
 import { useAccess } from '../../access/AccessContext'
 
 // ========================================
@@ -8,8 +7,7 @@ import { useAccess } from '../../access/AccessContext'
 // ========================================
 
 export default function Navbar() {
-  const { user, loading, signOut } = useAuth()
-  const { hasAccess, loading: accessLoading } = useAccess()
+  const { hasAccess, loading, remainingInterviews } = useAccess()
 
   return (
     <motion.nav
@@ -43,26 +41,19 @@ export default function Navbar() {
       </Link>
 
       <div className="flex items-center gap-2">
-        {!loading && user ? (
-          <>
-            <div className="hidden sm:flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 shadow-sm">
-              <span className={`w-1.5 h-1.5 rounded-full ${accessLoading ? 'bg-slate-300' : hasAccess ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-              <span className="max-w-[160px] truncate text-[11px] text-slate-500">{user.email}</span>
-              <span className="text-[10px] font-medium text-slate-400">{hasAccess ? '已解锁' : '待解锁'}</span>
-            </div>
-            <button
-              onClick={() => void signOut()}
-              className="rounded-full border border-slate-200 bg-white/80 px-3.5 py-2 text-[12px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
-            >
-              退出
-            </button>
-          </>
-        ) : !loading ? (
-          <>
-            <Link to="/login" className="rounded-full px-3.5 py-2 text-[12px] font-medium text-slate-600 transition hover:text-slate-900">登录</Link>
-            <Link to="/register" className="rounded-full bg-blue-500 px-4 py-2 text-[12px] font-semibold text-white shadow-sm shadow-blue-500/20 transition hover:bg-blue-600">注册</Link>
-          </>
-        ) : null}
+        {!loading && (
+          <Link
+            to="/practice"
+            className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-[12px] font-medium shadow-sm transition ${
+              hasAccess
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                : 'border-slate-200 bg-white/80 text-slate-600 hover:border-blue-200 hover:text-blue-600'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${hasAccess ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+            {hasAccess ? `已解锁 · 剩余${remainingInterviews}次` : '输入邀请码'}
+          </Link>
+        )}
       </div>
     </motion.nav>
   )

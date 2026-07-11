@@ -12,7 +12,7 @@ interface InviteGateProps {
 export default function InviteGate({
   children,
   title = '输入邀请码，解锁 AI 面签',
-  description = '你的账号已经登录。兑换邀请码后，即可使用 AI 对话并查看专属反馈总结。',
+  description = '输入购买后收到的邀请码，即可在当前浏览器使用 AI 面签并查看本次反馈总结。',
   onUnlocked,
 }: InviteGateProps) {
   const { hasAccess, loading, redeemInviteCode } = useAccess()
@@ -81,7 +81,7 @@ export default function InviteGate({
           {submitting ? '正在验证…' : '验证并解锁'}
         </button>
       </form>
-      <p className="mt-4 text-center text-[11px] text-slate-400">邀请码兑换后会绑定当前账号，可在其他设备继续使用。</p>
+      <p className="mt-4 text-center text-[11px] text-slate-400">邀请码会激活当前浏览器；更换设备或清除 Cookie 可能需要重新激活。</p>
     </motion.section>
   )
 }

@@ -1,11 +1,12 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import type { ChatMessage, UserContext, AIAnalysisResult, InterviewRecord } from '../types'
+import type { InterviewSession } from '../../feedback/types'
 import { analyzeInterview, analyzeInterviewWithAI } from '../../shared/store/analysisEngine'
-import { saveSession, generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
-import { saveCloudSession } from '../../../services/sessionService'
-import { AuthenticationRequiredError, InviteRequiredError } from '../services/openai'
+import { generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
+import { InviteRequiredError } from '../services/openai'
+import { clearActiveInterviewSession } from '../../../access/AccessContext'
 
 // ========================================
 // Step 5: 面签完成
@@ -29,23 +30,21 @@ const visaTypeLabel: Record<string, string> = {
 
 export default function InterviewComplete({ messages, context, analysis, duration }: Props) {
   const navigate = useNavigate()
-  const location = useLocation()
   const savedRef = useRef(false)
-  const sessionIdRef = useRef<string>('')
-  const [saveState, setSaveState] = useState<'saving' | 'saved' | 'error'>('saving')
-  const [saveError, setSaveError] = useState('')
+  const [feedbackState, setFeedbackState] = useState<'generating' | 'ready' | 'error'>('generating')
+  const [feedbackError, setFeedbackError] = useState('')
+  const [feedbackSession, setFeedbackSession] = useState<InterviewSession | null>(null)
 
   const officerQuestions = messages.filter(m => m.role === 'officer')
   const userAnswers = messages.filter(m => m.role === 'user')
 
-  // 自动保存：组件挂载时保存一次（防止用户直接关闭页面丢失记录）
+  // 面签完成后仅生成本次反馈，不写入个人记录或云端数据库。
   useEffect(() => {
     if (savedRef.current || messages.length === 0) return
     savedRef.current = true
 
     const { date, time } = getNowFormatted()
     const id = generateSessionId()
-    sessionIdRef.current = id
 
     const record: InterviewRecord = {
       id,
@@ -59,16 +58,18 @@ export default function InterviewComplete({ messages, context, analysis, duratio
     }
 
     let cancelled = false
-    const persist = async () => {
+    const generateFeedback = async () => {
       try {
         const session = await analyzeInterviewWithAI(record)
-        await saveCloudSession(session)
-        if (!cancelled) setSaveState('saved')
+        if (!cancelled) {
+          setFeedbackSession(session)
+          setFeedbackState('ready')
+        }
       } catch (error) {
-        if (error instanceof AuthenticationRequiredError || error instanceof InviteRequiredError) {
+        if (error instanceof InviteRequiredError) {
           if (!cancelled) {
-            setSaveError(error.message)
-            setSaveState('error')
+            setFeedbackError(error.message)
+            setFeedbackState('error')
           }
           return
         }
@@ -76,34 +77,35 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         console.warn('[InterviewComplete] AI scoring failed, using rule engine:', error)
         try {
           const session = analyzeInterview(record)
-          await saveCloudSession(session)
-          if (!cancelled) setSaveState('saved')
-        } catch (cloudError) {
-          // 网络故障时保留本机副本，避免用户本次练习完全丢失。
-          const fallbackSession = analyzeInterview(record)
-          saveSession(fallbackSession)
           if (!cancelled) {
-            setSaveError('云端保存暂时失败，记录已保存在本机，稍后可重新同步。')
-            setSaveState('error')
+            setFeedbackSession(session)
+            setFeedbackState('ready')
           }
-          console.warn('[InterviewComplete] Cloud save failed:', cloudError)
+        } catch (fallbackError) {
+          console.warn('[InterviewComplete] Feedback generation failed:', fallbackError)
+          if (!cancelled) {
+            setFeedbackError('反馈生成失败，请稍后再试。')
+            setFeedbackState('error')
+          }
         }
       }
     }
-    void persist()
+    void generateFeedback()
     return () => { cancelled = true }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 跳转反馈页
   const handleViewFeedback = useCallback(() => {
-    if (saveState !== 'saved') return
+    if (!feedbackSession) return
     navigate('/feedback', {
-      state: {
-        ...(location.state as any),
-        highlightSessionId: sessionIdRef.current,
-      },
+      state: { session: feedbackSession },
     })
-  }, [navigate, location.state, saveState])
+  }, [navigate, feedbackSession])
+
+  const handleRetry = useCallback(() => {
+    clearActiveInterviewSession()
+    navigate('/practice', { replace: true })
+  }, [navigate])
 
   return (
     <div className="flex flex-col items-center max-w-lg mx-auto">
@@ -212,15 +214,15 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         <motion.button
           whileTap={{ scale: 0.97 }}
           onClick={handleViewFeedback}
-          disabled={saveState !== 'saved'}
+          disabled={feedbackState !== 'ready'}
           className="flex-1 px-5 py-3 rounded-xl bg-blue-500 text-[14px] font-semibold text-white
             hover:bg-blue-600 transition-all duration-200 shadow-sm shadow-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saveState === 'saving' ? '正在生成并保存反馈…' : saveState === 'saved' ? '查看 AI 教练反馈 →' : '反馈保存失败'}
+          {feedbackState === 'generating' ? '正在生成反馈…' : feedbackState === 'ready' ? '查看并下载反馈 →' : '反馈生成失败'}
         </motion.button>
         <motion.button
           whileTap={{ scale: 0.97 }}
-          onClick={() => navigate('/practice')}
+          onClick={handleRetry}
           className="px-5 py-3 rounded-xl bg-white border border-slate-200 text-[14px] text-slate-600
             hover:border-slate-300 hover:text-slate-800 transition-all duration-200"
         >
@@ -228,7 +230,7 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         </motion.button>
       </motion.div>
 
-      {saveError && <p className="mt-3 text-center text-[12px] text-amber-600">{saveError}</p>}
+      {feedbackError && <p className="mt-3 text-center text-[12px] text-amber-600">{feedbackError}</p>}
 
       <motion.p
         initial={{ opacity: 0 }}
@@ -236,7 +238,7 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         transition={{ delay: 0.8 }}
         className="mt-6 text-[11px] text-slate-400"
       >
-        对话记录已自动保存，分析报告已生成。点击上方按钮查看详细反馈
+        本次反馈不会长期保存，生成后请立即下载 PDF 或截图留存
       </motion.p>
     </div>
   )

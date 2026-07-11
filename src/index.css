@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body,
+  #root {
+    background: white !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  #feedback-report {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+}
+
 /* ========================================
    Design System — AI 面签教练
    色彩心理学：自信蓝 + 通过绿 + 温暖金

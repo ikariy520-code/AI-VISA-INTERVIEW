@@ -10,7 +10,7 @@ import AIAnalysisScreen from './components/AIAnalysisScreen'
 import InterviewRoom from './components/InterviewRoom'
 import InterviewComplete from './components/InterviewComplete'
 import InviteGate from '../../access/InviteGate'
-import { useAccess } from '../../access/AccessContext'
+import { clearActiveInterviewSession, useAccess } from '../../access/AccessContext'
 
 // ========================================
 // 面签实战 — 主页面
@@ -60,7 +60,7 @@ export default function PracticePage() {
     if (fromStorage && ['pressure', 'standard', 'friendly', 'trump', 'custom'].includes(fromStorage)) {
       return fromStorage
     }
-    // 允许登录用户直接浏览第二部分，未从第一部分进入时使用标准型面签官。
+    // 允许用户直接浏览第二部分，未从第一部分进入时使用标准型面签官。
     return 'standard'
   }, [location.state])
 
@@ -72,6 +72,7 @@ export default function PracticePage() {
 
   // Step 1 → Step 2
   const handleSelectType = useCallback((type: VisaType) => {
+    clearActiveInterviewSession()
     setVisaType(type)
     setStep('context-form')
   }, [])
@@ -106,6 +107,7 @@ export default function PracticePage() {
 
   // 重置
   const handleReset = useCallback(() => {
+    clearActiveInterviewSession()
     setStep('select-type')
     setVisaType(null)
     setUserContext(null)

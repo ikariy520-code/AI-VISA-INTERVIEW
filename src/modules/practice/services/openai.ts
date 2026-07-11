@@ -16,7 +16,7 @@ import type {
 import type { OfficerType } from '../../voice/types'
 import { officerTypes } from '../../voice/data/officerTypes'
 import { mockAnalyzeUser, mockGenerateResponse } from '../data/mockOfficer'
-import { requireSupabase } from '../../../lib/supabase'
+import { getActiveInterviewSessionKey } from '../../../access/AccessContext'
 
 // ---- 配置 ----
 
@@ -48,7 +48,6 @@ const defaultConfig: OpenAIConfig = {
   systemPrompt: buildSystemPrompt('standard'),
 }
 
-export class AuthenticationRequiredError extends Error {}
 export class InviteRequiredError extends Error {}
 
 export function resetApiStatus() {
@@ -65,15 +64,14 @@ interface AICallOptions {
 }
 
 async function callAI(options: AICallOptions): Promise<string> {
-  const { data: sessionData } = await requireSupabase().auth.getSession()
-  const token = sessionData.session?.access_token
-  if (!token) throw new AuthenticationRequiredError('请先登录。')
+  const sessionKey = getActiveInterviewSessionKey()
+  if (!sessionKey) throw new InviteRequiredError('请输入邀请码并开始面签。')
 
   const response = await fetch(AI_CHAT_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      'X-Interview-Session': sessionKey,
     },
     body: JSON.stringify({
       messages: options.messages,
@@ -86,7 +84,6 @@ async function callAI(options: AICallOptions): Promise<string> {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({})) as any
-    if (response.status === 401) throw new AuthenticationRequiredError('登录状态已失效，请重新登录。')
     if (response.status === 403) throw new InviteRequiredError('请输入邀请码解锁 AI 功能。')
     throw new Error(err.error || `API error: ${response.status}`)
   }
@@ -135,7 +132,7 @@ ${JSON.stringify(context, null, 2)}`
     const parsed = JSON.parse(content)
     return parsed.analysis ?? parsed
   } catch (err) {
-    if (err instanceof AuthenticationRequiredError || err instanceof InviteRequiredError) throw err
+    if (err instanceof InviteRequiredError) throw err
     console.warn('[AI] analyzeUserContext failed, falling back to mock:', err)
     return mockAnalyzeUser(context)
   }
@@ -207,7 +204,7 @@ export async function generateOfficerResponse(
       isDocumentRequest: parsed.isDocumentRequest || false,
     }
   } catch (err) {
-    if (err instanceof AuthenticationRequiredError || err instanceof InviteRequiredError) throw err
+    if (err instanceof InviteRequiredError) throw err
     console.warn('[AI] generateOfficerResponse failed, falling back to mock:', err)
     return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
   }

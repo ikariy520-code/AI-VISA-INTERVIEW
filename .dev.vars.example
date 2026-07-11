@@ -1,4 +1,6 @@
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
-DEEPSEEK_API_KEY=sk-your-key-here
-DEEPSEEK_MODEL=deepseek-chat
+AI_API_KEY=
+AI_API_BASE=https://api.deepseek.com/v1/chat/completions
+AI_MODEL=deepseek-chat
+ADMIN_API_TOKEN=replace-with-a-long-random-secret
+ADMIN_EMAIL=admin@example.com
+RATE_LIMIT_SALT=replace-with-another-random-secret
