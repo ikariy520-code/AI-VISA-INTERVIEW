@@ -13,6 +13,20 @@
 
 export type VisaType = 'B2' | 'B1' | 'F1' | 'H1B' | 'L1'
 
+export type DegreeLevel = 'bachelor' | 'master' | 'phd' | 'language' | 'other'
+export type CurrentStatus = 'student' | 'new-graduate' | 'employed' | 'unemployed' | 'gap'
+export type FundingSource = 'parents' | 'self' | 'scholarship' | 'relatives' | 'combined' | 'other'
+export type BudgetRange = 'under-30k' | '30k-50k' | '50k-80k' | '80k-plus' | 'not-sure'
+export type PostGraduationPlan = 'return-work' | 'further-study' | 'family-business' | 'undecided' | 'other'
+export type HomeTie = 'career' | 'study' | 'spouse-children' | 'family-responsibility' | 'property' | 'business' | 'other'
+export type B2Purpose = 'tourism' | 'family-visit' | 'friend-visit' | 'other-short-visit'
+export type B2CurrentStatus = 'employed' | 'self-employed' | 'student' | 'retired' | 'unemployed' | 'other'
+export type TravelFunding = 'self' | 'spouse-parents' | 'us-contact' | 'shared' | 'other'
+export type TravelCompanion = 'alone' | 'spouse' | 'parents' | 'children' | 'friends' | 'colleagues' | 'relatives'
+export type TripStyle = 'independent' | 'group-tour' | 'with-family-friends'
+export type TravelBudget = 'under-3k' | '3k-6k' | '6k-10k' | '10k-plus' | 'not-sure'
+export type TravelRegion = 'asia' | 'europe' | 'oceania' | 'north-america' | 'other'
+
 export interface VisaTypeInfo {
   id: VisaType
   label: string          // 中文标签
@@ -33,6 +47,37 @@ export interface UserContext {
   occupation: string     // 当前职业
   notes: string          // 补充说明
   major?: string         // F1 签证专用：专业
+  degreeLevel?: DegreeLevel
+  enrollmentDate?: string
+  currentStatus?: CurrentStatus
+  schoolReason?: string
+  majorReason?: string
+  fundingSource?: FundingSource | ''
+  budgetRange?: BudgetRange | ''
+  hasUsRelatives?: boolean
+  usRelativeType?: string
+  previousVisaDenied?: boolean
+  refusalReason?: string
+  hasStudyGap?: boolean
+  gapExplanation?: string
+  postGraduationPlan?: PostGraduationPlan | ''
+  homeTies?: HomeTie[]
+  b2Purpose?: B2Purpose
+  travelMonth?: string
+  b2CurrentStatus?: B2CurrentStatus
+  travelFunding?: TravelFunding
+  tripStyle?: TripStyle
+  travelCompanion?: TravelCompanion
+  usContactRelation?: string
+  contactProvidesStay?: boolean
+  contactPaysExpenses?: boolean
+  hasMetContact?: boolean
+  workTenureRange?: string
+  travelBudget?: TravelBudget | ''
+  travelHistoryRegions?: TravelRegion[]
+  hadOverstay?: boolean
+  returnReason?: string
+  previousVisaAnswer?: 'yes' | 'no'
 }
 
 // ---- AI 对话 ----
@@ -141,42 +186,4 @@ export interface InterviewRecord {
   userContext: UserContext
   messages: ChatMessage[]
   aiAnalysis: AIAnalysisResult
-}
-
-// ========================================
-// 文档上传 & 解析（F1 签证专用）
-// ========================================
-
-/** 支持的文档类型 */
-export type DocumentType = 'ds160' | 'i20'
-
-/** 解析状态 */
-export type ParseStatus = 'idle' | 'loading' | 'success' | 'error'
-
-/** DS-160 确认页提取的字段 */
-export interface DS160Data {
-  fullName?: string
-  passportNumber?: string
-  nationality?: string
-  destination?: string       // 计划访美城市
-  purposeOfTrip?: string     // 访问目的
-}
-
-/** I-20 表格提取的字段 */
-export interface I20Data {
-  sevisId?: string
-  universityName?: string
-  major?: string             // 专业/项目名称
-  programStartDate?: string
-  programEndDate?: string
-  duration?: string          // 项目时长（推算）
-}
-
-/** 统一解析结果 */
-export interface DocumentParseResult {
-  type: DocumentType
-  fileName: string
-  rawText: string            // 提取的原始文本（调试用）
-  ds160?: DS160Data
-  i20?: I20Data
 }

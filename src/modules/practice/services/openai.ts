@@ -28,7 +28,78 @@ const BASE_SYSTEM_PROMPT = `You are a US visa officer conducting an interview. Y
 - Evaluate: ties to home country, purpose of travel, financial ability, travel history
 - The interview should feel like a real conversation, not an interrogation
 - Respond in the same language the applicant uses
-- Keep responses concise — 1-3 sentences per question`
+- Keep responses concise — 1-3 sentences per question
+- Never ask for or repeat identifying details such as a passport number, SEVIS ID, DS-160 confirmation number, date of birth, phone number, email address, exact home address, or bank/account number
+- If a document check is relevant, simulate the applicant handing over the document; never ask them to upload a real document or provide its identifying numbers`
+
+const trimText = (value: string | undefined, maxLength: number) =>
+  value?.trim().slice(0, maxLength) || undefined
+
+/**
+ * Only these product-approved, non-identifying fields may be placed in an AI prompt.
+ * Keeping this mapping explicit prevents future UI fields from being sent by accident.
+ */
+function buildSafeInterviewContext(context: UserContext): Record<string, unknown> {
+  if (context.visaType === 'F1') {
+    return {
+      visaType: context.visaType,
+      schoolNameOrAlias: trimText(context.purpose, 100),
+      degreeLevel: context.degreeLevel,
+      major: trimText(context.major, 100),
+      enrollmentMonth: context.enrollmentDate,
+      programDuration: trimText(context.duration, 40),
+      currentStatus: context.currentStatus,
+      schoolReason: trimText(context.schoolReason, 160),
+      majorReason: trimText(context.majorReason, 160),
+      fundingSource: context.fundingSource || undefined,
+      annualBudgetRange: context.budgetRange || undefined,
+      hasUsRelatives: Boolean(context.hasUsRelatives),
+      usRelativeType: context.hasUsRelatives ? trimText(context.usRelativeType, 40) : undefined,
+      hasPreviousVisa: context.previousVisa,
+      hasPreviousVisaDenial: Boolean(context.previousVisaDenied),
+      refusalReasonCategory: context.previousVisaDenied ? trimText(context.refusalReason, 80) : undefined,
+      hasStudyOrWorkGap: Boolean(context.hasStudyGap),
+      gapExplanation: context.hasStudyGap ? trimText(context.gapExplanation, 160) : undefined,
+      postGraduationPlan: context.postGraduationPlan || undefined,
+      homeTies: context.homeTies?.slice(0, 6),
+      interviewConcern: trimText(context.notes, 240),
+    }
+  }
+
+  return {
+    visaType: context.visaType,
+    travelPurposeCategory: context.b2Purpose || trimText(context.purpose, 40),
+    departureMonth: context.travelMonth,
+    destinations: trimText(context.destination, 80),
+    plannedDuration: trimText(context.duration, 40),
+    currentStatus: context.b2CurrentStatus || trimText(context.occupation, 40),
+    travelFunding: context.travelFunding,
+    tripStyle: context.b2Purpose === 'tourism' ? context.tripStyle : undefined,
+    travelCompanion: context.b2Purpose === 'tourism' ? context.travelCompanion : undefined,
+    usContactRelation: context.b2Purpose === 'family-visit' || context.b2Purpose === 'friend-visit'
+      ? trimText(context.usContactRelation, 40)
+      : undefined,
+    contactProvidesStay: context.b2Purpose === 'family-visit' || context.b2Purpose === 'friend-visit'
+      ? Boolean(context.contactProvidesStay)
+      : undefined,
+    contactPaysExpenses: context.b2Purpose === 'family-visit' || context.b2Purpose === 'friend-visit'
+      ? Boolean(context.contactPaysExpenses)
+      : undefined,
+    hasMetContact: context.b2Purpose === 'family-visit' || context.b2Purpose === 'friend-visit'
+      ? Boolean(context.hasMetContact)
+      : undefined,
+    homeTies: context.homeTies?.slice(0, 7),
+    currentStatusDuration: trimText(context.workTenureRange, 40),
+    travelBudgetRange: context.travelBudget || undefined,
+    travelHistoryRegions: context.travelHistoryRegions?.slice(0, 5),
+    hasPreviousVisa: context.previousVisaAnswer ? context.previousVisa : undefined,
+    hasPreviousVisaDenial: context.previousVisaDenied ? true : undefined,
+    refusalReasonCategory: context.previousVisaDenied ? trimText(context.refusalReason, 80) : undefined,
+    hadLongStayOrOverstay: context.hadOverstay ? true : undefined,
+    returnReason: trimText(context.returnReason, 160),
+    interviewConcern: trimText(context.notes, 240),
+  }
+}
 
 // 根据面签官类型拼接不同的 system prompt
 function buildSystemPrompt(officerType: OfficerType): string {
@@ -116,7 +187,7 @@ You are now in ANALYSIS mode. Given the applicant's background below, output a J
 }
 
 Applicant background:
-${JSON.stringify(context, null, 2)}`
+${JSON.stringify(buildSafeInterviewContext(context), null, 2)}`
 
   try {
     const content = await callAI({
@@ -159,13 +230,8 @@ export async function generateOfficerResponse(
   if (conversationHistory.length <= 1) {
     messages.push({
       role: 'system',
-      content: `Current interview context:
-- Visa type: ${context.visaType}
-- Purpose: ${context.purpose}
-- Destination: ${context.destination}
-- Occupation: ${context.occupation}
-- Previous US visa: ${context.previousVisa ? 'Yes' : 'No'}
-- Major (if student): ${context.major || 'N/A'}`,
+      content: `Current interview context (approved non-identifying fields only):
+${JSON.stringify(buildSafeInterviewContext(context), null, 2)}`,
     })
   }
 
@@ -290,12 +356,8 @@ You are now in ANALYSIS mode. Given the applicant's background, output a JSON ob
 function buildConversationPrompt(context: UserContext): string {
   return `${defaultConfig.systemPrompt}
 
-Current interview context:
-- Visa type: ${context.visaType}
-- Purpose: ${context.purpose}
-- Destination: ${context.destination}
-- Occupation: ${context.occupation}
-- Previous US visa: ${context.previousVisa ? 'Yes' : 'No'}
+Current interview context (approved non-identifying fields only):
+${JSON.stringify(buildSafeInterviewContext(context), null, 2)}
 
 Continue the conversation naturally. Keep responses to 1-3 sentences.
 Output JSON: { "message": "...", "emotion": "neutral|friendly|stern|curious|reassuring|thoughtful", "followUpExpected": true|false }`

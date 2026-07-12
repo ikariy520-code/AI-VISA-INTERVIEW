@@ -19,7 +19,7 @@ const visaTypes: VisaTypeInfo[] = [
     id: 'B2',
     label: 'B2 旅游签证',
     fullName: 'Tourist Visa',
-    description: '赴美旅游、探亲、医疗',
+    description: '赴美旅游、探亲、访友',
     accentClass: 'from-blue-500 to-blue-600 shadow-blue-500/20',
     icon: '🏖️',
   },
