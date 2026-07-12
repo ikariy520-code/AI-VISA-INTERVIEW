@@ -43,7 +43,7 @@ export default function Navbar() {
       <div className="flex items-center gap-2">
         {!loading && (
           <Link
-            to="/practice"
+            to="/voice"
             className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-[12px] font-medium shadow-sm transition ${
               hasAccess
                 ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'

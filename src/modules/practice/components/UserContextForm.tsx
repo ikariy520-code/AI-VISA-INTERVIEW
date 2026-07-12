@@ -19,7 +19,7 @@ interface Props {
 const visaTypeLabel: Record<VisaType, string> = {
   B2: 'B2 · 旅游签证',
   B1: 'B1 · 商务签证',
-  F1: 'F1 · 学生签证',
+  F1: 'F1 · 学术签证',
   H1B: 'H1B · 工作签证',
   L1: 'L1 · 跨国经理',
 }

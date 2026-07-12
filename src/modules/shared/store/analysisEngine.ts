@@ -373,7 +373,7 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
 
   // 标题生成
   const visaLabel: Record<string, string> = {
-    B2: 'B2 旅游签证', B1: 'B1 商务签证', F1: 'F1 学生签证',
+    B2: 'B2 旅游签证', B1: 'B1 商务签证', F1: 'F1 学术签证',
     H1B: 'H1B 工作签证', L1: 'L1 跨国经理',
   }
   const title = `${visaLabel[record.visaType] ?? record.visaType} · ${record.userContext.purpose || '面签练习'}`
@@ -544,7 +544,7 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
 
   // 标题
   const visaLabel: Record<string, string> = {
-    B2: 'B2 旅游签证', B1: 'B1 商务签证', F1: 'F1 学生签证',
+    B2: 'B2 旅游签证', B1: 'B1 商务签证', F1: 'F1 学术签证',
     H1B: 'H1B 工作签证', L1: 'L1 跨国经理',
   }
   const title = `${visaLabel[record.visaType] ?? record.visaType} · ${record.userContext.purpose || '面签练习'}`

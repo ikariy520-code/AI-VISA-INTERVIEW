@@ -2,34 +2,16 @@ import FeatureCard from './FeatureCard'
 import type { FeatureCardData } from '../types'
 
 // ========================================
-// 三卡网格
+// 核心功能入口
 // 简介短而有力，核心卖点一句话讲透
 // ========================================
 
 const features: FeatureCardData[] = [
   {
-    id: 'voice',
-    title: '挑兵点将',
-    description: '四位面签官风格各异，挑一位与你对练，用最舒服的方式开始。',
-    route: '/voice',
-    accentClass: 'from-blue-500 to-blue-600',
-    shadowClass: 'shadow-blue-500/20',
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        {/* 人物头像 */}
-        <circle cx="12" cy="9" r="4" />
-        <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
-        {/* 左右切换箭头 */}
-        <polyline points="4 6 2 8 4 10" />
-        <polyline points="20 6 22 8 20 10" />
-      </svg>
-    ),
-  },
-  {
     id: 'practice',
     title: '面签实战',
-    description: '百战不殆。模拟真实面签环境反复练习，练到从容不迫、对答如流。',
-    route: '/practice', // TODO: 守卫恢复后改回 /voice
+    description: '选择面签官与签证类型，模拟真实面签环境反复练习。',
+    route: '/voice',
     accentClass: 'from-emerald-500 to-emerald-600',
     shadowClass: 'shadow-emerald-500/20',
     icon: (
@@ -61,7 +43,7 @@ const features: FeatureCardData[] = [
 
 export default function FeatureGrid() {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-5 px-6 max-w-5xl mx-auto pb-24">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 px-6 max-w-3xl mx-auto pb-24">
       {features.map((f, i) => (
         <FeatureCard key={f.id} {...f} index={i} />
       ))}

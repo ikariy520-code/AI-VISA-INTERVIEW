@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import type { VisaType, UserContext, InterviewStep, AIAnalysisResult, ChatMessage } from './types'
@@ -60,9 +60,12 @@ export default function PracticePage() {
     if (fromStorage && ['pressure', 'standard', 'friendly', 'trump', 'custom'].includes(fromStorage)) {
       return fromStorage
     }
-    // 允许用户直接浏览第二部分，未从第一部分进入时使用标准型面签官。
-    return 'standard'
+    return null
   }, [location.state])
+
+  useEffect(() => {
+    if (!officerType) navigate('/voice', { replace: true })
+  }, [navigate, officerType])
 
   // officerType 未就绪时不渲染（等待守卫跳转）
   const officerConfig = useMemo(

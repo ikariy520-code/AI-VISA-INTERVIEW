@@ -8,44 +8,20 @@ import type { VisaType, VisaTypeInfo } from '../types'
 
 const visaTypes: VisaTypeInfo[] = [
   {
+    id: 'F1',
+    label: 'F1 学术签证',
+    fullName: 'Academic Visa',
+    description: '赴美留学、学术进修',
+    accentClass: 'from-violet-500 to-violet-600 shadow-violet-500/20',
+    icon: '🎓',
+  },
+  {
     id: 'B2',
     label: 'B2 旅游签证',
     fullName: 'Tourist Visa',
     description: '赴美旅游、探亲、医疗',
     accentClass: 'from-blue-500 to-blue-600 shadow-blue-500/20',
     icon: '🏖️',
-  },
-  {
-    id: 'B1',
-    label: 'B1 商务签证',
-    fullName: 'Business Visa',
-    description: '商务会议、谈判、考察',
-    accentClass: 'from-emerald-500 to-emerald-600 shadow-emerald-500/20',
-    icon: '💼',
-  },
-  {
-    id: 'F1',
-    label: 'F1 学生签证',
-    fullName: 'Student Visa',
-    description: '赴美留学、学术进修',
-    accentClass: 'from-violet-500 to-violet-600 shadow-violet-500/20',
-    icon: '🎓',
-  },
-  {
-    id: 'H1B',
-    label: 'H1B 工作签证',
-    fullName: 'Specialty Occupation',
-    description: '专业领域赴美工作',
-    accentClass: 'from-amber-500 to-amber-600 shadow-amber-500/20',
-    icon: '💻',
-  },
-  {
-    id: 'L1',
-    label: 'L1 跨国经理',
-    fullName: 'Intracompany Transfer',
-    description: '跨国企业内部调动',
-    accentClass: 'from-rose-500 to-rose-600 shadow-rose-500/20',
-    icon: '🏢',
   },
 ]
 
@@ -72,7 +48,7 @@ export default function VisaTypeSelector({ onSelect }: Props) {
       </motion.div>
 
       {/* 签证卡片网格 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-3xl">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl">
         {visaTypes.map((visa, i) => (
           <motion.button
             key={visa.id}
