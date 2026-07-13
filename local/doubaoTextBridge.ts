@@ -50,7 +50,7 @@ export function doubaoTextBridge(options: DoubaoTextBridgeOptions): Plugin {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({ ...body, model }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(30_000),
       })
       const payload = await upstream.json().catch(() => null)
       if (!upstream.ok) {
@@ -86,6 +86,7 @@ export function doubaoTextBridge(options: DoubaoTextBridgeOptions): Plugin {
           const provider = await callDoubao({
             messages: buildDoubaoDecisionMessages(decisionRequest),
             temperature: 0.1,
+            reasoning_effort: 'low',
             max_tokens: 500,
           })
           if (!provider.ok) return writeJson(response, provider.status, provider.payload)

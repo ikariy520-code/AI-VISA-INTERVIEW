@@ -21,7 +21,7 @@ import { parseDoubaoAssessment, type F1AnswerAssessment } from '../../../shared/
 const AI_CHAT_ENDPOINT = '/api/ai-chat'
 const F1_DECISION_ENDPOINT = '/api/interview/decision'
 const REQUEST_TIMEOUT_MS = 15000
-const DECISION_TIMEOUT_MS = 6500
+const DECISION_TIMEOUT_MS = 32000
 
 const BASE_SYSTEM_PROMPT = `You are a US visa officer conducting an interview. Your core rules:
 - Ask one question at a time, wait for the answer

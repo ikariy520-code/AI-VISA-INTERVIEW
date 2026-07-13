@@ -327,6 +327,7 @@ async function handleInterviewDecision(request: Request, env: Env): Promise<Resp
     model: env.ARK_TEXT_MODEL,
     messages: buildDoubaoDecisionMessages(decisionRequest),
     temperature: 0.1,
+    reasoning_effort: 'low',
     max_tokens: 500,
   })
   if (!providerResponse.ok) return providerResponse
