@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { doubaoRealtimeBridge } from './local/doubaoRealtimeBridge'
+import { doubaoTextBridge } from './local/doubaoTextBridge'
 
 // ========================================
 // Vite 配置
@@ -18,20 +19,24 @@ import { doubaoRealtimeBridge } from './local/doubaoRealtimeBridge'
 export default defineConfig(({ command, mode }) => {
   // 加载 .env.local 中的所有变量（第三个参数 '' = 不过滤前缀）
   const env = loadEnv(mode, process.cwd(), '')
-  const legacyApiKey = env.AI_API_KEY || ''
   const configuredSpeechApiKey = env.DOUBAO_API_KEY || env.SPEECH_API_KEY || ''
-  const arkKeyDetected = [configuredSpeechApiKey, env.ARK_API_KEY || '', legacyApiKey]
+  const arkKeyDetected = [configuredSpeechApiKey, env.ARK_API_KEY || '']
     .some(key => key.startsWith('ark-'))
   const doubaoApiKey = configuredSpeechApiKey.startsWith('ark-')
     ? ''
     : configuredSpeechApiKey
-  const textApiKey = env.TEXT_AI_API_KEY
-    || (!legacyApiKey.startsWith('ark-') ? legacyApiKey : '')
+  const textApiKey = env.ARK_API_KEY || ''
+  const textModel = env.ARK_TEXT_MODEL || env.DOUBAO_TEXT_MODEL || ''
   const isLocalDev = command === 'serve' && mode !== 'cloudflare'
 
   return {
     plugins: [
       react(),
+      ...(isLocalDev ? [doubaoTextBridge({
+        apiKey: textApiKey,
+        model: textModel,
+        endpoint: env.ARK_API_BASE,
+      })] : []),
       ...(isLocalDev ? [doubaoRealtimeBridge({
         apiKey: doubaoApiKey,
         upstreamUrl: env.DOUBAO_REALTIME_URL,
@@ -45,29 +50,6 @@ export default defineConfig(({ command, mode }) => {
       // 本地测试阶段只监听本机，避免把携带密钥的开发代理暴露到局域网。
       host: '127.0.0.1',
       port: Number(env.VITE_DEV_PORT) || 5173,
-      // 本地开发代理：前端直接 fetch /api/ai-chat，Vite 转发到 DeepSeek 并注入 key
-      proxy: textApiKey ? {
-        '/api/ai-chat': {
-          target: env.AI_API_BASE || 'https://api.deepseek.com/v1/chat/completions',
-          changeOrigin: true,
-          rewrite: () => '/v1/chat/completions',
-          configure: (proxy) => {
-            proxy.on('proxyReq', (proxyReq) => {
-              proxyReq.setHeader('Authorization', `Bearer ${textApiKey}`)
-            })
-          },
-        },
-        '/api/ai-score': {
-          target: env.AI_API_BASE || 'https://api.deepseek.com/v1/chat/completions',
-          changeOrigin: true,
-          rewrite: () => '/v1/chat/completions',
-          configure: (proxy) => {
-            proxy.on('proxyReq', (proxyReq) => {
-              proxyReq.setHeader('Authorization', `Bearer ${textApiKey}`)
-            })
-          },
-        },
-      } : undefined,
     },
   }
 })

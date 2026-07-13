@@ -1,9 +1,7 @@
 // ========================================
 // AI 服务层（Provider 无关）
 //
-// 对话生成、用户分析全部走 /api/ai-chat 代理：
-//   · 本地开发 → Vite 插件转发到 DeepSeek API
-//   · 生产部署 → Netlify Function 转发到 DeepSeek API
+// 对话生成、回答判断和用户分析全部走服务端豆包代理。
 //
 // 自动降级：API 不可用时回退到 mock 模式
 // TTS / STT 暂用浏览器原生 API
@@ -15,12 +13,15 @@ import type {
 } from '../types'
 import type { OfficerType } from '../../voice/types'
 import { officerTypes } from '../../voice/data/officerTypes'
-import { mockAnalyzeUser, mockGenerateResponse } from '../data/mockOfficer'
+import { getF1DecisionContext, mockAnalyzeUser, mockGenerateResponse } from '../data/mockOfficer'
+import { parseDoubaoAssessment, type F1AnswerAssessment } from '../../../shared/doubaoDecision'
 
 // ---- 配置 ----
 
 const AI_CHAT_ENDPOINT = '/api/ai-chat'
+const F1_DECISION_ENDPOINT = '/api/interview/decision'
 const REQUEST_TIMEOUT_MS = 15000
+const DECISION_TIMEOUT_MS = 6500
 
 const BASE_SYSTEM_PROMPT = `You are a US visa officer conducting an interview. Your core rules:
 - Ask one question at a time, wait for the answer
@@ -119,7 +120,7 @@ const containsCjk = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff
 
 const defaultConfig: OpenAIConfig = {
   apiKey: '',
-  model: 'deepseek-chat',
+  model: 'doubao-text-endpoint',
   voice: 'alloy',
   systemPrompt: buildSystemPrompt('standard'),
 }
@@ -159,6 +160,34 @@ async function callAI(options: AICallOptions): Promise<string> {
   const content = responseData.choices?.[0]?.message?.content
   if (!content) throw new Error('Empty AI response')
   return content
+}
+
+async function assessF1AnswerWithDoubao(
+  context: UserContext,
+  conversationHistory: Array<{ role: string; text: string }>,
+  answer: string,
+): Promise<F1AnswerAssessment | undefined> {
+  const decisionContext = getF1DecisionContext(context)
+  if (!decisionContext) return undefined
+
+  const response = await fetch(F1_DECISION_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...decisionContext,
+      answer,
+      safeContext: buildSafeInterviewContext(context),
+      recentTurns: conversationHistory.slice(-8).map(turn => ({
+        role: turn.role === 'officer' ? 'officer' : 'user',
+        text: turn.text,
+      })),
+    }),
+    signal: AbortSignal.timeout(DECISION_TIMEOUT_MS),
+  })
+  if (!response.ok) throw new Error(`Doubao decision API error: ${response.status}`)
+  const payload = await response.json() as { assessment?: unknown }
+  const content = JSON.stringify(payload.assessment ?? null)
+  return parseDoubaoAssessment(content, decisionContext.allowedFollowUps.map(item => item.id)) ?? undefined
 }
 
 // ============================================================
@@ -217,7 +246,13 @@ export async function generateOfficerResponse(
   // F1 question selection is product-owned. The provider must not bypass the
   // approved 22-question catalog or skip mandatory screening questions.
   if (context.visaType === 'F1') {
-    return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
+    let assessment: F1AnswerAssessment | undefined
+    try {
+      assessment = await assessF1AnswerWithDoubao(context, conversationHistory, userJustSaid)
+    } catch (error) {
+      console.warn('[Doubao] F1 answer assessment failed; using local decision rules:', error)
+    }
+    return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType, assessment)
   }
 
   const systemPrompt = buildSystemPrompt(officerType)

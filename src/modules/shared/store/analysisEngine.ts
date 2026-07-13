@@ -390,7 +390,7 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
 // ========================================
 // AI 评分（调用 /api/ai-score 代理）
 //
-// 每个 QA pair 发送到 DeepSeek 做多维度评分
+// 每个 QA pair 发送到豆包文本模型做多维度评分
 // API 不可用时自动降级到规则引擎
 // ========================================
 

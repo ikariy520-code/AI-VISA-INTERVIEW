@@ -1,4 +1,5 @@
 import type { OfficerEmotion, OfficerTurn, UserContext } from '../types'
+import type { F1AnswerAssessment } from '../../../shared/doubaoDecision'
 import {
   F1_MANDATORY_QUESTION_IDS,
   F1_QUESTION_CATALOG,
@@ -130,16 +131,20 @@ export function createInterviewFlow(
   const plan = buildF1QuestionPlan(userContext, options)
   const askedMainQuestionIds: F1QuestionId[] = []
   const askedFollowUpIds: string[] = []
-  const answers: Array<{ questionId?: F1QuestionId; followUpId?: string; answer: string }> = []
+  const answers: Array<{ questionId?: F1QuestionId; followUpId?: string; answer: string; assessment?: F1AnswerAssessment }> = []
   const riskFlags: string[] = []
   let planIndex = 0
   let activeTurn: ActiveTurn | null = null
   let pendingFollowUp: { question: F1QuestionDefinition; rule: F1FollowUpRule } | null = null
   let ended = false
 
-  function evaluateActiveAnswer(answer: string) {
+  function evaluateActiveAnswer(answer: string, assessment?: F1AnswerAssessment) {
     if (!activeTurn || !answer.trim()) return
-    answers.push({ questionId: activeTurn.questionId, followUpId: activeTurn.followUpId, answer: answer.trim() })
+    answers.push({ questionId: activeTurn.questionId, followUpId: activeTurn.followUpId, answer: answer.trim(), assessment })
+    if (assessment && activeTurn.questionId) {
+      for (const signal of assessment.riskSignals) riskFlags.push(`doubao:${activeTurn.questionId}:${signal}`)
+      if (assessment.isContradictory) riskFlags.push(`doubao:${activeTurn.questionId}:possible_inconsistency`)
+    }
     if (activeTurn.kind !== 'main' || !activeTurn.questionId) return
 
     const question = getF1Question(activeTurn.questionId)
@@ -148,13 +153,18 @@ export function createInterviewFlow(
     if (question.answerShape === 'open' && signals.wordCount > 0 && signals.wordCount < 3) {
       riskFlags.push(`short:${question.id}`)
     }
-    const matchedRule = question.followUps.find(rule => followUpMatches(rule, signals))
+    const recommendedRule = assessment?.needsFollowUp
+      ? question.followUps.find(rule => rule.id === assessment.allowedFollowUpId)
+      : undefined
+    const localRule = question.followUps.find(rule => followUpMatches(rule, signals))
+    const mustPreserveLocalScreeningFollowUp = ['f1_19', 'f1_20', 'f1_21', 'f1_22'].includes(question.id)
+    const matchedRule = recommendedRule ?? (!assessment || mustPreserveLocalScreeningFollowUp ? localRule : undefined)
     if (matchedRule) pendingFollowUp = { question, rule: matchedRule }
   }
 
-  function nextTurn(lastUserAnswer?: string): OfficerTurn {
+  function nextTurn(lastUserAnswer?: string, assessment?: F1AnswerAssessment): OfficerTurn {
     if (ended) return { text: CLOSING_TEXT, emotion: 'reassuring', isClosing: true }
-    if (lastUserAnswer !== undefined) evaluateActiveAnswer(lastUserAnswer)
+    if (lastUserAnswer !== undefined) evaluateActiveAnswer(lastUserAnswer, assessment)
 
     if (!activeTurn) {
       activeTurn = { kind: 'opening', text: OPENING_TEXT }
@@ -194,7 +204,7 @@ export function createInterviewFlow(
   return {
     nextTurn,
     /** Compatibility hook. Prefer passing the answer directly to nextTurn(). */
-    evaluateAnswer: (answer: string) => evaluateActiveAnswer(answer),
+    evaluateAnswer: (answer: string, assessment?: F1AnswerAssessment) => evaluateActiveAnswer(answer, assessment),
     getState: () => ({
       plan: [...plan],
       planIndex,

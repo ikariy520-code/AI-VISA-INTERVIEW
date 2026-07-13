@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "binding": "ASSETS",
+    "directory": "./dist",
     "not_found_handling": "single-page-application"
   },
   "d1_databases": [
@@ -17,7 +18,7 @@
     }
   ],
   "vars": {
-    "AI_API_BASE": "https://api.deepseek.com/v1/chat/completions",
-    "AI_MODEL": "deepseek-chat"
+    "ARK_API_BASE": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+    "ARK_TEXT_MODEL": ""
   }
 }

@@ -13,6 +13,8 @@ import type {
 } from '../types'
 import type { OfficerType } from '../../voice/types'
 import { createInterviewFlow } from '../services/interviewFlow'
+import { getF1Question } from './f1QuestionCatalog'
+import type { F1AnswerAssessment } from '../../../shared/doubaoDecision'
 
 // ---- 状态机实例（F1 专用，按面试生命周期管理） ----
 
@@ -27,6 +29,20 @@ function ensureFlow(context: UserContext) {
 /** 重置状态机（新面试开始时调用） */
 export function resetInterviewFlow() {
   flowInstance = null
+}
+
+export function getF1DecisionContext(context: UserContext) {
+  const state = ensureFlow(context).getState()
+  const activeTurn = state.activeTurn
+  if (!activeTurn?.questionId || activeTurn.kind === 'opening') return null
+  const question = getF1Question(activeTurn.questionId)
+  return {
+    questionId: question.id,
+    questionText: activeTurn.text,
+    allowedFollowUps: activeTurn.kind === 'main'
+      ? question.followUps.map(rule => ({ id: rule.id, text: rule.text }))
+      : [],
+  }
 }
 
 // ---- 分析阶段：按签证类型返回策略 ----
@@ -186,12 +202,13 @@ export function mockGenerateResponse(
   history: Array<{ role: string; text: string }>,
   userJustSaid: string,
   officerType: OfficerType = 'standard',
+  assessment?: F1AnswerAssessment,
 ): { text: string; emotion: string; isClosing?: boolean; isDocumentRequest?: boolean } {
   // ---- F1：使用状态机引擎 ----
   if (context.visaType === 'F1') {
     const flow = ensureFlow(context)
     // The state machine owns the current question, answer assessment and next turn.
-    const turn = flow.nextTurn(userJustSaid)
+    const turn = flow.nextTurn(userJustSaid, assessment)
 
     if (turn.isClosing) {
       resetInterviewFlow()

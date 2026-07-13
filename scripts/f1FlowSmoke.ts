@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { F1_MANDATORY_QUESTION_IDS, F1_QUESTION_CATALOG } from '../src/modules/practice/data/f1QuestionCatalog'
 import { createInterviewFlow } from '../src/modules/practice/services/interviewFlow'
 import type { UserContext } from '../src/modules/practice/types'
+import { parseDoubaoAssessment, sanitizeF1DecisionRequest, type F1AnswerAssessment } from '../src/shared/doubaoDecision'
 
 const context: UserContext = {
   visaType: 'F1',
@@ -23,6 +24,42 @@ const context: UserContext = {
 assert.equal(F1_QUESTION_CATALOG.length, 22, 'The product catalog must contain exactly 22 F1 questions')
 assert.equal(new Set(F1_QUESTION_CATALOG.map(question => question.id)).size, 22, 'F1 question IDs must be unique')
 assert.deepEqual(F1_QUESTION_CATALOG.map(question => question.number), Array.from({ length: 22 }, (_, index) => index + 1))
+
+const validAssessmentJson = JSON.stringify({
+  relevance: 3,
+  specificity: 2,
+  clarity: 4,
+  isUncertain: true,
+  isContradictory: false,
+  contradictsQuestionIds: [],
+  needsFollowUp: true,
+  allowedFollowUpId: 'f1_01_clarify',
+  riskSignals: ['uncertain'],
+  decisionReason: 'uncertain',
+})
+assert.ok(parseDoubaoAssessment(validAssessmentJson, ['f1_01_clarify']), 'A valid Doubao decision must parse')
+assert.equal(parseDoubaoAssessment(validAssessmentJson, ['another_follow_up']), null, 'An unapproved follow-up ID must be rejected')
+
+const sanitizedDecision = sanitizeF1DecisionRequest({
+  questionId: 'f1_01',
+  questionText: 'Which school will you study at?',
+  answer: 'My email is person@example.com and my passport number is E12345678.',
+  allowedFollowUps: [],
+  recentTurns: [],
+  safeContext: { visaType: 'F1', major: 'Computer Science', passportNumber: 'E12345678' },
+})
+assert.ok(sanitizedDecision)
+assert.ok(sanitizedDecision?.answer.includes('[redacted email]'), 'Email addresses must be redacted before the provider call')
+assert.ok(sanitizedDecision?.answer.includes('[redacted identifier]'), 'Document identifiers must be redacted before the provider call')
+assert.equal('passportNumber' in (sanitizedDecision?.safeContext ?? {}), false, 'Unapproved context fields must be removed')
+
+const modelDirectedFlow = createInterviewFlow(context, { seed: 2, targetMainQuestions: 11 })
+modelDirectedFlow.nextTurn()
+const firstMainQuestion = modelDirectedFlow.nextTurn('Here are the simulated documents.')
+assert.equal(firstMainQuestion.text, 'Which school will you study at?')
+const modelAssessment = parseDoubaoAssessment(validAssessmentJson, ['f1_01_clarify']) as F1AnswerAssessment
+const directedFollowUp = modelDirectedFlow.nextTurn('I am not completely sure.', modelAssessment)
+assert.equal(directedFollowUp.text, 'What is the full name of the school?', 'The state machine must honor a validated Doubao follow-up')
 
 for (let seed = 1; seed <= 20; seed += 1) {
   const flow = createInterviewFlow(context, { seed, targetMainQuestions: 11 })

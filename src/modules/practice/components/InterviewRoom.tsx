@@ -152,8 +152,8 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
     try {
       const response = await generateOfficerResponse(context, history, text.trim(), officerType)
 
-      // 模拟自然延迟
-      await new Promise(r => setTimeout(r, 800 + Math.random() * 800))
+      // Keep a brief conversational beat without making the API round-trip feel sluggish.
+      await new Promise(r => setTimeout(r, 250 + Math.random() * 300))
 
       const officerMsg: ChatMessage = {
         id: nextId(),

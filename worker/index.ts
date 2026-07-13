@@ -1,9 +1,16 @@
+import {
+  buildDoubaoDecisionMessages,
+  getArkMessageContent,
+  parseDoubaoAssessment,
+  sanitizeF1DecisionRequest,
+} from '../src/shared/doubaoDecision'
+
 interface Env {
   ASSETS: Fetcher
   DB: D1Database
-  AI_API_KEY?: string
-  AI_API_BASE?: string
-  AI_MODEL?: string
+  ARK_API_KEY?: string
+  ARK_API_BASE?: string
+  ARK_TEXT_MODEL?: string
   ADMIN_API_TOKEN?: string
   RATE_LIMIT_SALT?: string
 }
@@ -18,7 +25,7 @@ interface AccessRow {
 }
 
 const ACCESS_COOKIE = 'visa_access'
-const DEFAULT_AI_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions'
+const DEFAULT_ARK_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
 
 function json(body: unknown, status = 200, extraHeaders?: HeadersInit): Response {
   return Response.json(body, {
@@ -247,26 +254,26 @@ async function handleInterviewStart(request: Request, env: Env): Promise<Respons
   return json(refreshed ? accessPayload(refreshed, true) : { unlocked: true })
 }
 
-async function callAI(env: Env, body: Record<string, unknown>): Promise<Response> {
-  if (!env.AI_API_KEY) return json({ error: 'AI_NOT_CONFIGURED' }, 503)
+async function callDoubao(env: Env, body: Record<string, unknown>): Promise<Response> {
+  if (!env.ARK_API_KEY || !env.ARK_TEXT_MODEL) return json({ error: 'DOUBAO_TEXT_NOT_CONFIGURED' }, 503)
   try {
-    const response = await fetch(env.AI_API_BASE || DEFAULT_AI_ENDPOINT, {
+    const response = await fetch(env.ARK_API_BASE || DEFAULT_ARK_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${env.AI_API_KEY}`,
+        Authorization: `Bearer ${env.ARK_API_KEY}`,
       },
       body: JSON.stringify(body),
     })
     const text = await response.text()
     if (!response.ok) {
-      console.error('[AI] Provider error', response.status, text.slice(0, 300))
-      return json({ error: 'AI_SERVICE_ERROR' }, 502)
+      console.error('[Doubao] Provider error', response.status, text.slice(0, 300))
+      return json({ error: 'DOUBAO_SERVICE_ERROR' }, 502)
     }
     return new Response(text, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
   } catch (error) {
-    console.error('[AI] Network error', error)
-    return json({ error: 'AI_SERVICE_UNAVAILABLE' }, 502)
+    console.error('[Doubao] Network error', error)
+    return json({ error: 'DOUBAO_SERVICE_UNAVAILABLE' }, 502)
   }
 }
 
@@ -281,8 +288,8 @@ async function handleAiChat(request: Request, env: Env): Promise<Response> {
   }))
   const totalLength = sanitized.reduce((sum: number, message: any) => sum + message.content.length, 0)
   if (totalLength > 24_000) return json({ error: 'CONVERSATION_TOO_LONG' }, 400)
-  return callAI(env, {
-    model: env.AI_MODEL || 'deepseek-chat',
+  return callDoubao(env, {
+    model: env.ARK_TEXT_MODEL,
     messages: sanitized,
     temperature: Math.min(Math.max(Number(body.temperature ?? 0.7), 0), 1.5),
     max_tokens: Math.min(Math.max(Number(body.max_tokens ?? 512), 1), 1000),
@@ -297,16 +304,45 @@ async function handleAiScore(request: Request, env: Env): Promise<Response> {
   const answer = String(body.answer ?? '').trim().slice(0, 6000)
   if (!question || !answer) return json({ error: 'MISSING_QUESTION_OR_ANSWER' }, 400)
   const prompt = `Evaluate this US visa interview answer.\nQuestion: ${question}\nAnswer: ${answer}\nReturn ONLY JSON with content scores for logic, specificity, persuasion and ties (1-5), voice confidence (1-100), verdict, summary and two suggestions.`
-  return callAI(env, {
-    model: env.AI_MODEL || 'deepseek-chat',
+  return callDoubao(env, {
+    model: env.ARK_TEXT_MODEL,
     messages: [
       { role: 'system', content: 'You are an expert visa interview coach. Always respond with valid JSON only.' },
       { role: 'user', content: prompt },
     ],
     temperature: 0.5,
     max_tokens: 800,
-    response_format: { type: 'json_object' },
   })
+}
+
+async function handleInterviewDecision(request: Request, env: Env): Promise<Response> {
+  const access = await requireAccess(request, env)
+  if (access instanceof Response) return access
+  const body = await parseJsonBody(request, 24_000)
+  if (body instanceof Response) return body
+  const decisionRequest = sanitizeF1DecisionRequest(body)
+  if (!decisionRequest) return json({ error: 'INVALID_DECISION_REQUEST' }, 400)
+
+  const providerResponse = await callDoubao(env, {
+    model: env.ARK_TEXT_MODEL,
+    messages: buildDoubaoDecisionMessages(decisionRequest),
+    temperature: 0.1,
+    max_tokens: 500,
+  })
+  if (!providerResponse.ok) return providerResponse
+
+  let providerPayload: unknown
+  try {
+    providerPayload = await providerResponse.json()
+  } catch {
+    return json({ error: 'DOUBAO_INVALID_RESPONSE' }, 502)
+  }
+  const content = getArkMessageContent(providerPayload)
+  const assessment = content
+    ? parseDoubaoAssessment(content, decisionRequest.allowedFollowUps.map(item => item.id))
+    : null
+  if (!assessment) return json({ error: 'DOUBAO_INVALID_DECISION' }, 502)
+  return json({ assessment, provider: 'doubao', schemaVersion: 1 })
 }
 
 function isAdmin(request: Request, env: Env): boolean {
@@ -390,11 +426,17 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
     if (url.pathname === '/api/health' && request.method === 'GET') {
-      return json({ ok: true, aiConfigured: Boolean(env.AI_API_KEY), adminConfigured: Boolean(env.ADMIN_API_TOKEN) })
+      return json({
+        ok: true,
+        aiConfigured: Boolean(env.ARK_API_KEY && env.ARK_TEXT_MODEL),
+        aiProvider: 'doubao',
+        adminConfigured: Boolean(env.ADMIN_API_TOKEN),
+      })
     }
     if (url.pathname === '/api/access' && request.method === 'GET') return handleAccess(request, env)
     if (url.pathname === '/api/invite/redeem' && request.method === 'POST') return handleRedeem(request, env)
     if (url.pathname === '/api/interview/start' && request.method === 'POST') return handleInterviewStart(request, env)
+    if (url.pathname === '/api/interview/decision' && request.method === 'POST') return handleInterviewDecision(request, env)
     if (url.pathname === '/api/ai-chat' && request.method === 'POST') return handleAiChat(request, env)
     if (url.pathname === '/api/ai-score' && request.method === 'POST') return handleAiScore(request, env)
     if (url.pathname === '/api/admin/invites' && request.method === 'GET') return handleAdminList(request, env)

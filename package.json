@@ -9,7 +9,7 @@
     "test:f1-flow": "esbuild scripts/f1FlowSmoke.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/f1-flow-smoke.cjs && node node_modules/.cache/f1-flow-smoke.cjs",
     "preview": "vite preview",
     "dev:cloudflare": "vite --mode cloudflare",
-    "deploy:cloudflare": "npm run build && wrangler deploy",
+    "deploy:cloudflare": "npm run build && wrangler deploy --config wrangler.jsonc",
     "ai-proxy": "echo Local Doubao realtime bridge is built into the Vite dev server. Run: npm run dev"
   },
   "dependencies": {
