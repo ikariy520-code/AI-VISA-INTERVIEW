@@ -271,8 +271,6 @@ async function callAI(env: Env, body: Record<string, unknown>): Promise<Response
 }
 
 async function handleAiChat(request: Request, env: Env): Promise<Response> {
-  const access = await requireAccess(request, env)
-  if (access instanceof Response) return access
   const body = await parseJsonBody(request)
   if (body instanceof Response) return body
   const messages = Array.isArray(body.messages) ? body.messages : null
@@ -293,8 +291,6 @@ async function handleAiChat(request: Request, env: Env): Promise<Response> {
 }
 
 async function handleAiScore(request: Request, env: Env): Promise<Response> {
-  const access = await requireAccess(request, env)
-  if (access instanceof Response) return access
   const body = await parseJsonBody(request, 32_000)
   if (body instanceof Response) return body
   const question = String(body.question ?? '').trim().slice(0, 2000)

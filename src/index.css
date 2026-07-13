@@ -2,6 +2,278 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+  --ink: #1d1d1f;
+  --ink-soft: #424245;
+  --muted: #6e6e73;
+  --line: rgba(29, 29, 31, 0.09);
+  --line-strong: rgba(29, 29, 31, 0.14);
+  --canvas: #f5f5f7;
+  --surface: rgba(255, 255, 255, 0.88);
+  --blue: #0071e3;
+  --blue-dark: #0062c3;
+  --blue-soft: #eaf4ff;
+  --green: #158f65;
+  --green-soft: #eaf8f2;
+  --amber: #a96813;
+  --amber-soft: #fff6e6;
+  --red: #c9342f;
+  --red-soft: #fff0ef;
+  --ease-apple: cubic-bezier(0.28, 0.11, 0.32, 1);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.02), 0 18px 60px rgba(0, 0, 0, 0.055);
+  --shadow-float: 0 20px 70px rgba(0, 0, 0, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: var(--canvas);
+  scroll-behavior: smooth;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  width: 100%;
+}
+
+body {
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 50% -20%, rgba(255, 255, 255, 0.96), transparent 42%),
+    var(--canvas);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-feature-settings: "kern" 1, "liga" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.006em;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 3px solid rgba(0, 113, 227, 0.22);
+  outline-offset: 3px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--ink);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+::selection {
+  background: rgba(0, 113, 227, 0.16);
+  color: var(--ink);
+}
+
+::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(110, 110, 115, 0.3);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+@layer components {
+  .app-page {
+    @apply min-h-screen text-slate-900;
+    background: var(--canvas);
+  }
+
+  .app-topbar {
+    @apply sticky top-0 z-40 border-b backdrop-blur-2xl;
+    border-color: var(--line);
+    background: rgba(245, 245, 247, 0.78);
+  }
+
+  .app-card {
+    @apply rounded-[24px] border bg-white;
+    border-color: var(--line);
+    box-shadow: var(--shadow-card);
+  }
+
+  .app-card-interactive {
+    @apply app-card transition-all duration-300;
+    transition-timing-function: var(--ease-apple);
+  }
+
+  .app-card-interactive:hover {
+    border-color: var(--line-strong);
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.025), 0 26px 72px rgba(0, 0, 0, 0.085);
+    transform: translateY(-3px);
+  }
+
+  .app-eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em];
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid var(--line);
+    color: var(--blue);
+  }
+
+  .app-title {
+    @apply text-[34px] font-semibold tracking-[-0.045em] text-[#1d1d1f] sm:text-[42px];
+    text-wrap: balance;
+  }
+
+  .app-subtitle {
+    @apply mt-3 max-w-2xl text-[15px] leading-7 text-[#6e6e73] sm:text-[16px];
+  }
+
+  .app-button-primary {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-5 py-2.5 text-[14px] font-semibold text-white transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-45;
+    background: var(--blue);
+    box-shadow: 0 10px 26px rgba(0, 113, 227, 0.22);
+  }
+
+  .app-button-primary:hover:not(:disabled) {
+    background: var(--blue-dark);
+    box-shadow: 0 14px 32px rgba(0, 113, 227, 0.26);
+    transform: translateY(-1px);
+  }
+
+  .app-button-primary:active:not(:disabled) {
+    transform: scale(0.985);
+  }
+
+  .app-button-secondary {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full border bg-white px-5 py-2.5 text-[14px] font-semibold text-[#424245] transition-all duration-200;
+    border-color: var(--line-strong);
+  }
+
+  .app-button-secondary:hover {
+    background: #fafafa;
+    border-color: rgba(29, 29, 31, 0.22);
+    color: var(--ink);
+  }
+
+  .app-icon-button {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-full border bg-white/85 text-[#6e6e73] transition-all duration-200;
+    border-color: var(--line);
+  }
+
+  .app-icon-button:hover {
+    background: white;
+    border-color: var(--line-strong);
+    color: var(--ink);
+    transform: translateY(-1px);
+  }
+
+  .app-field {
+    @apply w-full rounded-2xl border bg-white px-4 py-3.5 text-[14px] text-[#1d1d1f] outline-none transition-all duration-200 placeholder:text-[#a1a1a6];
+    border-color: var(--line-strong);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+  }
+
+  .app-field:hover {
+    border-color: rgba(29, 29, 31, 0.22);
+  }
+
+  .app-field:focus {
+    border-color: rgba(0, 113, 227, 0.6);
+    box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.09);
+  }
+
+  .app-soft-panel {
+    @apply rounded-[20px] border;
+    border-color: var(--line);
+    background: rgba(255, 255, 255, 0.64);
+  }
+
+  .app-segment {
+    @apply rounded-full px-3 py-1.5 text-[12px] font-semibold;
+    background: var(--blue-soft);
+    color: var(--blue-dark);
+  }
+}
+
+.gradient-text {
+  background: linear-gradient(110deg, #0071e3 4%, #4f8df5 56%, #6b78e5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(28px) saturate(150%);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--blue);
+}
+
+input[type="range"] {
+  accent-color: var(--blue);
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @media print {
   @page {
     size: A4;
@@ -11,9 +283,9 @@
   html,
   body,
   #root {
-    background: white !important;
     height: auto !important;
     overflow: visible !important;
+    background: white !important;
   }
 
   .print\:hidden {
@@ -24,117 +296,10 @@
     max-width: none !important;
     padding: 0 !important;
   }
-}
 
-/* ========================================
-   Design System — AI 面签教练
-   色彩心理学：自信蓝 + 通过绿 + 温暖金
-   线条：全局结构性线条，清晰利落
-   ======================================== */
-
-:root {
-  --blue-500: #3B82F6;
-  --blue-400: #60A5FA;
-  --blue-50: #EFF6FF;
-  --emerald-500: #10B981;
-  --emerald-50: #ECFDF5;
-  --amber-500: #F59E0B;
-  --amber-50: #FFFBEB;
-  --slate-900: #0F172A;
-  --slate-700: #334155;
-  --slate-500: #64748B;
-  --slate-300: #CBD5E1;
-  --slate-200: #E2E8F0;
-  --slate-100: #F1F5F9;
-  --slate-50: #F8FAFC;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-html, body, #root {
-  height: 100%;
-  width: 100%;
-  overflow-x: hidden;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
-  background: #F8FAFC;
-  color: #0F172A;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  letter-spacing: 0.01em;
-  line-height: 1.6;
-}
-
-/* ========================================
-   Lines — 全局线条系统
-   所有结构分割都通过精细线条表达
-   ======================================== */
-
-hr {
-  border: none;
-  border-top: 1px solid #E2E8F0;
-}
-
-/* ========================================
-   Typography — 字体层级
-   中文为主，英文为辅，克制使用
-   ======================================== */
-
-h1, h2, h3, h4 {
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-}
-
-/* ========================================
-   Scrollbar — 轻量滚动条
-   ======================================== */
-
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
-
-/* ========================================
-   Selection
-   ======================================== */
-
-::selection {
-  background: rgba(59, 130, 246, 0.15);
-  color: #0F172A;
-}
-
-/* ========================================
-   Utility: card with clean lines
-   ======================================== */
-
-.card-line {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 16px;
-  transition: all 0.3s cubic-bezier(0.25, 0.1, 0, 1);
-}
-
-.card-line:hover {
-  border-color: #CBD5E1;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-  transform: translateY(-2px);
-}
-
-/* ========================================
-   Utility: gradient text (blue)
-   ======================================== */
-
-.gradient-text {
-  background: linear-gradient(135deg, #2563EB, #3B82F6, #60A5FA);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  .app-card,
+  .app-card-interactive {
+    border: 0 !important;
+    box-shadow: none !important;
+  }
 }

@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { HiOutlineInformationCircle, HiOutlineUser } from 'react-icons/hi2'
 import type { ChatMessage } from '../types'
 import OfficerAvatar from './OfficerAvatar'
 
@@ -22,8 +23,8 @@ export default function ChatBubble({ message }: Props) {
         animate={{ opacity: 1 }}
         className="flex justify-center py-2"
       >
-        <span className="text-[11px] text-slate-400 font-medium bg-slate-50 px-3 py-1 rounded-full">
-          {message.text}
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-black/[0.06] bg-white px-3 py-1.5 text-[10px] font-medium text-[#86868b]">
+          <HiOutlineInformationCircle className="h-3.5 w-3.5" /> {message.text}
         </span>
       </motion.div>
     )
@@ -36,17 +37,16 @@ export default function ChatBubble({ message }: Props) {
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.3, ease: [0.25, 0.1, 0, 1] }}
-        className="flex justify-end gap-3 mb-4"
+        className="mb-5 flex justify-end gap-3"
       >
-        <div className="flex-1 max-w-[75%]">
-          <p className="text-[14px] text-slate-700 leading-relaxed bg-white border border-slate-200
-            rounded-2xl rounded-tr-sm px-4 py-2.5 shadow-sm">
+        <div className="max-w-[82%] sm:max-w-[75%]">
+          <p className="rounded-[20px] rounded-tr-md bg-[#1d1d1f] px-4 py-3 text-[14px] leading-6 text-white shadow-sm">
             {message.text}
           </p>
         </div>
         {/* 用户头像 */}
-        <div className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0 mt-0.5">
-          <span className="text-slate-500 text-[11px] font-bold">你</span>
+        <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[13px] bg-[#eef0f3] text-[#6e6e73]">
+          <HiOutlineUser className="h-[17px] w-[17px]" />
         </div>
       </motion.div>
     )
@@ -58,7 +58,7 @@ export default function ChatBubble({ message }: Props) {
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3, ease: [0.25, 0.1, 0, 1] }}
-      className="flex gap-3 mb-4"
+      className="mb-5 flex gap-3"
     >
       {/* Officer 头像 */}
       <OfficerAvatar
@@ -67,10 +67,9 @@ export default function ChatBubble({ message }: Props) {
         size="sm"
       />
 
-      <div className="flex-1 max-w-[80%]">
+      <div className="max-w-[82%] flex-1 sm:max-w-[78%]">
         {/* 文字气泡 */}
-        <p className="text-[14px] text-slate-800 leading-relaxed bg-blue-50/70
-          rounded-2xl rounded-tl-sm px-4 py-2.5">
+        <p className="rounded-[20px] rounded-tl-md border border-black/[0.06] bg-white px-4 py-3 text-[14px] leading-6 text-[#424245] shadow-sm">
           {message.text}
         </p>
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { HiOutlineArrowPath, HiOutlineSignal } from 'react-icons/hi2'
 import type { UserContext, ChatMessage, InterviewStatus, AIAnalysisResult, OfficerEmotion } from '../types'
 import type { OfficerType } from '../../voice/types'
 import { generateOfficerResponse, textToSpeech } from '../services/openai'
@@ -9,6 +10,7 @@ import { useVoiceInput, formatDuration } from '../hooks/useVoiceInput'
 import ChatBubble from './ChatBubble'
 import VoiceControls from './VoiceControls'
 import OfficerNameIntro from './OfficerNameIntro'
+import OfficerAvatar from './OfficerAvatar'
 
 // ========================================
 // Step 4: 面签对话室 — 语音交互
@@ -235,37 +237,29 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
         />
       )}
 
-      <div className="flex flex-col h-[calc(100vh-120px)] max-w-2xl mx-auto">
+      <div className="app-card mx-auto flex h-[calc(100vh-104px)] max-w-3xl flex-col overflow-hidden">
         {/* ---- 顶部：AI 面签官头像 ---- */}
-        <div className="flex flex-col items-center py-6 border-b border-slate-100">
+        <div className="relative flex flex-col items-center border-b border-black/[0.06] bg-white px-5 py-5">
+          <div className="absolute left-5 top-5 inline-flex items-center gap-1.5 rounded-full bg-[#eaf8f2] px-2.5 py-1 text-[10px] font-semibold text-[#147a58]">
+            <HiOutlineSignal className="h-3.5 w-3.5" /> 实时面签
+          </div>
           <AnimatePresence mode="wait">
             <motion.div
               key={officerEmotion}
-              initial={{ scale: 0.8, opacity: 0 }}
+              initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              transition={{ duration: 0.3 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              transition={{ duration: 0.28, ease: [0.28, 0.11, 0.32, 1] }}
             >
-              <div className={`w-16 h-16 rounded-[18px] bg-gradient-to-br flex items-center justify-center shadow-lg
-                ${officerEmotion === 'friendly' || officerEmotion === 'reassuring' ? 'from-emerald-500 to-emerald-600 shadow-emerald-500/20' :
-                  officerEmotion === 'stern' ? 'from-amber-500 to-amber-600 shadow-amber-500/20' :
-                  officerEmotion === 'curious' || officerEmotion === 'thoughtful' ? 'from-violet-500 to-violet-600 shadow-violet-500/20' :
-                  'from-blue-500 to-blue-600 shadow-blue-500/20'}`}
-              >
-                <span className="text-2xl">
-                  {officerEmotion === 'friendly' || officerEmotion === 'reassuring' ? '😊' :
-                   officerEmotion === 'stern' ? '🤨' :
-                   officerEmotion === 'curious' || officerEmotion === 'thoughtful' ? '🤔' : '🫡'}
-                </span>
-              </div>
+              <OfficerAvatar emotion={officerEmotion} isSpeaking={status === 'officer-speaking'} size="md" />
             </motion.div>
           </AnimatePresence>
 
-          <div className="mt-3 text-center">
-            <p className="text-[15px] font-semibold text-slate-900">
+          <div className="mt-2 text-center">
+            <p className="text-[15px] font-semibold tracking-[-0.02em] text-[#1d1d1f]">
               {officerName} 面签官
             </p>
-            <p className="text-[11px] text-slate-400 font-medium">
+            <p className="mt-0.5 text-[11px] font-medium text-[#86868b]">
               {context.visaType} · {context.purpose || '面签练习'}
             </p>
           </div>
@@ -273,12 +267,12 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
           {/* 说话指示 */}
           {status === 'officer-speaking' && (
             <div className="flex items-center gap-[2px] mt-2">
-              {[0, 1, 2, 3].map(i => (
+              {[0, 1, 2, 3, 4].map(i => (
                 <motion.span
                   key={i}
-                  animate={{ height: [4, 12, 6, 10, 4] }}
-                  transition={{ repeat: Infinity, duration: 0.6, delay: i * 0.12 }}
-                  className="w-[3px] rounded-full bg-blue-400"
+                  animate={{ height: [3, 11, 5, 9, 3] }}
+                  transition={{ repeat: Infinity, duration: 0.7, delay: i * 0.09 }}
+                  className="w-[2px] rounded-full bg-[#0071e3]"
                 />
               ))}
             </div>
@@ -286,18 +280,15 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
 
           {/* 处理中指示 */}
           {status === 'processing' && (
-            <div className="flex items-center gap-2 mt-2 text-[12px] text-slate-400">
-              <svg className="animate-spin w-3.5 h-3.5 text-blue-400" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
-                <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-              </svg>
-              AI 正在思考...
+            <div className="mt-2 flex items-center gap-2 text-[11px] font-medium text-[#86868b]">
+              <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin text-[#0071e3]" />
+              正在组织下一次追问
             </div>
           )}
         </div>
 
         {/* ---- 中间：对话区域 ---- */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1 scrollbar-thin">
+        <div className="flex-1 space-y-1 overflow-y-auto bg-[#fbfbfd] px-4 py-5 sm:px-6">
           {messages.map(msg => (
             <ChatBubble key={msg.id} message={msg} />
           ))}
@@ -309,9 +300,8 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
               animate={{ opacity: 1, y: 0 }}
               className="flex justify-end"
             >
-              <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-br-md
-                bg-slate-100 border border-slate-200">
-                <p className="text-[14px] text-slate-500 italic leading-relaxed">
+              <div className="max-w-[82%] rounded-[18px] rounded-br-md border border-[#0071e3]/15 bg-[#eaf4ff] px-4 py-3">
+                <p className="text-[14px] italic leading-relaxed text-[#536271]">
                   {voice.partialTranscript}
                 </p>
               </div>
@@ -323,7 +313,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
 
         {/* ---- 底部：语音控制 ---- */}
         {aiError && (
-          <div className="mx-4 mb-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[12px] text-red-600">
+          <div className="mx-4 mb-2 rounded-2xl border border-red-200/70 bg-[#fff0ef] px-4 py-3 text-[12px] text-[#b53a34] sm:mx-6">
             {aiError}
           </div>
         )}

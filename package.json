@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "dev:cloudflare": "vite --mode cloudflare",
-    "deploy:cloudflare": "npm run build && wrangler deploy"
+    "deploy:cloudflare": "npm run build && wrangler deploy",
+    "ai-proxy": "echo Local Doubao realtime bridge is built into the Vite dev server. Run: npm run dev"
   },
   "dependencies": {
     "framer-motion": "^11.15.0",
@@ -18,17 +19,19 @@
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260711.1",
     "@cloudflare/vite-plugin": "^1.18.4",
+    "@cloudflare/workers-types": "^5.20260711.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "dotenv": "^17.4.2",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
-    "wrangler": "^4.110.0"
+    "wrangler": "^4.110.0",
+    "ws": "^8.21.0"
   },
   "allowScripts": {
     "esbuild@0.25.12": true,

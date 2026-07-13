@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { HiOutlineCalendarDays, HiOutlineClock, HiOutlineQuestionMarkCircle } from 'react-icons/hi2'
 import type { InterviewSession } from '../types'
 import TranscriptBubble from './TranscriptBubble'
 
@@ -8,9 +9,9 @@ import TranscriptBubble from './TranscriptBubble'
 // ========================================
 
 function overallLabel(score: number) {
-  if (score >= 4) return { text: '表现优秀', color: 'text-emerald-600 bg-emerald-50' }
-  if (score >= 3) return { text: '仍需练习', color: 'text-amber-600 bg-amber-50' }
-  return { text: '需要大幅提升', color: 'text-red-600 bg-red-50' }
+  if (score >= 4) return { text: '表现稳定', color: 'text-[#147a58] bg-[#eaf8f2]', ring: 'ring-emerald-200/70' }
+  if (score >= 3) return { text: '继续巩固', color: 'text-[#8a5818] bg-[#fff6e6]', ring: 'ring-amber-200/70' }
+  return { text: '优先加强', color: 'text-[#b53a34] bg-[#fff0ef]', ring: 'ring-red-200/70' }
 }
 
 export default function SessionDetail({ session }: { session: InterviewSession }) {
@@ -25,31 +26,29 @@ export default function SessionDetail({ session }: { session: InterviewSession }
       className="flex-1 overflow-y-auto"
     >
       {/* 顶部信息卡 */}
-      <div className="px-8 pt-8 pb-6 border-b border-slate-100">
-        <div className="flex items-start justify-between mb-3">
+      <div className="border-b border-black/[0.06] bg-[#fbfbfd] px-5 py-7 sm:px-8 sm:py-8">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-[22px] font-semibold text-slate-900 mb-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#86868b]">Interview report</p>
+            <h1 className="mt-2 text-[26px] font-semibold tracking-[-0.04em] text-[#1d1d1f] sm:text-[30px]">
               {session.title}
             </h1>
-            <div className="flex items-center gap-3 text-[13px] text-slate-400 font-normal">
-              <span>{session.date}</span>
-              <span className="text-slate-300">·</span>
-              <span>{session.time}</span>
-              <span className="text-slate-300">·</span>
-              <span>时长 {session.duration}</span>
-              <span className="text-slate-300">·</span>
-              <span>{session.transcript.length} 轮问答</span>
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] font-medium text-[#86868b]">
+              <span className="inline-flex items-center gap-1.5"><HiOutlineCalendarDays className="h-4 w-4" />{session.date} · {session.time}</span>
+              <span className="inline-flex items-center gap-1.5"><HiOutlineClock className="h-4 w-4" />{session.duration}</span>
+              <span className="inline-flex items-center gap-1.5"><HiOutlineQuestionMarkCircle className="h-4 w-4" />{session.transcript.length} 轮问答</span>
             </div>
           </div>
           {/* 综合评分 */}
-          <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[14px] font-bold ${label.color}`}>
-            {session.overallScore.toFixed(1)} / 5.0
+          <div className={`flex min-w-[132px] items-center justify-between gap-4 rounded-[20px] px-4 py-3 ring-1 ${label.color} ${label.ring}`}>
+            <div><p className="text-[10px] font-semibold uppercase tracking-[0.1em] opacity-75">综合表现</p><p className="mt-1 text-[12px] font-semibold">{label.text}</p></div>
+            <p className="text-[28px] font-semibold tracking-[-0.05em]">{session.overallScore.toFixed(1)}</p>
           </div>
         </div>
       </div>
 
       {/* 对话记录 */}
-      <div className="px-8 py-6 space-y-8 max-w-3xl">
+      <div className="mx-auto max-w-4xl space-y-10 px-5 py-7 sm:px-8 sm:py-9">
         {session.transcript.map((qa, i) => (
           <TranscriptBubble key={qa.id} qa={qa} />
         ))}

@@ -1,5 +1,11 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import {
+  HiOutlineChevronDown,
+  HiOutlineClock,
+  HiOutlineUser,
+  HiOutlineUserCircle,
+} from 'react-icons/hi2'
 import type { QAPair } from '../types'
 import CoachFeedback from './CoachFeedback'
 
@@ -13,34 +19,7 @@ function AudioBar({ duration }: { duration: number }) {
   const secs = Math.floor(duration % 60)
   const time = `${mins}:${secs.toString().padStart(2, '0')}`
 
-  return (
-    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 w-fit">
-      {/* 播放按钮（占位 — 第二阶段接入真实音频后替换为真实播放） */}
-      <button
-        className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center
-          hover:bg-blue-600 transition-colors flex-shrink-0"
-        title="播放录音"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
-          <polygon points="5 3 19 12 5 21 5 3" />
-        </svg>
-      </button>
-
-      {/* 波形示意条 */}
-      <div className="flex items-end gap-[1px] h-5">
-        {Array.from({ length: 20 }, () => Math.random() * 0.7 + 0.3).map((h, i) => (
-          <div
-            key={i}
-            className="w-[2px] bg-blue-400/60 rounded-full"
-            style={{ height: `${h * 100}%` }}
-          />
-        ))}
-      </div>
-
-      {/* 时长 */}
-      <span className="text-[11px] text-slate-400 font-mono tabular-nums flex-shrink-0">{time}</span>
-    </div>
-  )
+  return <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[10px] font-semibold text-[#86868b]"><HiOutlineClock className="h-3.5 w-3.5" />回答 {time}</span>
 }
 
 export default function TranscriptBubble({ qa }: { qa: QAPair }) {
@@ -48,11 +27,10 @@ export default function TranscriptBubble({ qa }: { qa: QAPair }) {
   const { voice } = qa.feedback
 
   return (
-    <div className="group">
+    <div className="group rounded-[22px] border border-black/[0.06] bg-[#fbfbfd] p-4 sm:p-5">
       {/* 时间戳 + 录音条 */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-5 h-[1px] bg-slate-200" />
-        <span className="text-[11px] text-slate-400 font-medium tracking-wider">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#a1a1a6]">
           {qa.timestamp}
         </span>
         {/* 录音回放条 */}
@@ -60,43 +38,36 @@ export default function TranscriptBubble({ qa }: { qa: QAPair }) {
       </div>
 
       {/* 面签官提问 */}
-      <div className="flex gap-3 mb-3">
-        <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-          <span className="text-white text-[11px] font-bold">官</span>
+      <div className="mb-3 flex gap-3">
+        <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[13px] bg-[#eaf4ff] text-[#0071e3]">
+          <HiOutlineUserCircle className="h-[18px] w-[18px]" />
         </div>
         <div className="flex-1">
-          <p className="text-[14px] text-slate-800 font-medium leading-relaxed bg-blue-50/60 rounded-xl rounded-tl-sm px-4 py-2.5">
+          <p className="rounded-[18px] rounded-tl-md bg-white px-4 py-3 text-[14px] font-medium leading-6 text-[#1d1d1f] ring-1 ring-black/[0.06]">
             {qa.question}
           </p>
         </div>
       </div>
 
       {/* 用户回答 */}
-      <div className="flex gap-3 mb-1">
-        <div className="flex-1 ml-10">
-          <p className="text-[14px] text-slate-600 leading-relaxed bg-white border border-slate-200 rounded-xl rounded-tl-sm px-4 py-2.5">
+      <div className="mb-1 flex gap-3">
+        <div className="ml-7 flex-1 sm:ml-12">
+          <p className="rounded-[18px] rounded-tr-md bg-[#1d1d1f] px-4 py-3 text-[14px] leading-6 text-white">
             {qa.answer}
           </p>
         </div>
-        <div className="w-7 h-7 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0 mt-0.5">
-          <span className="text-slate-500 text-[11px] font-bold">你</span>
+        <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[13px] bg-[#eef0f3] text-[#6e6e73]">
+          <HiOutlineUser className="h-[18px] w-[18px]" />
         </div>
       </div>
 
       {/* 展开教练点评按钮 */}
-      <div className="ml-10">
+      <div className="ml-7 sm:ml-12">
         <button
           onClick={() => setShowFeedback(!showFeedback)}
-          className="text-[12px] font-medium text-slate-400 hover:text-blue-500
-            transition-colors duration-200 flex items-center gap-1.5 py-1"
+          className="flex items-center gap-1.5 py-2 text-[12px] font-semibold text-[#86868b] transition-colors duration-200 hover:text-[#0071e3]"
         >
-          <svg
-            width="12" height="12" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`transition-transform duration-200 ${showFeedback ? 'rotate-180' : ''}`}
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+          <HiOutlineChevronDown className={`h-4 w-4 transition-transform duration-200 ${showFeedback ? 'rotate-180' : ''}`} />
           {showFeedback ? '收起教练点评' : '查看教练点评'}
         </button>
 

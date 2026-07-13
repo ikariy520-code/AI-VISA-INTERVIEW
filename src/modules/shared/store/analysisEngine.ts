@@ -13,8 +13,6 @@
 // ========================================
 
 import type { InterviewRecord, ChatMessage } from '../../practice/types'
-import { getActiveInterviewSessionKey } from '../../../access/AccessContext'
-import { InviteRequiredError } from '../../practice/services/openai'
 import type {
   InterviewSession, QAPair,
   VoiceAnalysis, VoiceMetrics, VoiceEmotion,
@@ -421,20 +419,13 @@ interface AIScoreResult {
  */
 async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPair['feedback'] | null> {
   try {
-    const sessionKey = getActiveInterviewSessionKey()
-    if (!sessionKey) throw new InviteRequiredError('请输入邀请码并开始面签。')
-
     const response = await fetch(AI_SCORE_ENDPOINT, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Interview-Session': sessionKey,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question, answer }),
       signal: AbortSignal.timeout(20000),
     })
 
-    if (response.status === 403) throw new InviteRequiredError('请输入邀请码解锁 AI 总结。')
     if (!response.ok) return null
 
     const data = await response.json() as any
@@ -495,8 +486,7 @@ async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPa
     }
 
     return feedback
-  } catch (error) {
-    if (error instanceof InviteRequiredError) throw error
+  } catch {
     return null
   }
 }

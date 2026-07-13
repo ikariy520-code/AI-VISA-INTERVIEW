@@ -1,69 +1,57 @@
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import type { ReactNode } from 'react'
-
-// ========================================
-// 功能卡片
-// 白底 + 清晰边框线 + 悬停蓝色提亮
-// 简洁克制，不堆砌信息
-// ========================================
+import { HiOutlineArrowUpRight } from 'react-icons/hi2'
+import type { IconType } from 'react-icons'
 
 interface FeatureCardProps {
-  icon: ReactNode
+  icon: IconType
+  eyebrow: string
   title: string
   description: string
   route: string
+  action: string
   index: number
-  accentClass: string
-  shadowClass: string
+  tone: 'blue' | 'mint'
 }
 
 export default function FeatureCard({
-  icon, title, description, route, index, accentClass, shadowClass,
+  icon: Icon,
+  eyebrow,
+  title,
+  description,
+  route,
+  action,
+  index,
+  tone,
 }: FeatureCardProps) {
   const navigate = useNavigate()
+  const toneClass = tone === 'blue'
+    ? 'bg-[#eaf4ff] text-[#0062c3]'
+    : 'bg-[#eaf8f2] text-[#147a58]'
 
   return (
     <motion.button
+      type="button"
       onClick={() => navigate(route)}
-      initial={{ opacity: 0, y: 32 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{
-        duration: 0.55,
-        delay: 0.9 + index * 0.12,
-        ease: [0.25, 0.1, 0, 1],
-      }}
-      whileHover={{ y: -4 }}
-      whileTap={{ scale: 0.985 }}
-      className="group relative flex flex-col items-start text-left
-        bg-white border border-slate-200 rounded-2xl
-        p-7 sm:p-8 cursor-pointer
-        transition-all duration-300 ease-out
-        hover:border-blue-300 hover:shadow-lg hover:shadow-slate-200/50"
+      initial={{ opacity: 0, y: 22, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.58, delay: 0.48 + index * 0.1, ease: [0.28, 0.11, 0.32, 1] }}
+      whileTap={{ scale: 0.992 }}
+      className="app-card-interactive group min-h-[220px] p-7 text-left sm:p-8"
     >
-      {/* 图标区 — 彩色渐变底 + 细阴影 */}
-      <div
-        className={`relative w-12 h-12 rounded-xl bg-gradient-to-br ${accentClass}
-          flex items-center justify-center mb-5 shadow-sm ${shadowClass}
-          transition-transform duration-300 group-hover:scale-105`}
-      >
-        <div className="text-white text-[22px]">{icon}</div>
+      <div className="flex items-start justify-between">
+        <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${toneClass}`}>
+          <Icon className="h-[22px] w-[22px]" />
+        </span>
+        <span className="flex h-9 w-9 items-center justify-center rounded-full border border-black/[0.07] bg-white text-[#86868b] transition-all duration-300 group-hover:bg-[#1d1d1f] group-hover:text-white">
+          <HiOutlineArrowUpRight className="h-4 w-4" />
+        </span>
       </div>
 
-      {/* 标题 — 中等字重，清晰可读 */}
-      <h3 className="text-[19px] sm:text-[21px] font-semibold text-slate-900 mb-2.5 tracking-[-0.01em]">
-        {title}
-      </h3>
-
-      {/* 描述 — 一行足矣，不啰嗦 */}
-      <p className="text-[14px] text-slate-500 font-normal leading-relaxed">
-        {description}
-      </p>
-
-      {/* 底部指示线 — 悬停时出现蓝色 */}
-      <div className="mt-6 w-6 h-[1.5px] rounded-full bg-slate-300
-        transition-all duration-300
-        group-hover:w-8 group-hover:bg-blue-500" />
+      <p className="mt-7 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868b]">{eyebrow}</p>
+      <h2 className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-[#1d1d1f] sm:text-[28px]">{title}</h2>
+      <p className="mt-3 max-w-md text-[14px] leading-6 text-[#6e6e73]">{description}</p>
+      <p className="mt-6 text-[13px] font-semibold text-[#424245] transition-colors group-hover:text-[#0071e3]">{action}</p>
     </motion.button>
   )
 }

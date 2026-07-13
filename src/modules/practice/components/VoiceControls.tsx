@@ -1,23 +1,18 @@
 import { motion } from 'framer-motion'
+import {
+  HiMiniStop,
+  HiOutlineArrowPath,
+  HiOutlineClock,
+  HiOutlineMicrophone,
+  HiOutlineStopCircle,
+} from 'react-icons/hi2'
 import type { InterviewStatus } from '../types'
-
-// ========================================
-// 语音控制栏
-//
-// 基于 InterviewStatus 切换状态：
-//   idle              → 蓝色麦克风 + "点击麦克风开始回答"
-//   user-speaking     → 红色麦克风（录音中）+ 脉冲动画 + 时长
-//   processing        → 灰色转圈 + "AI 正在思考..."
-//   officer-speaking  → 灰色禁用 + "等待面签官发言..."
-//
-// 录音流程：点击 → 说话 → 再次点击 → 停止 & 自动提交
-// ========================================
 
 interface Props {
   status: InterviewStatus
-  elapsed: string                       // "02:34" — 总面试计时
-  recordingDuration: string             // "00:05" — 当前录音时长
-  partialTranscript: string             // 实时转写文字
+  elapsed: string
+  recordingDuration: string
+  partialTranscript: string
   error: string | null
   isSupported: boolean
   onMicPress: () => void
@@ -25,156 +20,92 @@ interface Props {
 }
 
 const statusLabel: Record<InterviewStatus, { text: string; sub: string }> = {
-  'idle':               { text: '点击麦克风开始回答',  sub: '说完后再次点击停止并提交' },
-  'user-speaking':      { text: '正在录音...',          sub: '点击停止提交回答' },
-  'processing':         { text: 'AI 正在思考...',       sub: '分析你的回答中' },
-  'officer-speaking':   { text: '等待面签官发言...',    sub: '请先听完面签官的问题' },
+  idle: { text: '轮到你回答', sub: '想清楚第一句，再开始表达' },
+  'user-speaking': { text: '正在记录回答', sub: '说完后再次点击即可提交' },
+  processing: { text: '正在理解你的回答', sub: '下一次追问正在生成' },
+  'officer-speaking': { text: '先听完面签官的问题', sub: '问题结束后麦克风会自动就绪' },
 }
 
 export default function VoiceControls({
-  status, elapsed, recordingDuration,
-  partialTranscript, error, isSupported,
-  onMicPress, onEndInterview,
+  status,
+  elapsed,
+  recordingDuration,
+  partialTranscript,
+  error,
+  isSupported,
+  onMicPress,
+  onEndInterview,
 }: Props) {
   const isUserTurn = status === 'user-speaking'
   const isProcessing = status === 'processing'
-  const isOfficerTurn = status === 'officer-speaking'
   const isIdle = status === 'idle'
   const isInteractive = isIdle || isUserTurn
-
   const label = statusLabel[status]
 
   return (
-    <div className="border-t border-slate-200 bg-white">
-      {/* ---- 状态提示区 ---- */}
-      <div className="px-4 pt-3 pb-1 text-center">
-        <p className={`text-[13px] font-semibold transition-colors duration-300
-          ${isUserTurn ? 'text-red-500' : isIdle ? 'text-blue-600' : 'text-slate-500'}`}
-        >
-          {label.text}
-        </p>
-        <p className="text-[11px] text-slate-400 mt-0.5">
-          {label.sub}
-        </p>
-
-        {/* 录音时长 */}
-        {isUserTurn && (
-          <div className="flex items-center justify-center gap-2 mt-1.5">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-[15px] font-mono font-semibold text-red-500 tabular-nums">
-              {recordingDuration}
-            </span>
-          </div>
-        )}
-
-        {/* 错误提示 */}
-        {error && (
-          <p className="text-[11px] text-red-400 mt-1">{error}</p>
-        )}
-      </div>
-
-      {/* ---- 实时转写预览 ---- */}
+    <div className="border-t border-black/[0.07] bg-white/95 backdrop-blur-xl">
       {isUserTurn && (
-        <div className="px-4 pb-2">
-          <div className="min-h-[28px] px-3 py-1.5 rounded-lg bg-red-50/60 border border-red-100
-            text-center transition-all duration-200">
-            {partialTranscript ? (
-              <p className="text-[13px] text-slate-600 leading-relaxed">
-                {partialTranscript}
-              </p>
-            ) : (
-              <p className="text-[12px] text-slate-400 italic">
-                {isSupported ? '正在听取你的回答...' : '浏览器不支持语音识别，请使用 Chrome'}
-              </p>
-            )}
+        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden px-4 pt-3 sm:px-6">
+          <div className="rounded-2xl border border-red-200/60 bg-[#fff7f6] px-4 py-2.5 text-center">
+            <p className="text-[12px] leading-5 text-[#6e6e73]">
+              {partialTranscript || (isSupported ? '正在听取你的回答…' : '当前浏览器暂不支持语音识别')}
+            </p>
           </div>
-        </div>
+        </motion.div>
       )}
 
-      {/* ---- 控制栏 ---- */}
-      <div className="flex items-center gap-4 px-4 pb-4 pt-1">
-        {/* 面试计时器 */}
-        <div className="flex items-center gap-1.5 min-w-[60px]">
-          <span className={`w-1.5 h-1.5 rounded-full transition-colors duration-300
-            ${isUserTurn ? 'bg-red-400 animate-pulse' : isProcessing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}
-          />
-          <span className="text-[13px] font-mono text-slate-600 tabular-nums font-medium">
-            {elapsed}
-          </span>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-4 sm:px-6">
+        <div className="min-w-0">
+          <p className={`truncate text-[12px] font-semibold ${isUserTurn ? 'text-[#c9342f]' : isIdle ? 'text-[#0071e3]' : 'text-[#6e6e73]'}`}>{label.text}</p>
+          <p className="mt-0.5 hidden truncate text-[10px] text-[#a1a1a6] sm:block">{label.sub}</p>
+          {error && <p className="mt-1 truncate text-[10px] text-[#c9342f]">{error}</p>}
         </div>
 
-        {/* 中央：麦克风按钮 */}
-        <div className="flex-1 flex justify-center">
-          <motion.button
-            whileTap={{ scale: isInteractive ? 0.9 : 1 }}
-            onClick={isInteractive ? onMicPress : undefined}
-            disabled={!isInteractive}
-            className={`relative w-16 h-16 rounded-full flex items-center justify-center
-              transition-all duration-300 shadow-lg
-              ${isUserTurn
-                ? 'bg-red-500 shadow-red-500/30 scale-110 cursor-pointer'
-                : isIdle
-                  ? 'bg-blue-500 shadow-blue-500/30 hover:bg-blue-600 hover:scale-105 cursor-pointer'
-                  : 'bg-slate-300 shadow-slate-300/20 cursor-not-allowed'
-              }`}
-          >
-            {/* 录音时的双层脉冲环 */}
-            {isUserTurn && (
-              <>
-                <motion.span
-                  animate={{ scale: [1, 1.6, 1], opacity: [0.4, 0, 0.4] }}
-                  transition={{ repeat: Infinity, duration: 1.8 }}
-                  className="absolute inset-0 rounded-full border-2 border-red-400"
-                />
-                <motion.span
-                  animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0, 0.3] }}
-                  transition={{ repeat: Infinity, duration: 1.2, delay: 0.3 }}
-                  className="absolute inset-0 rounded-full border border-red-300"
-                />
-              </>
-            )}
-
-            {/* 等待时的呼吸环 */}
-            {isIdle && (
-              <motion.span
-                animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.1, 0.3] }}
-                transition={{ repeat: Infinity, duration: 2.5 }}
-                className="absolute inset-0 rounded-full border-2 border-blue-300"
-              />
-            )}
-
-            {/* 图标 */}
-            {isProcessing ? (
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="animate-spin">
-                <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
-                <path d="M12 2a10 10 0 0 1 10 10" />
-              </svg>
-            ) : isUserTurn ? (
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-                <rect x="9" y="4" width="6" height="16" rx="2" />
-              </svg>
-            ) : (
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="white" strokeWidth="2" />
-                <line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2" />
-                <line x1="8" y1="23" x2="16" y2="23" stroke="white" strokeWidth="2" />
-              </svg>
-            )}
-          </motion.button>
-        </div>
-
-        {/* 结束按钮 */}
         <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={onEndInterview}
-          disabled={isProcessing}
-          className="px-3 py-2 rounded-lg text-[11px] font-medium text-slate-400
-            hover:text-red-500 hover:bg-red-50 transition-all duration-200
-            disabled:opacity-50 disabled:cursor-not-allowed"
+          type="button"
+          whileTap={{ scale: isInteractive ? 0.92 : 1 }}
+          onClick={isInteractive ? onMicPress : undefined}
+          disabled={!isInteractive}
+          className={`relative flex h-16 w-16 items-center justify-center rounded-full text-white shadow-xl transition-all duration-300 ${
+            isUserTurn
+              ? 'scale-105 bg-[#c9342f] shadow-red-500/25'
+              : isIdle
+                ? 'bg-[#0071e3] shadow-blue-500/25 hover:scale-[1.03] hover:bg-[#0062c3]'
+                : 'cursor-not-allowed bg-[#d2d2d7] shadow-black/5'
+          }`}
+          aria-label={isUserTurn ? '停止并提交回答' : '开始回答'}
         >
-          结束
+          {isUserTurn && (
+            <motion.span
+              animate={{ scale: [1, 1.45, 1], opacity: [0.36, 0, 0.36] }}
+              transition={{ repeat: Infinity, duration: 1.7 }}
+              className="absolute inset-0 rounded-full border-2 border-[#c9342f]"
+            />
+          )}
+          {isProcessing ? (
+            <HiOutlineArrowPath className="h-6 w-6 animate-spin" />
+          ) : isUserTurn ? (
+            <HiMiniStop className="h-5 w-5" />
+          ) : (
+            <HiOutlineMicrophone className="h-6 w-6" />
+          )}
         </motion.button>
+
+        <div className="flex items-center justify-end gap-2">
+          <div className="hidden items-center gap-1.5 rounded-full bg-[#f5f5f7] px-3 py-2 text-[11px] font-semibold text-[#6e6e73] sm:flex">
+            <HiOutlineClock className="h-3.5 w-3.5" />
+            <span className="tabular-nums">{isUserTurn ? recordingDuration : elapsed}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onEndInterview}
+            disabled={isProcessing}
+            className="inline-flex h-10 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold text-[#86868b] transition hover:bg-[#fff0ef] hover:text-[#c9342f] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <HiOutlineStopCircle className="h-4 w-4" />
+            <span className="hidden sm:inline">结束</span>
+          </button>
+        </div>
       </div>
     </div>
   )

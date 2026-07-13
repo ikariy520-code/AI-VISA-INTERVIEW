@@ -1,5 +1,13 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  HiOutlineArrowDownTray,
+  HiOutlineArrowLeft,
+  HiOutlineArrowPath,
+  HiOutlineKey,
+  HiOutlinePlus,
+  HiOutlineShieldCheck,
+} from 'react-icons/hi2'
 
 interface InviteRow {
   id: string
@@ -145,20 +153,20 @@ export default function AdminInvitesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
-          <button onClick={() => navigate('/')} className="rounded-lg px-3 py-2 text-[13px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">← 返回网站</button>
+    <div className="app-page">
+      <header className="app-topbar">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
+          <button onClick={() => navigate('/')} className="app-icon-button" aria-label="返回网站"><HiOutlineArrowLeft className="h-[18px] w-[18px]" /></button>
           <div className="text-right">
-            <p className="text-[14px] font-semibold">邀请码管理</p>
-            <p className="text-[11px] text-slate-400">仅管理员可访问</p>
+            <p className="text-[13px] font-semibold text-[#1d1d1f]">邀请码管理</p>
+            <p className="text-[10px] uppercase tracking-[0.12em] text-[#86868b]">Admin only</p>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h1 className="text-[17px] font-semibold">管理员验证</h1>
+      <main className="mx-auto max-w-7xl space-y-4 px-5 py-8 sm:px-8 sm:py-12">
+        <section className="app-card p-5 sm:p-6">
+          <h1 className="flex items-center gap-2 text-[17px] font-semibold"><HiOutlineShieldCheck className="h-5 w-5 text-[#0071e3]" /> 管理员验证</h1>
           <p className="mt-1 text-[12px] leading-5 text-slate-500">管理密钥只保存在当前标签页，不会写入网站代码或长期保存在浏览器中。</p>
           <div className="mt-4 flex flex-col gap-3 sm:flex-row">
             <input
@@ -167,22 +175,22 @@ export default function AdminInvitesPage() {
               onChange={(event) => setToken(event.target.value)}
               placeholder="输入管理员密钥"
               autoComplete="off"
-              className="min-w-0 flex-1 rounded-xl border border-slate-200 px-4 py-3 text-[13px] outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+              className="app-field min-w-0 flex-1"
             />
-            <button disabled={loading} onClick={saveTokenAndLoad} className="rounded-xl bg-slate-900 px-5 py-3 text-[13px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50">验证并读取</button>
+            <button disabled={loading} onClick={saveTokenAndLoad} className="app-button-primary"><HiOutlineKey className="h-4 w-4" /> 验证并读取</button>
           </div>
         </section>
 
         {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700">{error}</div>}
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="app-card p-5 sm:p-6">
           <div className="mb-5">
-            <h2 className="text-[17px] font-semibold">批量生成邀请码</h2>
+            <h2 className="flex items-center gap-2 text-[17px] font-semibold"><HiOutlinePlus className="h-5 w-5 text-[#0071e3]" /> 批量生成邀请码</h2>
             <p className="mt-1 text-[12px] text-slate-500">原始邀请码只在生成成功时显示一次。数据库只保存加密摘要，无法反查原码。</p>
           </div>
           <form onSubmit={handleGenerate} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="text-[12px] font-medium text-slate-600 sm:col-span-2 lg:col-span-1">批次名称
-              <input required maxLength={80} value={batchName} onChange={(event) => setBatchName(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-[13px] outline-none focus:border-blue-400" />
+              <input required maxLength={80} value={batchName} onChange={(event) => setBatchName(event.target.value)} className="app-field mt-1.5" />
             </label>
             {[
               ['生成数量', count, setCount, 1, 200],
@@ -192,10 +200,10 @@ export default function AdminInvitesPage() {
               ['邀请码未激活有效天数', codeValidityDays, setCodeValidityDays, 1, 3650],
             ].map(([label, value, setter, min, max]) => (
               <label key={String(label)} className="text-[12px] font-medium text-slate-600">{String(label)}
-                <input type="number" min={Number(min)} max={Number(max)} required value={Number(value)} onChange={(event) => (setter as (value: number) => void)(Number(event.target.value))} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-[13px] outline-none focus:border-blue-400" />
+                <input type="number" min={Number(min)} max={Number(max)} required value={Number(value)} onChange={(event) => (setter as (value: number) => void)(Number(event.target.value))} className="app-field mt-1.5" />
               </label>
             ))}
-            <button disabled={loading} className="rounded-xl bg-blue-500 px-5 py-3 text-[13px] font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600 disabled:opacity-50 sm:col-span-2 lg:col-span-3">{loading ? '处理中…' : '生成邀请码'}</button>
+            <button disabled={loading} className="app-button-primary sm:col-span-2 lg:col-span-3"><HiOutlinePlus className="h-4 w-4" />{loading ? '处理中…' : '生成邀请码'}</button>
           </form>
         </section>
 
@@ -206,7 +214,7 @@ export default function AdminInvitesPage() {
                 <h2 className="text-[16px] font-semibold text-amber-900">请立即下载并妥善保存</h2>
                 <p className="mt-1 text-[12px] leading-5 text-amber-700">关闭或刷新本页面后，以下完整邀请码无法从服务器恢复。</p>
               </div>
-              <button onClick={() => downloadCsv(generated)} className="rounded-xl bg-amber-700 px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-amber-800">下载 CSV</button>
+              <button onClick={() => downloadCsv(generated)} className="app-button-secondary bg-white"><HiOutlineArrowDownTray className="h-4 w-4" /> 下载 CSV</button>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {generated.codes.map((code) => <code key={code} className="rounded-lg border border-amber-200 bg-white px-3 py-2.5 text-[13px] font-semibold text-slate-800">{code}</code>)}
@@ -214,13 +222,13 @@ export default function AdminInvitesPage() {
           </section>
         )}
 
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="app-card overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
             <div>
               <h2 className="text-[16px] font-semibold">已生成邀请码</h2>
               <p className="mt-0.5 text-[11px] text-slate-400">仅显示部分字符，共 {codes.length} 条</p>
             </div>
-            <button disabled={loading} onClick={() => void saveTokenAndLoad()} className="rounded-lg border border-slate-200 px-3 py-2 text-[12px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">刷新</button>
+            <button disabled={loading} onClick={() => void saveTokenAndLoad()} className="app-button-secondary min-h-9 px-3 py-2 text-[12px]"><HiOutlineArrowPath className="h-4 w-4" /> 刷新</button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-left text-[12px]">

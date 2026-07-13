@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
+import {
+  HiOutlineArrowLeft,
+  HiOutlineArrowRight,
+  HiOutlineCheckCircle,
+  HiOutlineLockClosed,
+  HiOutlinePencilSquare,
+  HiOutlineShieldCheck,
+} from 'react-icons/hi2'
 import type {
   B2CurrentStatus,
   B2Purpose,
@@ -167,8 +175,7 @@ const refusalLabels: Record<string, string> = {
   other: '其他原因',
 }
 
-const fieldClass = `w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[14px] text-slate-900
-  placeholder:text-slate-400 outline-none transition-all duration-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100`
+const fieldClass = 'app-field'
 
 function detectSensitiveInformation(text: string): string | null {
   if (/\bN00\d{9,10}\b/i.test(text)) return 'SEVIS ID'
@@ -378,24 +385,23 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
 
   if (reviewing) {
     return (
-      <div className="mx-auto flex w-full max-w-lg flex-col items-center">
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="w-full">
+      <div className="mx-auto flex w-full max-w-2xl flex-col items-center">
+        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="w-full">
           <div className="text-center">
-            <div className="mb-4 inline-flex items-center rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-blue-600">
-              Privacy Check
-            </div>
-            <h1 className="text-[26px] font-semibold tracking-tight text-slate-900">确认发送给 AI 的信息</h1>
-            <p className="mt-2 text-[13px] leading-6 text-slate-500">请确认以下内容不包含姓名、证件号码、联系方式或详细地址。</p>
+            <div className="app-eyebrow mb-5"><HiOutlineShieldCheck className="h-4 w-4" /> Privacy Check</div>
+            <h1 className="text-[32px] font-semibold tracking-[-0.045em] text-[#1d1d1f]">确认发送给 AI 的信息</h1>
+            <p className="mx-auto mt-3 max-w-lg text-[13px] leading-6 text-[#6e6e73]">请确认以下内容不包含姓名、证件号码、联系方式或详细地址。</p>
           </div>
 
-          <div className="mt-7 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 bg-emerald-50/60 px-5 py-4">
-              <p className="text-[13px] font-semibold text-emerald-800">只发送本次面签需要的背景摘要</p>
-              <p className="mt-1 text-[11px] leading-5 text-emerald-700">{isF1
+          <div className="app-card mt-8 overflow-hidden">
+            <div className="flex items-start gap-3 border-b border-black/[0.06] bg-[#eaf8f2] px-5 py-4 sm:px-6">
+              <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[13px] bg-white text-[#158f65] shadow-sm"><HiOutlineLockClosed className="h-[17px] w-[17px]" /></span>
+              <div><p className="text-[13px] font-semibold text-[#146c50]">只发送本次面签需要的背景摘要</p>
+              <p className="mt-1 text-[11px] leading-5 text-[#347861]">{isF1
                 ? '不包含 DS-160、I-20、护照号或 SEVIS ID，网站不会长期保存这份背景资料。'
-                : '不包含护照、银行流水、联系人身份信息、详细地址或行程订单，网站不会长期保存这份背景资料。'} 开始模拟后，你的面签回答会发送给 AI，用于生成追问和评分。</p>
+                : '不包含护照、银行流水、联系人身份信息、详细地址或行程订单，网站不会长期保存这份背景资料。'} 开始模拟后，你的面签回答会发送给 AI，用于生成追问和评分。</p></div>
             </div>
-            <dl className="divide-y divide-slate-100 px-5">
+            <dl className="divide-y divide-black/[0.06] px-5 sm:px-6">
               {reviewItems.map(([label, value]) => (
                 <div key={label} className="grid grid-cols-[8rem_1fr] gap-4 py-3.5 text-[13px]">
                   <dt className="text-slate-400">{label}</dt>
@@ -405,12 +411,12 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
             </dl>
           </div>
 
-          <div className="mt-5 flex gap-3">
-            <button type="button" onClick={() => setReviewing(false)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-[14px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
-              修改信息
+          <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row">
+            <button type="button" onClick={() => setReviewing(false)} className="app-button-secondary">
+              <HiOutlinePencilSquare className="h-4 w-4" /> 修改信息
             </button>
-            <button type="button" onClick={handleConfirm} className="flex-1 rounded-xl bg-blue-500 px-5 py-3 text-[14px] font-semibold text-white shadow-sm shadow-blue-500/20 transition hover:bg-blue-600">
-              确认并开始 AI 分析
+            <button type="button" onClick={handleConfirm} className="app-button-primary flex-1">
+              确认并开始准备 <HiOutlineArrowRight className="h-4 w-4" />
             </button>
           </div>
         </motion.div>
@@ -419,18 +425,16 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-lg flex-col items-center">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-7 text-center">
-        <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-600">
-          Step 2
-        </div>
-        <h1 className="mb-1 text-[26px] font-semibold tracking-tight text-slate-900">建立面签背景</h1>
-        <p className="text-[13px] font-normal text-slate-500">只填写会影响面签问题的信息 · <span className="font-medium text-slate-700">{visaTypeLabel[visaType]}</span></p>
+    <div className="mx-auto flex w-full max-w-2xl flex-col items-center">
+      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-8 text-center">
+        <div className="app-eyebrow mb-5">Background setup</div>
+        <h1 className="text-[32px] font-semibold tracking-[-0.045em] text-[#1d1d1f]">建立面签背景</h1>
+        <p className="mt-3 text-[13px] font-normal text-[#6e6e73]">只填写会影响面签问题的信息 · <span className="font-semibold text-[#424245]">{visaTypeLabel[visaType]}</span></p>
       </motion.div>
 
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-6 w-full rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-4 w-full rounded-[20px] border border-emerald-200/70 bg-[#eaf8f2] p-4 sm:p-5">
         <div className="flex items-start gap-3">
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white text-emerald-600 shadow-sm">✓</div>
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[14px] bg-white text-[#158f65] shadow-sm"><HiOutlineCheckCircle className="h-5 w-5" /></div>
           <div>
             <p className="text-[13px] font-semibold text-emerald-900">{isF1 ? '无需上传 DS-160 或 I-20' : '无需上传护照、流水或行程订单'}</p>
             <p className="mt-1 text-[12px] leading-5 text-emerald-700">{isF1
@@ -440,7 +444,7 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
         </div>
       </motion.div>
 
-      <motion.form initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} onSubmit={handlePrepareReview} className="w-full space-y-4">
+      <motion.form initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} onSubmit={handlePrepareReview} className="app-card w-full space-y-5 p-5 sm:p-7">
         {isF1 ? (
           <>
             <div>
@@ -776,10 +780,10 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
           </div>
         )}
 
-        <div className="flex gap-3 pt-2">
-          <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={onBack} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-[14px] text-slate-600 transition hover:border-slate-300 hover:text-slate-800">← 返回</motion.button>
-          <motion.button type="submit" whileTap={{ scale: privacyWarning || missingHomeTie ? 1 : 0.97 }} disabled={Boolean(privacyWarning || missingHomeTie)} className="flex-1 rounded-xl bg-blue-500 px-5 py-3 text-[14px] font-semibold text-white shadow-sm shadow-blue-500/20 transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
-            查看并确认信息
+        <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
+          <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={onBack} className="app-button-secondary"><HiOutlineArrowLeft className="h-4 w-4" /> 返回</motion.button>
+          <motion.button type="submit" whileTap={{ scale: privacyWarning || missingHomeTie ? 1 : 0.985 }} disabled={Boolean(privacyWarning || missingHomeTie)} className="app-button-primary flex-1">
+            查看并确认信息 <HiOutlineArrowRight className="h-4 w-4" />
           </motion.button>
         </div>
       </motion.form>

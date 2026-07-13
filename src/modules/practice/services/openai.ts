@@ -16,7 +16,6 @@ import type {
 import type { OfficerType } from '../../voice/types'
 import { officerTypes } from '../../voice/data/officerTypes'
 import { mockAnalyzeUser, mockGenerateResponse } from '../data/mockOfficer'
-import { getActiveInterviewSessionKey } from '../../../access/AccessContext'
 
 // ---- 配置 ----
 
@@ -119,10 +118,8 @@ const defaultConfig: OpenAIConfig = {
   systemPrompt: buildSystemPrompt('standard'),
 }
 
-export class InviteRequiredError extends Error {}
-
 export function resetApiStatus() {
-  // 保留兼容接口。鉴权后的请求不再缓存“API 可用性”，避免 401/403 被当成离线模式。
+  // 保留兼容接口。
 }
 
 // ---- 通用 AI 调用 ----
@@ -135,15 +132,9 @@ interface AICallOptions {
 }
 
 async function callAI(options: AICallOptions): Promise<string> {
-  const sessionKey = getActiveInterviewSessionKey()
-  if (!sessionKey) throw new InviteRequiredError('请输入邀请码并开始面签。')
-
   const response = await fetch(AI_CHAT_ENDPOINT, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Interview-Session': sessionKey,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: options.messages,
       temperature: options.temperature ?? 0.7,
@@ -155,7 +146,6 @@ async function callAI(options: AICallOptions): Promise<string> {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({})) as any
-    if (response.status === 403) throw new InviteRequiredError('请输入邀请码解锁 AI 功能。')
     throw new Error(err.error || `API error: ${response.status}`)
   }
 
@@ -203,7 +193,6 @@ ${JSON.stringify(buildSafeInterviewContext(context), null, 2)}`
     const parsed = JSON.parse(content)
     return parsed.analysis ?? parsed
   } catch (err) {
-    if (err instanceof InviteRequiredError) throw err
     console.warn('[AI] analyzeUserContext failed, falling back to mock:', err)
     return mockAnalyzeUser(context)
   }
@@ -270,7 +259,6 @@ ${JSON.stringify(buildSafeInterviewContext(context), null, 2)}`,
       isDocumentRequest: parsed.isDocumentRequest || false,
     }
   } catch (err) {
-    if (err instanceof InviteRequiredError) throw err
     console.warn('[AI] generateOfficerResponse failed, falling back to mock:', err)
     return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
   }

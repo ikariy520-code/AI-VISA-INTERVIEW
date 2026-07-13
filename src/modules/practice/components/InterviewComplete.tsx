@@ -1,12 +1,20 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
+import {
+  HiOutlineArrowPath,
+  HiOutlineArrowRight,
+  HiOutlineCheck,
+  HiOutlineChartBarSquare,
+  HiOutlineClock,
+  HiOutlineDocumentArrowDown,
+  HiOutlineExclamationTriangle,
+  HiOutlineQuestionMarkCircle,
+} from 'react-icons/hi2'
 import type { ChatMessage, UserContext, AIAnalysisResult, InterviewRecord } from '../types'
 import type { InterviewSession } from '../../feedback/types'
 import { analyzeInterview, analyzeInterviewWithAI } from '../../shared/store/analysisEngine'
 import { generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
-import { InviteRequiredError } from '../services/openai'
-import { clearActiveInterviewSession } from '../../../access/AccessContext'
 
 // ========================================
 // Step 5: 面签完成
@@ -28,9 +36,42 @@ const visaTypeLabel: Record<string, string> = {
   L1: 'L1 跨国经理',
 }
 
+const AI_FEEDBACK_TIMEOUT_MS = 8000
+
+interface FeedbackResult {
+  session: InterviewSession
+  usedLocalFallback: boolean
+}
+
+function waitForFeedback<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('AI_FEEDBACK_TIMEOUT')), timeoutMs)
+    promise.then(
+      value => {
+        window.clearTimeout(timer)
+        resolve(value)
+      },
+      error => {
+        window.clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+async function generateFeedbackResult(record: InterviewRecord): Promise<FeedbackResult> {
+  try {
+    const session = await waitForFeedback(analyzeInterviewWithAI(record), AI_FEEDBACK_TIMEOUT_MS)
+    return { session, usedLocalFallback: false }
+  } catch (error) {
+    console.warn('[InterviewComplete] AI scoring unavailable, using rule engine:', error)
+    return { session: analyzeInterview(record), usedLocalFallback: true }
+  }
+}
+
 export default function InterviewComplete({ messages, context, analysis, duration }: Props) {
   const navigate = useNavigate()
-  const savedRef = useRef(false)
+  const feedbackPromiseRef = useRef<Promise<FeedbackResult> | null>(null)
   const [feedbackState, setFeedbackState] = useState<'generating' | 'ready' | 'error'>('generating')
   const [feedbackError, setFeedbackError] = useState('')
   const [feedbackSession, setFeedbackSession] = useState<InterviewSession | null>(null)
@@ -40,59 +81,50 @@ export default function InterviewComplete({ messages, context, analysis, duratio
 
   // 面签完成后仅生成本次反馈，不写入个人记录或云端数据库。
   useEffect(() => {
-    if (savedRef.current || messages.length === 0) return
-    savedRef.current = true
+    if (messages.length === 0) {
+      setFeedbackError('暂无可分析的对话记录。')
+      setFeedbackState('error')
+      return
+    }
 
-    const { date, time } = getNowFormatted()
-    const id = generateSessionId()
+    if (!feedbackPromiseRef.current) {
+      const { date, time } = getNowFormatted()
+      const id = generateSessionId()
 
-    const record: InterviewRecord = {
-      id,
-      date,
-      time,
-      duration,
-      visaType: context.visaType,
-      userContext: context,
-      messages,
-      aiAnalysis: analysis,
+      const record: InterviewRecord = {
+        id,
+        date,
+        time,
+        duration,
+        visaType: context.visaType,
+        userContext: context,
+        messages,
+        aiAnalysis: analysis,
+      }
+
+      feedbackPromiseRef.current = generateFeedbackResult(record)
     }
 
     let cancelled = false
-    const generateFeedback = async () => {
-      try {
-        const session = await analyzeInterviewWithAI(record)
+    void feedbackPromiseRef.current.then(
+      ({ session, usedLocalFallback }) => {
         if (!cancelled) {
           setFeedbackSession(session)
+          setFeedbackError(usedLocalFallback ? 'AI 服务未连接，已使用本地规则生成反馈。' : '')
           setFeedbackState('ready')
         }
-      } catch (error) {
-        if (error instanceof InviteRequiredError) {
-          if (!cancelled) {
-            setFeedbackError(error.message)
-            setFeedbackState('error')
-          }
-          return
+      },
+      error => {
+        console.warn('[InterviewComplete] Feedback generation failed:', error)
+        if (!cancelled) {
+          setFeedbackError('反馈生成失败，请稍后再试。')
+          setFeedbackState('error')
         }
+      },
+    )
 
-        console.warn('[InterviewComplete] AI scoring failed, using rule engine:', error)
-        try {
-          const session = analyzeInterview(record)
-          if (!cancelled) {
-            setFeedbackSession(session)
-            setFeedbackState('ready')
-          }
-        } catch (fallbackError) {
-          console.warn('[InterviewComplete] Feedback generation failed:', fallbackError)
-          if (!cancelled) {
-            setFeedbackError('反馈生成失败，请稍后再试。')
-            setFeedbackState('error')
-          }
-        }
-      }
-    }
-    void generateFeedback()
     return () => { cancelled = true }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [analysis, context, duration, messages])
 
   // 跳转反馈页
   const handleViewFeedback = useCallback(() => {
@@ -103,24 +135,20 @@ export default function InterviewComplete({ messages, context, analysis, duratio
   }, [navigate, feedbackSession])
 
   const handleRetry = useCallback(() => {
-    clearActiveInterviewSession()
     navigate('/practice', { replace: true })
   }, [navigate])
 
   return (
-    <div className="flex flex-col items-center max-w-lg mx-auto">
+    <div className="mx-auto flex max-w-2xl flex-col items-center pb-12">
       {/* 完成图标 */}
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
         transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-        className="mb-6"
+        className="mb-7"
       >
-        <div className="w-20 h-20 rounded-[22px] bg-gradient-to-br from-emerald-500 to-emerald-600
-          flex items-center justify-center shadow-lg shadow-emerald-500/25">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+        <div className="flex h-20 w-20 items-center justify-center rounded-[26px] bg-[#158f65] text-white shadow-xl shadow-emerald-500/20">
+          <HiOutlineCheck className="h-9 w-9" />
         </div>
       </motion.div>
 
@@ -129,17 +157,17 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="text-[24px] font-semibold text-slate-900 mb-2 tracking-tight"
+        className="text-[34px] font-semibold tracking-[-0.05em] text-[#1d1d1f]"
       >
-        面签完成！
+        这次练习，完成了。
       </motion.h1>
       <motion.p
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="text-[14px] text-slate-500 mb-8"
+        className="mb-8 mt-3 max-w-lg text-center text-[14px] leading-6 text-[#6e6e73]"
       >
-        你的表现已经记录下来，可以查看 AI 教练的详细分析
+        每一次完整表达都在积累稳定感。反馈正在整理你最值得优先改进的部分。
       </motion.p>
 
       {/* 数据概览卡片 */}
@@ -147,40 +175,35 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
-        className="w-full bg-white border border-slate-200 rounded-2xl p-5 mb-6 space-y-4"
+        className="app-card mb-4 grid w-full grid-cols-2 gap-3 p-4 sm:grid-cols-4 sm:p-5"
       >
-        <div className="flex items-center justify-between">
-          <span className="text-[13px] text-slate-500">签证类型</span>
-          <span className="text-[13px] font-semibold text-slate-900">{visaTypeLabel[context.visaType] ?? context.visaType}</span>
+        <div className="rounded-2xl bg-[#f5f5f7] p-4">
+          <HiOutlineChartBarSquare className="h-5 w-5 text-[#0071e3]" />
+          <span className="mt-3 block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#86868b]">签证类型</span>
+          <span className="mt-1 block text-[13px] font-semibold text-[#1d1d1f]">{visaTypeLabel[context.visaType] ?? context.visaType}</span>
         </div>
-        <div className="w-full h-[1px] bg-slate-100" />
-
-        <div className="flex items-center justify-between">
-          <span className="text-[13px] text-slate-500">对话时长</span>
-          <span className="text-[13px] font-semibold text-slate-900 font-mono">{duration}</span>
+        <div className="rounded-2xl bg-[#f5f5f7] p-4">
+          <HiOutlineClock className="h-5 w-5 text-[#6554c0]" />
+          <span className="mt-3 block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#86868b]">对话时长</span>
+          <span className="mt-1 block text-[13px] font-semibold tabular-nums text-[#1d1d1f]">{duration}</span>
         </div>
-        <div className="w-full h-[1px] bg-slate-100" />
-
-        <div className="flex items-center justify-between">
-          <span className="text-[13px] text-slate-500">提问数量</span>
-          <span className="text-[13px] font-semibold text-slate-900">{officerQuestions.length} 个问题</span>
+        <div className="rounded-2xl bg-[#f5f5f7] p-4">
+          <HiOutlineQuestionMarkCircle className="h-5 w-5 text-[#9a5f12]" />
+          <span className="mt-3 block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#86868b]">提问数量</span>
+          <span className="mt-1 block text-[13px] font-semibold text-[#1d1d1f]">{officerQuestions.length} 个问题</span>
         </div>
-        <div className="w-full h-[1px] bg-slate-100" />
-
-        <div className="flex items-center justify-between">
-          <span className="text-[13px] text-slate-500">回答数量</span>
-          <span className="text-[13px] font-semibold text-slate-900">{userAnswers.length} 条回答</span>
+        <div className="rounded-2xl bg-[#f5f5f7] p-4">
+          <HiOutlineCheck className="h-5 w-5 text-[#158f65]" />
+          <span className="mt-3 block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#86868b]">回答数量</span>
+          <span className="mt-1 block text-[13px] font-semibold text-[#1d1d1f]">{userAnswers.length} 条回答</span>
         </div>
 
         {/* AI 策略简述 */}
         {analysis.strategy && (
-          <>
-            <div className="w-full h-[1px] bg-slate-100" />
-            <div>
-              <span className="text-[13px] font-medium text-slate-700">AI 策略分析</span>
-              <p className="text-[12px] text-slate-500 leading-relaxed mt-1">{analysis.strategy}</p>
-            </div>
-          </>
+          <div className="col-span-2 rounded-2xl border border-black/[0.06] bg-white p-4 sm:col-span-4">
+            <span className="text-[12px] font-semibold text-[#424245]">本次面签策略</span>
+            <p className="mt-1 text-[12px] leading-6 text-[#6e6e73]">{analysis.strategy}</p>
+          </div>
         )}
       </motion.div>
 
@@ -190,9 +213,9 @@ export default function InterviewComplete({ messages, context, analysis, duratio
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
-          className="w-full bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6"
+          className="mb-4 w-full rounded-[20px] border border-amber-200/70 bg-[#fff6e6] p-5"
         >
-          <p className="text-[12px] font-semibold text-amber-700 mb-2">⚠️ AI 识别你的风险点</p>
+          <p className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[#8a5818]"><HiOutlineExclamationTriangle className="h-[17px] w-[17px]" /> 本次需要留意</p>
           <ul className="space-y-1">
             {analysis.riskPoints.map((point, i) => (
               <li key={i} className="text-[12px] text-amber-700 flex gap-2">
@@ -209,22 +232,20 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6 }}
-        className="flex flex-col sm:flex-row gap-3 w-full"
+        className="flex w-full flex-col gap-3 sm:flex-row"
       >
         <motion.button
           whileTap={{ scale: 0.97 }}
           onClick={handleViewFeedback}
           disabled={feedbackState !== 'ready'}
-          className="flex-1 px-5 py-3 rounded-xl bg-blue-500 text-[14px] font-semibold text-white
-            hover:bg-blue-600 transition-all duration-200 shadow-sm shadow-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          className="app-button-primary flex-1"
         >
-          {feedbackState === 'generating' ? '正在生成反馈…' : feedbackState === 'ready' ? '查看并下载反馈 →' : '反馈生成失败'}
+          {feedbackState === 'generating' ? <><HiOutlineArrowPath className="h-4 w-4 animate-spin" /> 正在整理反馈</> : feedbackState === 'ready' ? <><HiOutlineDocumentArrowDown className="h-4 w-4" /> 查看并下载反馈 <HiOutlineArrowRight className="h-4 w-4" /></> : '反馈生成失败'}
         </motion.button>
         <motion.button
           whileTap={{ scale: 0.97 }}
           onClick={handleRetry}
-          className="px-5 py-3 rounded-xl bg-white border border-slate-200 text-[14px] text-slate-600
-            hover:border-slate-300 hover:text-slate-800 transition-all duration-200"
+          className="app-button-secondary"
         >
           再练一次
         </motion.button>

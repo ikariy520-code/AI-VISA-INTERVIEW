@@ -9,7 +9,7 @@ import FeatureGrid from '../shared/components/FeatureGrid'
 
 export default function HomePage() {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#F8FAFC]">
+    <div className="relative min-h-screen overflow-hidden bg-[#f5f5f7]">
       {/* 柔和光球背景 */}
       <Background />
 
@@ -17,20 +17,15 @@ export default function HomePage() {
       <div className="relative z-10 flex flex-col min-h-screen">
         <Navbar />
 
-        <main className="flex-1 flex flex-col justify-center">
+        <main className="flex-1">
           <HeroSection />
-
-          {/* 卡片与标题之间的呼吸空间 */}
-          <div className="h-10 sm:h-14" />
-
           <FeatureGrid />
         </main>
 
         {/* 底部 */}
-        <footer className="relative z-10 text-center pb-8">
-          <div className="w-8 h-[1px] bg-slate-300 mx-auto mb-3" />
-          <p className="text-[12px] text-slate-400 font-normal tracking-wide">
-            面签AI Coach · Practice with Confidence
+        <footer className="relative z-10 border-t border-black/[0.06] px-5 py-7 text-center">
+          <p className="text-[11px] font-medium tracking-[0.08em] text-[#86868b]">
+            面签 AI Coach · 让准备变成可以看见的进步
           </p>
         </footer>
       </div>

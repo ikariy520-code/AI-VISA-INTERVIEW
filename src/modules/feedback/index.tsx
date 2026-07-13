@@ -1,9 +1,14 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import {
+  HiOutlineArrowLeft,
+  HiOutlineArrowPath,
+  HiOutlineDocumentArrowDown,
+  HiOutlineDocumentChartBar,
+  HiOutlineLockClosed,
+} from 'react-icons/hi2'
 import type { InterviewSession } from './types'
 import SessionDetail from './components/SessionDetail'
-import InviteGate from '../../access/InviteGate'
-import { clearActiveInterviewSession } from '../../access/AccessContext'
 
 export default function FeedbackPage() {
   const navigate = useNavigate()
@@ -11,69 +16,66 @@ export default function FeedbackPage() {
   const session = (location.state as { session?: InterviewSession } | null)?.session ?? null
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC]">
-      <header className="print:hidden sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur-xl">
-        <button
-          onClick={() => navigate('/')}
-          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-        >
-          <span>←</span><span>返回首页</span>
-        </button>
-        <span className="text-[13px] font-semibold text-slate-800">本次面签反馈</span>
-        <div className="w-20" />
+    <div className="app-page">
+      <header className="app-topbar print:hidden">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+          <button onClick={() => navigate('/')} className="app-icon-button" aria-label="返回首页">
+            <HiOutlineArrowLeft className="h-[18px] w-[18px]" />
+          </button>
+          <div className="text-center">
+            <p className="text-[13px] font-semibold text-[#1d1d1f]">本次面签反馈</p>
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#86868b]">Review & improve</p>
+          </div>
+          <div className="w-10" />
+        </div>
       </header>
 
-      <InviteGate
-        title="输入邀请码查看反馈"
-        description="反馈总结只对已激活邀请码的浏览器开放。本次报告不会长期保存，请及时下载或截图。"
-      >
-        {session ? (
-          <div id="feedback-report" className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      {session ? (
+          <div id="feedback-report" className="mx-auto max-w-5xl px-5 py-8 sm:px-8 sm:py-12">
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              className="print:hidden mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 sm:flex sm:items-center sm:justify-between"
+              className="print:hidden mb-4 rounded-[20px] border border-emerald-200/70 bg-[#eaf8f2] px-4 py-4 sm:flex sm:items-center sm:justify-between sm:px-5"
             >
-              <div>
-                <p className="text-[13px] font-semibold text-amber-800">请立即保存本次反馈</p>
-                <p className="mt-1 text-[12px] leading-5 text-amber-700">网站不会保存个人面签记录。建议点击下载 PDF，或直接截图保存。</p>
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[13px] bg-white text-[#158f65] shadow-sm"><HiOutlineLockClosed className="h-[17px] w-[17px]" /></span>
+                <div>
+                  <p className="text-[13px] font-semibold text-[#146c50]">这份反馈只属于本次练习</p>
+                  <p className="mt-1 text-[12px] leading-5 text-[#347861]">网站不会长期保存面签记录，离开前请下载 PDF 或截图留存。</p>
+                </div>
               </div>
               <button
                 onClick={() => window.print()}
-                className="mt-3 w-full rounded-xl bg-amber-600 px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-amber-700 sm:mt-0 sm:w-auto"
+                className="app-button-secondary mt-3 w-full bg-white sm:mt-0 sm:w-auto"
               >
-                下载 / 打印 PDF
+                <HiOutlineDocumentArrowDown className="h-4 w-4" /> 下载 PDF
               </button>
             </motion.div>
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm print:border-0 print:shadow-none">
+            <div className="app-card overflow-hidden print:border-0 print:shadow-none">
               <SessionDetail session={session} />
             </div>
 
             <div className="print:hidden mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center">
-              <button onClick={() => window.print()} className="rounded-xl bg-blue-500 px-5 py-3 text-[14px] font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-600">下载 / 打印 PDF</button>
+              <button onClick={() => window.print()} className="app-button-primary"><HiOutlineDocumentArrowDown className="h-4 w-4" /> 下载 / 打印 PDF</button>
               <button
-                onClick={() => {
-                  clearActiveInterviewSession()
-                  navigate('/practice', { replace: true })
-                }}
-                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-[14px] font-medium text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                onClick={() => navigate('/practice', { replace: true })}
+                className="app-button-secondary"
               >
-                再练一次
+                <HiOutlineArrowPath className="h-4 w-4" /> 再练一次
               </button>
             </div>
           </div>
         ) : (
           <div className="flex min-h-[70vh] items-center justify-center px-6 text-center">
-            <div className="max-w-sm">
-              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-2xl">📄</div>
-              <h1 className="text-[20px] font-semibold text-slate-900">没有可查看的本次反馈</h1>
-              <p className="mt-2 text-[13px] leading-6 text-slate-500">反馈不会保存到服务器。请完成一次面签后立即下载或截图。</p>
-              <button onClick={() => navigate('/practice')} className="mt-6 rounded-xl bg-blue-500 px-5 py-3 text-[14px] font-semibold text-white hover:bg-blue-600">开始面签</button>
+            <div className="max-w-md">
+              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-[22px] bg-[#eaf4ff] text-[#0071e3]"><HiOutlineDocumentChartBar className="h-7 w-7" /></div>
+              <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">完成一次练习，反馈才会出现。</h1>
+              <p className="mt-3 text-[13px] leading-6 text-[#6e6e73]">我们不会保存历史记录。面签结束后，请在当前页面立即查看并下载本次总结。</p>
+              <button onClick={() => navigate('/voice')} className="app-button-primary mt-7">开始面签</button>
             </div>
           </div>
         )}
-      </InviteGate>
     </div>
   )
 }

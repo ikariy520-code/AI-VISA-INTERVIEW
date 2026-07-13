@@ -1,58 +1,47 @@
-import { useState, useCallback } from 'react'
+import { useCallback, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import {
+  HiOutlineArrowLeft,
+  HiOutlineArrowRight,
+  HiOutlineCheck,
+  HiOutlineChevronRight,
+  HiOutlinePause,
+  HiOutlinePlay,
+  HiOutlineSpeakerWave,
+  HiOutlineXMark,
+} from 'react-icons/hi2'
 import type { OfficerType } from './types'
 import { officerTypes } from './data/officerTypes'
+import OfficerIcon from './OfficerIcon'
 
-// ========================================
-// 声音选择模块
-//
-// 四种预设面签官类型 + 自定义入口
-//   - 预设类型可选中，仅特朗普支持试音
-//   - 所有卡片统一结构，2×2 网格整齐对齐
-//   - 试音展开内容在网格外渲染，不破坏布局
-//   - 自定义入口 → 跳转到二级页面 /voice/custom
-// 选择结果通过 react-router state + sessionStorage 传递
-// ========================================
-
-// 预设类型（不含自定义）
 const presetTypes = officerTypes.filter(o => o.id !== 'custom')
 const customType = officerTypes.find(o => o.id === 'custom')!
 
-// ---- 试音播放器（Web Speech API） ----
 function speakDemo(text: string, config: import('./types').OfficerTypeConfig) {
   window.speechSynthesis.cancel()
   const utterance = new SpeechSynthesisUtterance(text)
   utterance.lang = 'en-US'
-  const { voiceProfile } = config
-  utterance.rate = voiceProfile.rate
-  utterance.pitch = voiceProfile.pitch
+  utterance.rate = config.voiceProfile.rate
+  utterance.pitch = config.voiceProfile.pitch
   const voices = window.speechSynthesis.getVoices()
-  const genderKeywords = voiceProfile.gender === 'female'
+  const genderKeywords = config.voiceProfile.gender === 'female'
     ? ['female', 'woman', 'samantha', 'google uk female', 'microsoft zira']
     : ['male', 'guy', 'daniel', 'google uk male', 'microsoft david']
-  const enVoice =
-    voices.find(v => v.lang.startsWith('en') && genderKeywords.some(k => v.name.toLowerCase().includes(k)))
-    ?? voices.find(v => v.lang.startsWith('en') && v.name.includes('Google'))
+  utterance.voice = voices.find(v => v.lang.startsWith('en') && genderKeywords.some(k => v.name.toLowerCase().includes(k)))
     ?? voices.find(v => v.lang.startsWith('en-US'))
     ?? voices.find(v => v.lang.startsWith('en'))
-  if (enVoice) utterance.voice = enVoice
+    ?? null
   window.speechSynthesis.speak(utterance)
 }
 
-// ---- 页面容器动画 ----
-const pageTransition = {
-  initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -12 },
-  transition: { duration: 0.3, ease: [0.25, 0.1, 0, 1] as const },
-}
-
-const stagger = {
-  initial: { opacity: 0, y: 20 },
-  animate: (i: number) => ({
-    opacity: 1, y: 0,
-    transition: { delay: i * 0.08, duration: 0.35, ease: [0.25, 0.1, 0, 1] },
+const cardMotion = {
+  hidden: { opacity: 0, y: 18, scale: 0.985 },
+  visible: (index: number) => ({
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { delay: 0.08 + index * 0.07, duration: 0.48, ease: [0.28, 0.11, 0.32, 1] },
   }),
 }
 
@@ -64,343 +53,198 @@ export default function VoicePage() {
 
   const selectedConfig = presetTypes.find(o => o.id === selectedId) ?? null
   const previewConfig = previewId ? officerTypes.find(o => o.id === previewId) ?? null : null
-  const isPlayingPreview = previewId != null && playing
 
-  // 点击试音
   const handlePreview = useCallback((id: OfficerType) => {
     const config = officerTypes.find(o => o.id === id)!
     if (previewId === id) {
-      // 再次点击同一个 → 关闭试音
       setPreviewId(null)
       setPlaying(false)
       window.speechSynthesis.cancel()
       return
     }
     setPreviewId(id)
-    if (config.demoTextEn) {
-      setPlaying(true)
-      speakDemo(config.demoTextEn, config)
-      const estimatedDuration = config.demoTextEn.split(' ').length / 2.0 * 1000
-      setTimeout(() => setPlaying(false), Math.max(estimatedDuration, 2000))
-    }
+    if (!config.demoTextEn) return
+    setPlaying(true)
+    speakDemo(config.demoTextEn, config)
+    const estimatedDuration = config.demoTextEn.split(' ').length / 2 * 1000
+    window.setTimeout(() => setPlaying(false), Math.max(estimatedDuration, 2000))
   }, [previewId])
 
-  // 确定选择（仅预设类型）
   const handleConfirm = useCallback(() => {
     if (!selectedId) return
     sessionStorage.setItem('visa_officer_type', selectedId)
     navigate('/practice', { state: { officerType: selectedId } })
-  }, [selectedId, navigate])
+  }, [navigate, selectedId])
+
+  const handleVoiceLive = useCallback(() => {
+    if (!selectedId) return
+    sessionStorage.setItem('visa_officer_type', selectedId)
+    navigate('/voice/live', { state: { officerType: selectedId } })
+  }, [navigate, selectedId])
 
   return (
-    <motion.div {...pageTransition} className="min-h-screen bg-[#F8FAFC]">
-      {/* ---- 顶栏 ---- */}
-      <header className="flex items-center px-4 py-3">
-        <button
-          onClick={() => navigate('/')}
-          className="w-8 h-8 rounded-lg flex items-center justify-center
-            text-slate-400 hover:text-slate-600 hover:bg-slate-100
-            transition-all duration-200 flex-shrink-0"
-          title="返回首页"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
+    <div className="app-page pb-32">
+      <header className="app-topbar">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+          <button type="button" onClick={() => navigate('/')} className="app-icon-button" aria-label="返回首页">
+            <HiOutlineArrowLeft className="h-[18px] w-[18px]" />
+          </button>
+          <div className="text-center">
+            <p className="text-[13px] font-semibold text-[#1d1d1f]">选择面签官</p>
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#86868b]">Step 1 of 3</p>
+          </div>
+          <span className="w-10" />
+        </div>
       </header>
 
-      {/* ---- 内容 ---- */}
-      <div className="max-w-2xl mx-auto px-4 pb-24">
-        {/* 标题 */}
-        <div className="mb-8">
-          <h1 className="text-[28px] font-bold text-slate-900 tracking-tight">
-            选择面签官类型
-          </h1>
-          <p className="text-[15px] text-slate-500 mt-1.5 font-normal">
-            选择一种面签风格，AI 将以此人设进行模拟练习。也可以自定义你想要的类型
-          </p>
-        </div>
+      <main className="mx-auto max-w-5xl px-5 pb-8 pt-12 sm:px-8 sm:pt-16">
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.28, 0.11, 0.32, 1] }}
+          className="max-w-2xl"
+        >
+          <span className="app-eyebrow">Interview style</span>
+          <h1 className="app-title mt-5">选择今天要练习的节奏。</h1>
+          <p className="app-subtitle">不同风格会改变语速、追问强度和表达压力。第一次练习，建议从标准型开始。</p>
+        </motion.div>
 
-        {/* ---- 预设卡片 2×2 网格 ---- */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {presetTypes.map((officer, i) => {
+        <div className="mt-9 grid grid-cols-1 gap-4 md:grid-cols-2">
+          {presetTypes.map((officer, index) => {
             const isSelected = selectedId === officer.id
             const isPreview = previewId === officer.id
-            const hasDemo = !!officer.demoTextEn
-
             return (
               <motion.div
                 key={officer.id}
-                custom={i}
-                variants={stagger}
-                initial="initial"
-                animate="animate"
-                className="flex"
+                custom={index}
+                variants={cardMotion}
+                initial="hidden"
+                animate="visible"
+                className={`relative overflow-hidden rounded-[24px] border bg-white transition-all duration-300 ${
+                  isSelected
+                    ? 'border-[#0071e3] shadow-[0_0_0_4px_rgba(0,113,227,0.09),0_24px_64px_rgba(0,0,0,0.08)]'
+                    : 'border-black/[0.08] shadow-[0_14px_50px_rgba(0,0,0,0.045)] hover:-translate-y-0.5 hover:border-black/[0.14] hover:shadow-[0_20px_60px_rgba(0,0,0,0.075)]'
+                }`}
               >
-                {/* ---- 卡片主体 ---- */}
                 <button
-                  onClick={() => setSelectedId(prev => prev === officer.id ? null : officer.id)}
-                  className={`w-full text-left p-5 rounded-2xl border-2 transition-all duration-300
-                    bg-white flex flex-col
-                    ${isSelected
-                      ? `border-transparent ${officer.ringColor} ring-2 ring-offset-2 shadow-lg shadow-slate-200/50`
-                      : 'border-slate-100 hover:border-slate-200 hover:shadow-md hover:shadow-slate-100/50'
-                    }`}
+                  type="button"
+                  onClick={() => setSelectedId(current => current === officer.id ? null : officer.id)}
+                  className="w-full p-6 text-left sm:p-7"
                 >
-                  {/* 头像 + 标题 */}
                   <div className="flex items-start gap-4">
-                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${officer.gradient}
-                      flex items-center justify-center text-2xl flex-shrink-0
-                      shadow-sm ${isSelected ? 'shadow-md' : ''}`}
-                    >
-                      <span>{officer.icon}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-[16px] font-semibold text-slate-900 mb-0.5">
-                        {officer.label}
-                      </h3>
-                      <p className="text-[12px] text-slate-400 font-normal">
-                        {officer.subtitle}
-                      </p>
-                    </div>
-                    {/* 选中标记 */}
-                    {isSelected && (
-                      <div className={`w-6 h-6 rounded-full bg-gradient-to-br ${officer.gradient}
-                        flex items-center justify-center flex-shrink-0`}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                          stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
+                    <OfficerIcon type={officer.id} className="h-12 w-12 flex-shrink-0 rounded-2xl" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                          <h2 className="text-[18px] font-semibold tracking-[-0.025em] text-[#1d1d1f]">{officer.label}</h2>
+                          <p className="mt-1 text-[12px] font-medium text-[#86868b]">{officer.subtitle}</p>
+                        </div>
+                        <span className={`flex h-6 w-6 items-center justify-center rounded-full border transition-all ${
+                          isSelected ? 'border-[#0071e3] bg-[#0071e3] text-white' : 'border-black/[0.12] text-transparent'
+                        }`}>
+                          <HiOutlineCheck className="h-3.5 w-3.5" />
+                        </span>
                       </div>
-                    )}
-                  </div>
-
-                  {/* 描述 */}
-                  <p className="mt-3 text-[13px] text-slate-500 leading-relaxed flex-1">
-                    {officer.description}
-                  </p>
-
-                  {/* 底部操作区 — 所有卡片统一高度，无 demo 的卡片保留空位 */}
-                  <div className="mt-4" style={{ minHeight: '30px' }}>
-                    {hasDemo ? (
-                      <span
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handlePreview(officer.id)
-                        }}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full
-                          text-[12px] font-medium cursor-pointer
-                          transition-all duration-200
-                          ${isPlayingPreview && isPreview
-                            ? 'bg-red-50 text-red-500 border border-red-200'
-                            : isPreview
-                              ? 'bg-slate-800 text-white border border-slate-800'
-                              : 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100 hover:text-slate-700'
-                          }`}
-                      >
-                        {isPlayingPreview && isPreview ? (
-                          <>
-                            <span className="flex items-end gap-[1.5px] h-3">
-                              {[0.6, 1, 0.4, 0.8, 0.5].map((h, j) => (
-                                <span
-                                  key={j}
-                                  className="w-[2px] bg-current rounded-full animate-pulse"
-                                  style={{ height: `${h * 100}%`, animationDelay: `${j * 0.12}s` }}
-                                />
-                              ))}
-                            </span>
-                            正在试音…
-                          </>
-                        ) : isPreview ? (
-                          <>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <rect x="6" y="4" width="4" height="16" rx="1" />
-                              <rect x="14" y="4" width="4" height="16" rx="1" />
-                            </svg>
-                            停止试音
-                          </>
-                        ) : (
-                          <>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <polygon points="5 3 19 12 5 21 5 3" />
-                            </svg>
-                            试音
-                          </>
-                        )}
-                      </span>
-                    ) : null}
+                      <p className="mt-4 text-[13px] leading-6 text-[#6e6e73]">{officer.description}</p>
+                    </div>
                   </div>
                 </button>
+
+                {officer.demoTextEn && (
+                  <div className="border-t border-black/[0.06] px-6 py-3 sm:px-7">
+                    <button
+                      type="button"
+                      onClick={() => handlePreview(officer.id)}
+                      className="inline-flex items-center gap-2 text-[12px] font-semibold text-[#6e6e73] transition-colors hover:text-[#0071e3]"
+                    >
+                      {isPreview ? <HiOutlinePause className="h-4 w-4" /> : <HiOutlinePlay className="h-4 w-4" />}
+                      {isPreview && playing ? '正在试音' : isPreview ? '停止试音' : '试听说话节奏'}
+                    </button>
+                  </div>
+                )}
               </motion.div>
             )
           })}
         </div>
 
-        {/* ---- 试音内容展开（网格外渲染，不破坏 2×2 布局） ---- */}
+        <motion.button
+          type="button"
+          custom={4}
+          variants={cardMotion}
+          initial="hidden"
+          animate="visible"
+          onClick={() => navigate('/voice/custom')}
+          className="app-card-interactive group mt-4 flex w-full items-center gap-4 p-6 text-left sm:p-7"
+        >
+          <OfficerIcon type="custom" className="h-12 w-12 flex-shrink-0 rounded-2xl" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[17px] font-semibold tracking-[-0.025em] text-[#1d1d1f]">{customType.label}</p>
+            <p className="mt-1 text-[13px] leading-6 text-[#6e6e73]">自己设定性格、追问方式与练习难度。</p>
+          </div>
+          <HiOutlineChevronRight className="h-5 w-5 flex-shrink-0 text-[#a1a1a6] transition-transform group-hover:translate-x-0.5" />
+        </motion.button>
+
         <AnimatePresence>
-          {previewConfig && previewConfig.demoTextEn && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.3, ease: [0.25, 0.1, 0, 1] }}
+          {previewConfig?.demoTextEn && (
+            <motion.section
+              initial={{ opacity: 0, height: 0, y: -6 }}
+              animate={{ opacity: 1, height: 'auto', y: 0 }}
+              exit={{ opacity: 0, height: 0, y: -6 }}
+              transition={{ duration: 0.32, ease: [0.28, 0.11, 0.32, 1] }}
               className="overflow-hidden"
             >
-              <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-white/60">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className={`w-5 h-5 rounded-md bg-gradient-to-br ${previewConfig.gradient}
-                    flex items-center justify-center text-[10px]`}
-                  >
-                    {previewConfig.icon}
+              <div className="app-soft-panel mt-4 p-5 sm:p-6">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1d1d1f] text-white">
+                    <HiOutlineSpeakerWave className="h-[17px] w-[17px]" />
                   </span>
-                  <span className="text-[13px] font-semibold text-slate-700">
-                    {previewConfig.label} · 试音
-                  </span>
-                  <button
-                    onClick={() => {
-                      setPreviewId(null)
-                      setPlaying(false)
-                      window.speechSynthesis.cancel()
-                    }}
-                    className="ml-auto text-[12px] text-slate-400 hover:text-slate-600 transition-colors"
-                  >
-                    收起
+                  <div>
+                    <p className="text-[13px] font-semibold text-[#1d1d1f]">{previewConfig.label} · 语气参考</p>
+                    <p className="text-[11px] text-[#86868b]">已接入实时 AI 声线，面签中会保持同一角色音色。</p>
+                  </div>
+                  <button type="button" onClick={() => handlePreview(previewConfig.id)} className="app-icon-button ml-auto h-8 w-8" aria-label="关闭试音">
+                    <HiOutlineXMark className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                      中文参考
-                    </p>
-                    <div className="p-3 rounded-xl bg-white/80 backdrop-blur-sm border border-slate-100">
-                      <p className="text-[13px] text-slate-700 leading-relaxed">
-                        {previewConfig.demoText}
-                      </p>
-                    </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-2xl bg-white p-4 ring-1 ring-black/[0.06]">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#86868b]">中文参考</p>
+                    <p className="mt-2 text-[13px] leading-6 text-[#424245]">{previewConfig.demoText}</p>
                   </div>
-                  <div>
-                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                      英文试音（实际朗读）
-                    </p>
-                    <div className="p-3 rounded-xl bg-slate-800/90 backdrop-blur-sm">
-                      <p className="text-[13px] text-white/90 leading-relaxed font-normal">
-                        {previewConfig.demoTextEn}
-                      </p>
-                    </div>
+                  <div className="rounded-2xl bg-[#1d1d1f] p-4 text-white">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/50">Actual script</p>
+                    <p className="mt-2 text-[13px] leading-6 text-white/85">{previewConfig.demoTextEn}</p>
                   </div>
                 </div>
               </div>
-            </motion.div>
+            </motion.section>
           )}
         </AnimatePresence>
+      </main>
 
-        {/* ---- 自定义入口卡片（全宽） ---- */}
-        <motion.div
-          custom={4}
-          variants={stagger}
-          initial="initial"
-          animate="animate"
-          className="mt-4"
-        >
-          <button
-            onClick={() => navigate('/voice/custom')}
-            className="w-full text-left p-5 rounded-2xl border-2 border-dashed
-              border-purple-200 hover:border-purple-300
-              bg-gradient-to-r from-purple-50/50 to-pink-50/50
-              hover:from-purple-50 hover:to-pink-50
-              transition-all duration-300
-              hover:shadow-md hover:shadow-purple-100/30
-              group"
-          >
-            <div className="flex items-center gap-4">
-              {/* 图标 */}
-              <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${customType.gradient}
-                flex items-center justify-center text-2xl flex-shrink-0
-                shadow-sm group-hover:shadow-md transition-shadow duration-300`}
-              >
-                <span>{customType.icon}</span>
-              </div>
-
-              {/* 文字 */}
-              <div className="flex-1 min-w-0">
-                <h3 className="text-[16px] font-semibold text-slate-900 mb-0.5">
-                  {customType.label}
-                </h3>
-                <p className="text-[12px] text-slate-400 font-normal">
-                  {customType.subtitle}
-                </p>
-                <p className="mt-2 text-[13px] text-slate-500 leading-relaxed">
-                  {customType.description}
-                </p>
-              </div>
-
-              {/* 箭头 */}
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-white border border-slate-200
-                flex items-center justify-center
-                group-hover:bg-purple-50 group-hover:border-purple-200
-                transition-all duration-300 group-hover:translate-x-0.5"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                  className="text-slate-400 group-hover:text-purple-500 transition-colors"
-                >
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </div>
-            </div>
-          </button>
-        </motion.div>
-      </div>
-
-      {/* ---- 底部确定栏（仅预设类型） ---- */}
       <AnimatePresence>
         {selectedConfig && (
           <motion.div
-            initial={{ y: 100, opacity: 0 }}
+            initial={{ y: 90, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
-            transition={{ duration: 0.3, ease: [0.25, 0.1, 0, 1] }}
-            className="fixed bottom-0 left-0 right-0 z-50"
+            exit={{ y: 90, opacity: 0 }}
+            transition={{ duration: 0.38, ease: [0.28, 0.11, 0.32, 1] }}
+            className="fixed inset-x-0 bottom-0 z-50 border-t border-black/[0.07] bg-white/82 px-5 py-4 backdrop-blur-2xl sm:px-8"
           >
-            <div className="h-12 bg-gradient-to-t from-[#F8FAFC] to-transparent" />
-            <div className="bg-white/80 backdrop-blur-2xl border-t border-slate-200/60
-              px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]"
-            >
-              <div className="max-w-2xl mx-auto flex items-center gap-4">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] text-slate-500 font-normal">
-                    已选择
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-7 h-7 rounded-lg bg-gradient-to-br ${selectedConfig.gradient}
-                      flex items-center justify-center text-sm`}
-                    >
-                      {selectedConfig.icon}
-                    </span>
-                    <span className="text-[15px] font-semibold text-slate-900">
-                      {selectedConfig.label}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  onClick={handleConfirm}
-                  className={`flex-shrink-0 px-8 py-3 rounded-2xl text-[15px] font-semibold
-                    text-white shadow-lg transition-all duration-300
-                    bg-gradient-to-r ${selectedConfig.gradient}
-                    hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]
-                    shadow-slate-400/25`}
-                >
-                  确定选择
-                </button>
+            <div className="mx-auto flex max-w-5xl items-center gap-4">
+              <OfficerIcon type={selectedConfig.id} className="h-10 w-10 flex-shrink-0 rounded-[14px]" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#86868b]">本次角色</p>
+                <p className="truncate text-[14px] font-semibold text-[#1d1d1f]">{selectedConfig.label}</p>
               </div>
+              <button type="button" onClick={handleVoiceLive} className="app-button-primary">
+                开始实时面签
+                <HiOutlineArrowRight className="h-4 w-4" />
+              </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </div>
   )
 }

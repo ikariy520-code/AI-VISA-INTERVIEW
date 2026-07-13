@@ -20,10 +20,10 @@ function scoreVariant(score: number) {
 }
 
 const variantColors = {
-  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  amber:   'bg-amber-50 text-amber-700 border-amber-200',
-  red:     'bg-red-50 text-red-600 border-red-200',
-  slate:   'bg-slate-50 text-slate-600 border-slate-200',
+  emerald: 'bg-[#eaf8f2] text-[#147a58] border-emerald-200/70',
+  amber:   'bg-[#fff6e6] text-[#8a5818] border-amber-200/70',
+  red:     'bg-[#fff0ef] text-[#b53a34] border-red-200/70',
+  slate:   'bg-[#f5f5f7] text-[#6e6e73] border-black/[0.06]',
 }
 
 const scoreDots = (score: number) =>
@@ -43,7 +43,7 @@ export default function DimensionBadge({
   const colors = variantColors[v]
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[12px] font-medium ${colors}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${colors}`}>
       <span>{label}</span>
       {mode === 'score' && <span className="flex gap-0.5">{scoreDots(score)}</span>}
       {mode === 'numeric' && (

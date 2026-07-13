@@ -1,6 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
+import {
+  HiOutlineAdjustmentsHorizontal,
+  HiOutlineArrowLeft,
+  HiOutlineArrowRight,
+  HiOutlineEye,
+  HiOutlinePencilSquare,
+} from 'react-icons/hi2'
+import OfficerIcon from './OfficerIcon'
 
 // ========================================
 // 自定义面签官 — 二级配置页面
@@ -11,13 +19,27 @@ import { motion } from 'framer-motion'
 
 // ---- 难度等级定义 ----
 
-const DIFFICULTY_LABELS = ['', '轻松入门', '偏易', '标准', '偏难', '地狱难度']
+const DIFFICULTY_LABELS = ['', '轻松', '偏易', '标准', '偏难', '高压']
 const DIFFICULTY_DESCRIPTIONS: Record<number, string> = {
-  1: '面签官会非常耐心友好，给你充足时间思考和回答',
-  2: '面签官态度温和，问题清晰，氛围轻松舒适',
-  3: '标准面签节奏，专业中性，不刻意施压也不特别友好',
-  4: '面签官会追问细节，提出质疑，需要你给出具体证据',
-  5: '面试官咄咄逼人，频繁打断追问，压力拉满',
+  1: '慢速提问，耐心等待',
+  2: '语气友好，轻度追问',
+  3: '真实节奏，正常追问',
+  4: '连续追问，要求细节',
+  5: '高压节奏，频繁质疑',
+}
+
+const DIFFICULTY_THEMES: Record<number, {
+  accent: string
+  soft: string
+  border: string
+  text: string
+  shadow: string
+}> = {
+  1: { accent: '#24966d', soft: '#edf8f3', border: '#cfeadd', text: '#167252', shadow: 'rgba(36, 150, 109, 0.24)' },
+  2: { accent: '#159d9a', soft: '#ebf8f7', border: '#c9e9e7', text: '#087775', shadow: 'rgba(21, 157, 154, 0.24)' },
+  3: { accent: '#0071e3', soft: '#eef6ff', border: '#cfe5fb', text: '#0062c3', shadow: 'rgba(0, 113, 227, 0.24)' },
+  4: { accent: '#e78319', soft: '#fff6eb', border: '#f3ddbf', text: '#a95908', shadow: 'rgba(231, 131, 25, 0.24)' },
+  5: { accent: '#d94b45', soft: '#fff1f0', border: '#f1d1cf', text: '#b3322d', shadow: 'rgba(217, 75, 69, 0.24)' },
 }
 
 const DIFFICULTY_GUIDES: Record<number, string> = {
@@ -62,6 +84,7 @@ function DifficultySlider({
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
+  const theme = DIFFICULTY_THEMES[value] ?? DIFFICULTY_THEMES[3]
 
   // 将 clientX 映射为难度值 1-5
   const clientXToValue = useCallback((clientX: number): number => {
@@ -74,6 +97,7 @@ function DifficultySlider({
   // 鼠标/触摸拖拽
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     setDragging(true)
     const newVal = clientXToValue(e.clientX)
     onChange(newVal)
@@ -103,36 +127,59 @@ function DifficultySlider({
     onChange(newVal)
   }, [dragging, clientXToValue, onChange])
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      onChange(Math.min(5, value + 1))
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault()
+      onChange(Math.max(1, value - 1))
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      onChange(1)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      onChange(5)
+    }
+  }, [onChange, value])
+
   // 滑块位置百分比
   const thumbPercent = ((value - 1) / 4) * 100
 
   return (
-    <div
-      ref={trackRef}
-      onClick={handleTrackClick}
-      className="relative flex items-center w-full h-14
-        bg-white/70 backdrop-blur-2xl
-        border border-slate-200/60
-        rounded-full px-4
-        shadow-sm shadow-slate-200/50
-        cursor-pointer select-none
-        transition-all duration-300"
-    >
-      {/* 左侧标签：轻松 */}
-      <span className="text-[12px] text-slate-400 font-medium flex-shrink-0 select-none mr-3">
-        轻松
-      </span>
-
-      {/* 轨道 */}
-      <div className="relative flex-1 h-2 mx-1">
+    <div>
+      <div
+        ref={trackRef}
+        onClick={handleTrackClick}
+        onPointerDown={handlePointerDown}
+        onKeyDown={handleKeyDown}
+        role="slider"
+        tabIndex={0}
+        aria-label="练习难度"
+        aria-valuemin={1}
+        aria-valuemax={5}
+        aria-valuenow={value}
+        aria-valuetext={DIFFICULTY_LABELS[value]}
+        className="relative flex h-16 w-full cursor-pointer select-none items-center rounded-[20px] border px-6 outline-none transition-all duration-300 focus-visible:ring-4 focus-visible:ring-black/10"
+        style={{
+          backgroundColor: theme.soft,
+          borderColor: theme.border,
+          boxShadow: dragging ? `0 12px 30px ${theme.shadow}` : undefined,
+        }}
+      >
+        {/* 轨道 */}
+        <div className="relative h-2.5 flex-1">
         {/* 背景线 */}
-        <div className="absolute inset-y-0 left-0 right-0 my-auto h-1.5 rounded-full bg-slate-200" />
+        <div className="absolute inset-y-0 left-0 right-0 my-auto h-2 rounded-full bg-white/90 shadow-inner" />
 
         {/* 已填充线 */}
         <div
-          className="absolute inset-y-0 left-0 my-auto h-1.5 rounded-full
-            bg-gradient-to-r from-purple-400 to-pink-500 transition-all duration-150"
-          style={{ width: `${thumbPercent}%` }}
+          className="absolute inset-y-0 left-0 my-auto h-2 rounded-full transition-all duration-300"
+          style={{
+            width: `${thumbPercent}%`,
+            backgroundColor: theme.accent,
+            boxShadow: `0 3px 12px ${theme.shadow}`,
+          }}
         />
 
         {/* 刻度点 */}
@@ -149,11 +196,14 @@ function DifficultySlider({
                 <div
                   className={`rounded-full transition-all duration-200
                     ${level === value
-                      ? 'w-3 h-3 bg-white border-2 border-purple-500 shadow-sm shadow-purple-500/30'
+                      ? 'h-3.5 w-3.5 border-[3px] bg-white'
                       : isActive
-                        ? 'w-2 h-2 bg-purple-400'
-                        : 'w-2 h-2 bg-slate-300'
+                        ? 'h-2.5 w-2.5'
+                        : 'h-2.5 w-2.5 bg-[#d2d2d7]'
                     }`}
+                  style={level === value
+                    ? { borderColor: theme.accent, boxShadow: `0 2px 8px ${theme.shadow}` }
+                    : isActive ? { backgroundColor: theme.accent } : undefined}
                 />
               </div>
             )
@@ -163,29 +213,49 @@ function DifficultySlider({
         {/* 拖拽拇指 */}
         <div
           onPointerDown={handlePointerDown}
-          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2
-            w-7 h-7 rounded-full
-            bg-gradient-to-br from-purple-500 to-pink-600
-            shadow-lg shadow-purple-500/30
-            border-2 border-white
+          className="absolute top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full
+            border-[3px] border-white
             cursor-grab active:cursor-grabbing
             flex items-center justify-center
-            transition-shadow duration-200
-            hover:shadow-xl hover:shadow-purple-500/40
+            transition-all duration-300
             z-10"
-          style={{ left: `${thumbPercent}%`, touchAction: 'none' }}
+          style={{
+            left: `${thumbPercent}%`,
+            touchAction: 'none',
+            backgroundColor: theme.accent,
+            boxShadow: `0 8px 22px ${theme.shadow}`,
+            transform: `translate(-50%, -50%) scale(${dragging ? 1.08 : 1})`,
+          }}
         >
           {/* 拇指上的数字 */}
-          <span className="text-[10px] font-bold text-white select-none">
+          <span className="select-none text-[11px] font-bold text-white">
             {value}
           </span>
         </div>
       </div>
+      </div>
 
-      {/* 右侧标签：困难 */}
-      <span className="text-[12px] text-slate-400 font-medium flex-shrink-0 select-none ml-3">
-        困难
-      </span>
+      <div className="mt-3 grid grid-cols-5 gap-1.5">
+        {[1, 2, 3, 4, 5].map(level => {
+          const isSelected = level === value
+          const levelTheme = DIFFICULTY_THEMES[level]
+          return (
+            <button
+              type="button"
+              key={level}
+              onClick={() => onChange(level)}
+              aria-label={`难度 ${level}：${DIFFICULTY_LABELS[level]}`}
+              className="min-h-11 rounded-[14px] border px-1.5 py-2 text-center transition-all duration-200"
+              style={isSelected
+                ? { backgroundColor: levelTheme.soft, borderColor: levelTheme.border, color: levelTheme.text, outlineColor: levelTheme.accent }
+                : { backgroundColor: '#ffffff', borderColor: 'rgba(29,29,31,0.07)', color: '#86868b', outlineColor: levelTheme.accent }}
+            >
+              <span className="block text-[10px] font-semibold tabular-nums">0{level}</span>
+              <span className="mt-0.5 block text-[11px] font-semibold">{DIFFICULTY_LABELS[level]}</span>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -212,56 +282,48 @@ export default function CustomOfficerPage() {
   const isValid = description.trim().length > 0
 
   return (
-    <motion.div {...pageTransition} className="min-h-screen bg-[#F8FAFC]">
+    <motion.div {...pageTransition} className="app-page pb-32">
       {/* ---- 顶栏 ---- */}
-      <header className="flex items-center px-4 py-3">
-        <button
-          onClick={() => navigate('/voice')}
-          className="flex items-center gap-1.5 text-[13px] font-medium text-slate-400
-            hover:text-slate-700 transition-colors"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-          返回
-        </button>
-        <span className="flex-1 text-center text-[14px] font-semibold text-slate-700 mr-8">
-          自定义面签官
-        </span>
+      <header className="app-topbar">
+        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-5 sm:px-8">
+          <button onClick={() => navigate('/voice')} className="app-icon-button" aria-label="返回面签官选择">
+            <HiOutlineArrowLeft className="h-[18px] w-[18px]" />
+          </button>
+          <div className="text-center">
+            <p className="text-[13px] font-semibold text-[#1d1d1f]">自定义角色</p>
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#86868b]">Personal setup</p>
+          </div>
+          <span className="w-10" />
+        </div>
       </header>
 
       {/* ---- 内容 ---- */}
-      <div className="max-w-xl mx-auto px-4 pb-24">
+      <main className="mx-auto max-w-2xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
         {/* 简介 */}
-        <div className="mb-8">
-          <p className="text-[15px] text-slate-500 leading-relaxed">
-            描述你理想中的面签官，AI 将根据你的描述和难度设定，为你定制专属的面签练习体验。
-          </p>
+        <div className="mb-9">
+          <span className="app-eyebrow">Custom officer</span>
+          <h1 className="app-title mt-5">练你最担心的场景。</h1>
+          <p className="app-subtitle">写下角色风格，再选难度。</p>
         </div>
 
         {/* 描述输入区 */}
-        <section className="mb-8">
-          <h2 className="text-[15px] font-semibold text-slate-800 mb-3">
-            ✏️ 描述你想要的类型
+        <section className="app-card mb-4 p-6 sm:p-7">
+          <h2 className="mb-4 flex items-center gap-2 text-[15px] font-semibold text-[#1d1d1f]">
+            <HiOutlinePencilSquare className="h-[18px] w-[18px] text-[#0071e3]" />
+            描述你想要的类型
           </h2>
           <textarea
             value={description}
             onChange={e => setDescription(e.target.value)}
-            placeholder="例如：一位温和但严谨的华裔女性面签官，喜欢追问家庭细节和工作情况，偶尔会用中文确认关键信息。说话不快但每句话都很有分量…"
+            placeholder="例如：温和但严谨，语速较慢，重点追问资金与回国计划。"
             rows={4}
-            className="w-full px-4 py-3.5 rounded-2xl border border-slate-200
-              bg-white text-[14px] text-slate-700 placeholder-slate-400
-              outline-none transition-all duration-200
-              focus:border-purple-300 focus:ring-4 focus:ring-purple-50
-              resize-none leading-relaxed
-              shadow-sm"
+            className="app-field min-h-32 resize-none leading-7"
           />
 
           {/* 字符计数/提示 */}
           <div className="flex items-center justify-between mt-2">
             <p className="text-[12px] text-slate-400">
-              描述越具体，AI 扮演的角色越贴合你的预期
+              建议写清性格、语速和追问重点
             </p>
             <span className="text-[12px] text-slate-400 tabular-nums">
               {description.length}
@@ -270,48 +332,46 @@ export default function CustomOfficerPage() {
         </section>
 
         {/* 难度选择区 */}
-        <section className="mb-8">
-          <h2 className="text-[15px] font-semibold text-slate-800 mb-3">
-            🎚️ 练习难度
+        <section className="app-card mb-4 p-6 sm:p-7">
+          <h2 className="mb-4 flex items-center gap-2 text-[15px] font-semibold text-[#1d1d1f]">
+            <HiOutlineAdjustmentsHorizontal
+              className="h-[18px] w-[18px] transition-colors duration-300"
+              style={{ color: DIFFICULTY_THEMES[difficulty].accent }}
+            />
+            练习难度
           </h2>
 
           {/* 当前难度标签 */}
-          <div className="flex items-center gap-2 mb-4">
-            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[12px] font-semibold
-              ${difficulty <= 2
-                ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
-                : difficulty === 3
-                  ? 'bg-blue-50 text-blue-600 border border-blue-200'
-                  : 'bg-red-50 text-red-600 border border-red-200'
-              }`}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={difficulty}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.18 }}
+              className="mb-4 flex items-center justify-between rounded-[18px] border px-4 py-3"
+              style={{
+                backgroundColor: DIFFICULTY_THEMES[difficulty].soft,
+                borderColor: DIFFICULTY_THEMES[difficulty].border,
+              }}
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-current" />
-              {DIFFICULTY_LABELS[difficulty]}
-            </span>
-            <span className="text-[13px] text-slate-500">
-              {DIFFICULTY_DESCRIPTIONS[difficulty]}
-            </span>
-          </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: DIFFICULTY_THEMES[difficulty].text }}>
+                  Level 0{difficulty}
+                </p>
+                <p className="mt-0.5 text-[15px] font-semibold" style={{ color: DIFFICULTY_THEMES[difficulty].text }}>
+                  {DIFFICULTY_LABELS[difficulty]}
+                </p>
+              </div>
+              <p className="text-right text-[13px] font-medium text-[#6e6e73]">
+                {DIFFICULTY_DESCRIPTIONS[difficulty]}
+              </p>
+            </motion.div>
+          </AnimatePresence>
 
           {/* 可拖拽滑块 */}
           <DifficultySlider value={difficulty} onChange={setDifficulty} />
 
-          {/* 难度档位速查 */}
-          <div className="flex justify-between mt-3 px-1">
-            {[1, 2, 3, 4, 5].map(level => (
-              <button
-                key={level}
-                onClick={() => setDifficulty(level)}
-                className={`text-[11px] font-medium transition-colors duration-200
-                  ${level === difficulty
-                    ? 'text-purple-600'
-                    : 'text-slate-400 hover:text-slate-600'
-                  }`}
-              >
-                {level}
-              </button>
-            ))}
-          </div>
         </section>
 
         {/* 预览区 */}
@@ -320,12 +380,13 @@ export default function CustomOfficerPage() {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             transition={{ duration: 0.3 }}
-            className="mb-8 overflow-hidden"
+            className="app-card mb-4 overflow-hidden p-6 sm:p-7"
           >
-            <h2 className="text-[15px] font-semibold text-slate-800 mb-3">
-              👁️ 效果预览
+            <h2 className="mb-4 flex items-center gap-2 text-[15px] font-semibold text-[#1d1d1f]">
+              <HiOutlineEye className="h-[18px] w-[18px] text-[#0071e3]" />
+              效果预览
             </h2>
-            <div className="p-4 rounded-2xl bg-slate-800/90 border border-slate-700/50">
+            <div className="rounded-2xl bg-[#1d1d1f] p-4">
               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
                 AI System Prompt 预览
               </p>
@@ -335,52 +396,37 @@ export default function CustomOfficerPage() {
             </div>
           </motion.section>
         )}
-      </div>
+      </main>
 
       {/* ---- 底部确认栏 ---- */}
       <motion.div
         initial={{ y: 100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.3, ease: [0.25, 0.1, 0, 1] }}
-        className="fixed bottom-0 left-0 right-0 z-50"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-black/[0.07] bg-white/82 px-5 py-4 backdrop-blur-2xl sm:px-8"
       >
-        <div className="h-12 bg-gradient-to-t from-[#F8FAFC] to-transparent" />
-        <div className="bg-white/80 backdrop-blur-2xl border-t border-slate-200/60
-          px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]"
-        >
-          <div className="max-w-xl mx-auto flex items-center gap-4">
+          <div className="mx-auto flex max-w-2xl items-center gap-4">
+            <OfficerIcon type="custom" className="h-10 w-10 flex-shrink-0 rounded-[14px]" />
             <div className="flex-1 min-w-0">
-              <p className="text-[13px] text-slate-500 font-normal">
-                自定义面签官
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#86868b]">
+                自定义角色
               </p>
-              <div className="flex items-center gap-2">
-                <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-pink-600
-                  flex items-center justify-center text-sm"
-                >
-                  ✨
-                </span>
-                <span className="text-[14px] font-semibold text-slate-700 truncate">
+                <span className="block truncate text-[14px] font-semibold text-[#1d1d1f]">
                   {description
                     ? description.slice(0, 30) + (description.length > 30 ? '…' : '')
                     : '未填写描述'
                   }
                 </span>
-              </div>
             </div>
             <button
               onClick={handleConfirm}
               disabled={!isValid}
-              className={`flex-shrink-0 px-8 py-3 rounded-2xl text-[15px] font-semibold
-                text-white shadow-lg transition-all duration-300
-                bg-gradient-to-r from-purple-500 to-pink-600
-                hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]
-                shadow-purple-400/25
-                ${!isValid ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''}`}
+              className="app-button-primary flex-shrink-0"
             >
               开始练习
+              <HiOutlineArrowRight className="h-4 w-4" />
             </button>
           </div>
-        </div>
       </motion.div>
     </motion.div>
   )

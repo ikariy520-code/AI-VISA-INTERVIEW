@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { HiOutlineArrowLeft, HiOutlineCheck } from 'react-icons/hi2'
 import type { VisaType, UserContext, InterviewStep, AIAnalysisResult, ChatMessage } from './types'
 import type { OfficerType } from '../voice/types'
 import { officerTypes } from '../voice/data/officerTypes'
@@ -9,8 +10,6 @@ import UserContextForm from './components/UserContextForm'
 import AIAnalysisScreen from './components/AIAnalysisScreen'
 import InterviewRoom from './components/InterviewRoom'
 import InterviewComplete from './components/InterviewComplete'
-import InviteGate from '../../access/InviteGate'
-import { clearActiveInterviewSession, useAccess } from '../../access/AccessContext'
 
 // ========================================
 // 面签实战 — 主页面
@@ -32,10 +31,19 @@ import { clearActiveInterviewSession, useAccess } from '../../access/AccessConte
 
 // 页面切换动画
 const pageTransition = {
-  initial: { opacity: 0, y: 24 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -12 },
-  transition: { duration: 0.35, ease: [0.25, 0.1, 0, 1] },
+  initial: { opacity: 0, y: 14, scale: 0.995 },
+  animate: { opacity: 1, y: 0, scale: 1 },
+  exit: { opacity: 0, y: -8, scale: 0.997 },
+  transition: { duration: 0.36, ease: [0.28, 0.11, 0.32, 1] },
+}
+
+const steps: InterviewStep[] = ['select-type', 'context-form', 'ai-analysis', 'interview', 'complete']
+const stepMeta: Record<InterviewStep, { label: string; short: string }> = {
+  'select-type': { label: '选择签证类型', short: '类型' },
+  'context-form': { label: '建立面签背景', short: '背景' },
+  'ai-analysis': { label: '准备面签策略', short: '准备' },
+  'interview': { label: '模拟面签', short: '面签' },
+  'complete': { label: '生成反馈', short: '反馈' },
 }
 
 export default function PracticePage() {
@@ -47,7 +55,6 @@ export default function PracticePage() {
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [duration, setDuration] = useState('')
-  const { hasAccess } = useAccess()
 
   // 面签官类型：从路由 state 读取，回退到 sessionStorage
   const officerType: OfficerType | null = useMemo(() => {
@@ -75,7 +82,6 @@ export default function PracticePage() {
 
   // Step 1 → Step 2
   const handleSelectType = useCallback((type: VisaType) => {
-    clearActiveInterviewSession()
     setVisaType(type)
     setStep('context-form')
   }, [])
@@ -110,7 +116,6 @@ export default function PracticePage() {
 
   // 重置
   const handleReset = useCallback(() => {
-    clearActiveInterviewSession()
     setStep('select-type')
     setVisaType(null)
     setUserContext(null)
@@ -120,49 +125,53 @@ export default function PracticePage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC]">
+    <div className="app-page">
       {/* ---- 顶部导航条 ---- */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white/80 backdrop-blur-sm sticky top-0 z-30">
-        <button
-          onClick={() => (step === 'select-type' ? navigate('/') : handleBack())}
-          className="flex items-center gap-1.5 text-[13px] font-medium text-slate-400
-            hover:text-slate-700 transition-colors"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-          {step === 'select-type' ? '首页' : '返回'}
-        </button>
+      <header className="app-topbar">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+          <button
+            type="button"
+            onClick={() => (step === 'select-type' ? navigate('/') : handleBack())}
+            className="app-icon-button"
+            aria-label={step === 'select-type' ? '返回首页' : '返回上一步'}
+          >
+            <HiOutlineArrowLeft className="h-[18px] w-[18px]" />
+          </button>
 
-        <span className="text-[13px] font-semibold text-slate-700 tracking-tight">
-          面签实战
-        </span>
-
-        {/* 步骤进度指示 */}
-        <div className="flex items-center gap-2">
-          <span className={`hidden sm:inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium ${hasAccess ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${hasAccess ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-            {hasAccess ? 'AI 已解锁' : 'AI 待解锁'}
-          </span>
-          <div className="flex items-center gap-1.5">
-          {(['select-type', 'context-form', 'ai-analysis', 'interview', 'complete'] as InterviewStep[]).map((s, i) => (
-            <span
-              key={s}
-              className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
-                step === s
-                  ? 'bg-blue-500 scale-125'
-                  : ['select-type', 'context-form', 'ai-analysis', 'interview', 'complete'].indexOf(step) > i
-                  ? 'bg-blue-300'
-                  : 'bg-slate-200'
-              }`}
-            />
-          ))}
+          <div className="text-center">
+            <p className="text-[13px] font-semibold text-[#1d1d1f]">{stepMeta[step].label}</p>
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#86868b]">
+              Step {steps.indexOf(step) + 1} of {steps.length}
+            </p>
           </div>
+
+          <div className="hidden items-center gap-1.5 sm:flex" aria-label="面签流程进度">
+            {steps.map((item, index) => {
+              const currentIndex = steps.indexOf(step)
+              const isDone = index < currentIndex
+              const isActive = item === step
+              return (
+                <span
+                  key={item}
+                  className={`flex h-7 items-center justify-center rounded-full transition-all duration-300 ${
+                    isActive
+                      ? 'w-16 bg-[#1d1d1f] text-[10px] font-semibold text-white'
+                      : isDone
+                        ? 'w-7 bg-[#eaf4ff] text-[#0071e3]'
+                        : 'w-2 bg-black/[0.09] text-transparent'
+                  }`}
+                >
+                  {isActive ? stepMeta[item].short : isDone ? <HiOutlineCheck className="h-3.5 w-3.5" /> : ''}
+                </span>
+              )
+            })}
+          </div>
+          <div className="w-10 sm:hidden" />
         </div>
-      </div>
+      </header>
 
       {/* ---- 步骤内容 ---- */}
-      <div className="px-4 py-8">
+      <main className={step === 'interview' ? 'px-3 py-3 sm:px-5' : 'px-5 py-10 sm:px-8 sm:py-14'}>
         {officerType && officerConfig ? (
           <AnimatePresence mode="wait">
             <motion.div key={step} {...pageTransition}>
@@ -179,15 +188,10 @@ export default function PracticePage() {
               )}
 
               {step === 'ai-analysis' && userContext && (
-                <InviteGate
-                  title="解锁 AI 分析与面签对话"
-                  description="你可以浏览面签设置。输入邀请码后，AI 将分析你的背景并开始实时面签。"
-                >
-                  <AIAnalysisScreen
-                    context={userContext}
-                    onComplete={handleAnalysisComplete}
-                  />
-                </InviteGate>
+                <AIAnalysisScreen
+                  context={userContext}
+                  onComplete={handleAnalysisComplete}
+                />
               )}
 
               {step === 'interview' && userContext && analysis && (
@@ -215,7 +219,7 @@ export default function PracticePage() {
             <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
           </div>
         )}
-      </div>
+      </main>
     </div>
   )
 }
