@@ -51,9 +51,7 @@ export function mockAnalyzeUser(context: UserContext): AIAnalysisResult {
         '过往出国记录',
       ],
       strategy: '重点验证申请人的国内约束力和旅行计划的真实性。B2 签证关注申请人是否有移民倾向，需要让申请人展示明确的归国意愿。',
-      greeting: `你好，欢迎来面签。请把你的护照给我。
-
-Good morning. Please give me your passport.
+      greeting: `Good morning. Please give me your passport.
 
 So, what's the purpose of your trip to the United States?`,
     },
@@ -72,9 +70,7 @@ So, what's the purpose of your trip to the United States?`,
         '归国后的工作安排',
       ],
       strategy: '验证商务访问的合理性和必要性。关注申请人所在公司的规模和申请人在公司的角色，确认商务活动结束后会按时回国。',
-      greeting: `你好，欢迎来面签。请把护照给我。
-
-Good morning. Please give me your passport.
+      greeting: `Good morning. Please give me your passport.
 
 What's the purpose of your trip to the United States?`,
     },
@@ -112,9 +108,7 @@ What's the purpose of your trip to the United States?`,
         '长期职业规划',
       ],
       strategy: '验证专业职位与申请人背景的匹配度。关注雇佣关系的真实性以及申请人是否是合格的 specialty occupation 从业者。',
-      greeting: `你好，欢迎来面签。请把你的护照和 I-797 给我。
-
-Good morning. Please give me your passport and I-797 approval notice.
+      greeting: `Good morning. Please give me your passport and I-797 approval notice.
 
 So, tell me about the position you'll be taking in the United States.`,
     },
@@ -134,9 +128,7 @@ So, tell me about the position you'll be taking in the United States.`,
         '在美国的工作目标',
       ],
       strategy: '验证跨国公司的关联性以及申请人的管理层/专业技能资质。L1 签证需要确认申请人在过去三年中有至少一年的海外公司工作经验。',
-      greeting: `你好，欢迎来面签。请把你的护照和 L1 申请材料给我。
-
-Good morning. Please give me your passport and L1 petition documents.
+      greeting: `Good morning. Please give me your passport and L1 petition documents.
 
 Tell me about your current role at the company and what you'll be doing in the US office.`,
     },
@@ -244,27 +236,19 @@ export function getMockGreeting(visaType: VisaType, context?: UserContext): stri
 
   // 非 F1：固定开场白
   const greetings: Record<string, string> = {
-    B2: `你好，欢迎来面签。请把你的护照给我。
-
-Good morning. Please give me your passport.
+    B2: `Good morning. Please give me your passport.
 
 So, what's the purpose of your trip to the United States?`,
 
-    B1: `你好，欢迎来面签。请把护照给我。
-
-Good morning. Please give me your passport.
+    B1: `Good morning. Please give me your passport.
 
 What's the purpose of your trip to the United States?`,
 
-    H1B: `你好，欢迎来面签。请把护照和 I-797 给我。
-
-Good morning. Please give me your passport and I-797 approval notice.
+    H1B: `Good morning. Please give me your passport and I-797 approval notice.
 
 So, tell me about the position you'll be taking in the United States.`,
 
-    L1: `你好，欢迎来面签。请把护照和 L1 申请材料给我。
-
-Good morning. Please give me your passport and L1 petition documents.
+    L1: `Good morning. Please give me your passport and L1 petition documents.
 
 Tell me about your current role at the company and what you'll be doing in the US office.`,
   }

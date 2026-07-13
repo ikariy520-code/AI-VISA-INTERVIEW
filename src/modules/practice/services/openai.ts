@@ -26,7 +26,9 @@ const BASE_SYSTEM_PROMPT = `You are a US visa officer conducting an interview. Y
 - Ask one question at a time, wait for the answer
 - Evaluate: ties to home country, purpose of travel, financial ability, travel history
 - The interview should feel like a real conversation, not an interrogation
-- Respond in the same language the applicant uses
+- Conduct the entire interview in natural American English only
+- Never translate or repeat an interview question in Chinese
+- If the applicant speaks Chinese or another language, reply only in English and ask them to answer in English
 - Keep responses concise — 1-3 sentences per question
 - Never ask for or repeat identifying details such as a passport number, SEVIS ID, DS-160 confirmation number, date of birth, phone number, email address, exact home address, or bank/account number
 - If a document check is relevant, simulate the applicant handing over the document; never ask them to upload a real document or provide its identifying numbers`
@@ -104,12 +106,16 @@ function buildSafeInterviewContext(context: UserContext): Record<string, unknown
 function buildSystemPrompt(officerType: OfficerType): string {
   if (officerType === 'custom') {
     const custom = sessionStorage.getItem('visa_custom_system_prompt')
-    if (custom) return `${BASE_SYSTEM_PROMPT}\n\n${custom}`
+    if (custom) {
+      return `${BASE_SYSTEM_PROMPT}\n\n${custom}\n\nNon-negotiable language rule: every officer utterance must be written in English only.`
+    }
   }
   const config = officerTypes.find(o => o.id === officerType)
   const addition = config?.systemPromptAddition ?? officerTypes.find(o => o.id === 'standard')!.systemPromptAddition
-  return `${BASE_SYSTEM_PROMPT}\n\n${addition}`
+  return `${BASE_SYSTEM_PROMPT}\n\n${addition}\n\nNon-negotiable language rule: every officer utterance must be written in English only.`
 }
+
+const containsCjk = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(value)
 
 const defaultConfig: OpenAIConfig = {
   apiKey: '',
@@ -241,7 +247,8 @@ ${JSON.stringify(buildSafeInterviewContext(context), null, 2)}`,
   messages.push({
     role: 'system',
     content: `Continue the conversation naturally as the visa officer. Ask only ONE question. Output valid JSON:
-{ "text": "<your next question or statement as the officer>", "emotion": "<neutral|friendly|stern|curious|reassuring|thoughtful>", "isClosing": <true|false> }`,
+{ "text": "<your next question or statement as the officer, in English only>", "emotion": "<neutral|friendly|stern|curious|reassuring|thoughtful>", "isClosing": <true|false> }
+The text field must contain English only, even when the applicant answered in another language.`,
   })
 
   try {
@@ -252,8 +259,13 @@ ${JSON.stringify(buildSafeInterviewContext(context), null, 2)}`,
     })
 
     const parsed = JSON.parse(content)
+    const responseText = String(parsed.text || '').trim()
+    if (!responseText || containsCjk(responseText)) {
+      throw new Error('The AI returned a non-English officer response')
+    }
+
     return {
-      text: parsed.text || '',
+      text: responseText,
       emotion: parsed.emotion || 'neutral',
       isClosing: parsed.isClosing || false,
       isDocumentRequest: parsed.isDocumentRequest || false,

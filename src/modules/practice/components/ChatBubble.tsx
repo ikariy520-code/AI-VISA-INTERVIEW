@@ -40,7 +40,7 @@ export default function ChatBubble({ message }: Props) {
         className="mb-5 flex justify-end gap-3"
       >
         <div className="max-w-[82%] sm:max-w-[75%]">
-          <p className="rounded-[20px] rounded-tr-md bg-[#1d1d1f] px-4 py-3 text-[14px] leading-6 text-white shadow-sm">
+          <p lang="en" translate="no" className="rounded-[20px] rounded-tr-md bg-[#1d1d1f] px-4 py-3 text-[14px] leading-6 text-white shadow-sm">
             {message.text}
           </p>
         </div>
@@ -69,7 +69,7 @@ export default function ChatBubble({ message }: Props) {
 
       <div className="max-w-[82%] flex-1 sm:max-w-[78%]">
         {/* 文字气泡 */}
-        <p className="rounded-[20px] rounded-tl-md border border-black/[0.06] bg-white px-4 py-3 text-[14px] leading-6 text-[#424245] shadow-sm">
+        <p lang="en" translate="no" className="rounded-[20px] rounded-tl-md border border-black/[0.06] bg-white px-4 py-3 text-[14px] leading-6 text-[#424245] shadow-sm">
           {message.text}
         </p>
 

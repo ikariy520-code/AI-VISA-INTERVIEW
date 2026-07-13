@@ -76,12 +76,6 @@ export default function VoicePage() {
     navigate('/practice', { state: { officerType: selectedId } })
   }, [navigate, selectedId])
 
-  const handleVoiceLive = useCallback(() => {
-    if (!selectedId) return
-    sessionStorage.setItem('visa_officer_type', selectedId)
-    navigate('/voice/live', { state: { officerType: selectedId } })
-  }, [navigate, selectedId])
-
   return (
     <div className="app-page pb-32">
       <header className="app-topbar">
@@ -237,8 +231,8 @@ export default function VoicePage() {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#86868b]">本次角色</p>
                 <p className="truncate text-[14px] font-semibold text-[#1d1d1f]">{selectedConfig.label}</p>
               </div>
-              <button type="button" onClick={handleVoiceLive} className="app-button-primary">
-                开始实时面签
+              <button type="button" onClick={handleConfirm} className="app-button-primary">
+                选择签证类型
                 <HiOutlineArrowRight className="h-4 w-4" />
               </button>
             </div>

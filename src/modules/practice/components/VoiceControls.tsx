@@ -26,6 +26,8 @@ const statusLabel: Record<InterviewStatus, { text: string; sub: string }> = {
   'officer-speaking': { text: '先听完面签官的问题', sub: '问题结束后麦克风会自动就绪' },
 }
 
+const containsCjk = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(value)
+
 export default function VoiceControls({
   status,
   elapsed,
@@ -48,7 +50,11 @@ export default function VoiceControls({
         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden px-4 pt-3 sm:px-6">
           <div className="rounded-2xl border border-red-200/60 bg-[#fff7f6] px-4 py-2.5 text-center">
             <p className="text-[12px] leading-5 text-[#6e6e73]">
-              {partialTranscript || (isSupported ? '正在听取你的回答…' : '当前浏览器暂不支持语音识别')}
+              <span lang="en" translate="no">
+                {containsCjk(partialTranscript)
+                  ? 'Please answer in English.'
+                  : partialTranscript || (isSupported ? 'Listening to your answer…' : 'Speech recognition is not supported in this browser.')}
+              </span>
             </p>
           </div>
         </motion.div>

@@ -42,6 +42,8 @@ function formatElapsed(seconds: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 }
 
+const containsCjk = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(value)
+
 /** 检测结束语 */
 function checkClosingText(text: string): boolean {
   const lower = text.toLowerCase()
@@ -124,6 +126,13 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
 
   const submitAnswer = useCallback(async (text: string) => {
     if (!text.trim() || processingRef.current) return
+
+    if (containsCjk(text)) {
+      setAiError('Please answer in English. Your response was not added to the interview record.')
+      setStatus('idle')
+      return
+    }
+
     processingRef.current = true
 
     const userMsg: ChatMessage = {
