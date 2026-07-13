@@ -15,6 +15,7 @@ import type { OfficerType } from '../../voice/types'
 import { officerTypes } from '../../voice/data/officerTypes'
 import { getF1DecisionContext, mockAnalyzeUser, mockGenerateResponse } from '../data/mockOfficer'
 import { parseDoubaoAssessment, type F1AnswerAssessment } from '../../../shared/doubaoDecision'
+import { playDoubaoSpeech } from './doubaoSpeech'
 
 // ---- 配置 ----
 
@@ -323,7 +324,7 @@ The text field must contain English only, even when the applicant answered in an
 
 type TTSProvider = 'webspeech' | 'doubao' | 'openai'
 
-const ACTIVE_TTS_PROVIDER: TTSProvider = 'webspeech'
+const ACTIVE_TTS_PROVIDER: TTSProvider = 'doubao'
 
 const PROVIDER_VOICE_MAP: Record<Exclude<TTSProvider, 'webspeech'>, Record<OfficerType, string>> = {
   doubao: {
@@ -334,31 +335,40 @@ const PROVIDER_VOICE_MAP: Record<Exclude<TTSProvider, 'webspeech'>, Record<Offic
   },
 }
 
-export async function textToSpeech(text: string, officerType: OfficerType = 'standard'): Promise<void> {
+function speakWithBrowser(text: string, officerType: OfficerType): void {
   const config = officerTypes.find(o => o.id === officerType)
   if (!config) return
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  window.speechSynthesis.cancel()
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.lang = 'en-US'
+  utterance.rate = config.voiceProfile.rate
+  utterance.pitch = config.voiceProfile.pitch
+  const genderKeywords = config.voiceProfile.gender === 'female'
+    ? ['female', 'woman', 'samantha', 'zira']
+    : ['male', 'guy', 'daniel', 'david']
+  const voices = window.speechSynthesis.getVoices()
+  const bestVoice =
+    voices.find(v => v.lang.startsWith('en') && genderKeywords.some(k => v.name.toLowerCase().includes(k)))
+    ?? voices.find(v => v.lang.startsWith('en') && v.name.includes('Google'))
+    ?? voices.find(v => v.lang.startsWith('en-US'))
+    ?? voices.find(v => v.lang.startsWith('en'))
+  if (bestVoice) utterance.voice = bestVoice
+  window.speechSynthesis.speak(utterance)
+}
 
+export async function textToSpeech(text: string, officerType: OfficerType = 'standard'): Promise<void> {
   if (ACTIVE_TTS_PROVIDER === 'webspeech') {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel()
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.lang = 'en-US'
-      utterance.rate = config.voiceProfile.rate
-      utterance.pitch = config.voiceProfile.pitch
+    speakWithBrowser(text, officerType)
+    return
+  }
 
-      const genderKeywords = config.voiceProfile.gender === 'female'
-        ? ['female', 'woman', 'samantha', 'zira']
-        : ['male', 'guy', 'daniel', 'david']
-
-      const voices = window.speechSynthesis.getVoices()
-      const bestVoice =
-        voices.find(v => v.lang.startsWith('en') && genderKeywords.some(k => v.name.toLowerCase().includes(k)))
-        ?? voices.find(v => v.lang.startsWith('en') && v.name.includes('Google'))
-        ?? voices.find(v => v.lang.startsWith('en-US'))
-        ?? voices.find(v => v.lang.startsWith('en'))
-      if (bestVoice) utterance.voice = bestVoice
-
-      window.speechSynthesis.speak(utterance)
+  if (ACTIVE_TTS_PROVIDER === 'doubao') {
+    try {
+      await playDoubaoSpeech(text)
+    } catch (error) {
+      console.warn('[TTS] Doubao unavailable; using browser speech for this utterance:', error)
+      speakWithBrowser(text, officerType)
     }
     return
   }

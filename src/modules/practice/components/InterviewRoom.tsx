@@ -100,6 +100,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
 
   useEffect(() => {
     if (showIntro) return
+    let cancelled = false
     const timer = setTimeout(() => {
       resetInterviewFlow()
       const greeting = getMockGreeting(context.visaType, context)
@@ -111,10 +112,15 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
         emotion: 'friendly',
       }
       setMessages([msg])
-      setStatus('idle') // 等待用户开始录音
-      setTimeout(() => textToSpeech(greeting, officerType), 150)
+      setStatus('officer-speaking')
+      void textToSpeech(greeting, officerType).finally(() => {
+        if (!cancelled) setStatus('idle')
+      })
     }, 500)
-    return () => clearTimeout(timer)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [showIntro]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- 自动滚动 ----
@@ -167,8 +173,9 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
       setMessages(prev => [...prev, officerMsg])
       setOfficerEmotion(response.emotion as OfficerEmotion)
 
-      // TTS 朗读
-      textToSpeech(response.text, officerType)
+      // Keep the microphone disabled until the officer has finished speaking.
+      setStatus('officer-speaking')
+      await textToSpeech(response.text, officerType)
 
       // 结束判断
       if (response.isClosing || checkClosingText(response.text)) {

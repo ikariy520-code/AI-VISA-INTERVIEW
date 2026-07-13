@@ -1,48 +1,25 @@
-// ========================================
-// 语音输入 Hook
-//
-// 封装 Web Speech API (SpeechRecognition)
-// 支持浏览器原生语音识别，无需后端
-//
-// 用法：
-//   const { start, stop, transcript, isRecording, duration, error, isSupported }
-//     = useVoiceInput({ onResult: (text) => { ... } })
-//
-// 流程：
-//   点击麦克风 → start() → 说话 → stop() → onResult(text) 回调
-// ========================================
-
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { DoubaoAsrSession, isDoubaoAsrSupported } from '../services/doubaoSpeech'
 
 interface UseVoiceInputOptions {
-  /** 识别结果回调（用户说完了） */
   onResult?: (text: string) => void
-  /** 识别语言 */
   lang?: string
 }
 
 interface UseVoiceInputReturn {
-  /** 开始录音 */
   start: () => void
-  /** 停止录音并提交识别结果 */
   stop: () => void
-  /** 取消录音（不提交） */
   cancel: () => void
-  /** 当前实时识别文本（说话过程中更新） */
   partialTranscript: string
-  /** 是否正在录音 */
   isRecording: boolean
-  /** 录音时长（秒） */
   duration: number
-  /** 错误信息 */
   error: string | null
-  /** 浏览器是否支持语音识别 */
   isSupported: boolean
 }
 
-// SpeechRecognition 类型（浏览器原生 API）
-const SpeechRecognitionAPI =
-  (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+const BrowserSpeechRecognition = typeof window !== 'undefined'
+  ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+  : undefined
 
 export function useVoiceInput({
   onResult,
@@ -52,149 +29,156 @@ export function useVoiceInput({
   const [partialTranscript, setPartialTranscript] = useState('')
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [isSupported, setIsSupported] = useState(true)
-
-  const recognitionRef = useRef<any>(null)
-  const finalTextRef = useRef('')
-  const durationTimerRef = useRef<ReturnType<typeof setInterval>>()
-  const durationRef = useRef(0)
   const onResultRef = useRef(onResult)
+  const durationRef = useRef(0)
+  const durationTimerRef = useRef<ReturnType<typeof setInterval>>()
+  const cloudSessionRef = useRef<DoubaoAsrSession | null>(null)
+  const browserRecognitionRef = useRef<any>(null)
+  const finalTextRef = useRef('')
+  const cancelledRef = useRef(false)
+  const submittedRef = useRef(false)
   onResultRef.current = onResult
 
-  // ---- 初始化 SpeechRecognition ----
+  const isSupported = isDoubaoAsrSupported() || Boolean(BrowserSpeechRecognition)
 
-  const initRecognition = useCallback(() => {
-    if (!SpeechRecognitionAPI) {
-      setIsSupported(false)
-      setError('浏览器不支持语音识别，请使用 Chrome 或 Edge')
-      return null
+  const stopTimer = useCallback(() => {
+    clearInterval(durationTimerRef.current)
+    durationTimerRef.current = undefined
+  }, [])
+
+  const startTimer = useCallback(() => {
+    stopTimer()
+    durationRef.current = 0
+    setDuration(0)
+    durationTimerRef.current = setInterval(() => {
+      durationRef.current += 1
+      setDuration(durationRef.current)
+    }, 1000)
+  }, [stopTimer])
+
+  const submitFinalText = useCallback(() => {
+    if (cancelledRef.current || submittedRef.current) return
+    const cleaned = finalTextRef.current.replace(/\s+/g, ' ').trim()
+    if (!cleaned) {
+      setError('No speech was recognized. Please try again.')
+      return
     }
+    submittedRef.current = true
+    setPartialTranscript('')
+    onResultRef.current?.(cleaned)
+  }, [])
 
-    const recognition = new SpeechRecognitionAPI()
+  const startBrowserFallback = useCallback(() => {
+    if (!BrowserSpeechRecognition) {
+      setError('Cloud speech recognition is unavailable and this browser has no fallback recognition.')
+      return
+    }
+    const recognition = new BrowserSpeechRecognition()
+    browserRecognitionRef.current = recognition
     recognition.lang = lang
     recognition.interimResults = true
     recognition.continuous = true
     recognition.maxAlternatives = 1
-
     recognition.onstart = () => {
+      setError('Cloud recognition is unavailable; browser recognition is being used for this answer.')
       setIsRecording(true)
-      setError(null)
-      setPartialTranscript('')
-      finalTextRef.current = ''
-      durationRef.current = 0
-      setDuration(0)
-      // 开始计时
-      durationTimerRef.current = setInterval(() => {
-        durationRef.current++
-        setDuration(durationRef.current)
-      }, 1000)
+      startTimer()
     }
-
     recognition.onresult = (event: any) => {
       let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i]
-        if (result.isFinal) {
-          finalTextRef.current += ' ' + result[0].transcript
-        } else {
-          interim += result[0].transcript
-        }
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        if (result.isFinal) finalTextRef.current += ` ${result[0].transcript}`
+        else interim += result[0].transcript
       }
-      setPartialTranscript(finalTextRef.current + ' ' + interim)
+      setPartialTranscript(`${finalTextRef.current} ${interim}`.replace(/\s+/g, ' ').trim())
     }
-
     recognition.onerror = (event: any) => {
-      if (event.error === 'no-speech') {
-        // 静音不算错误，继续等待
-        return
-      }
-      if (event.error === 'aborted') {
-        return
-      }
-      setError(`语音识别错误: ${event.error}`)
+      if (!['no-speech', 'aborted'].includes(event.error)) setError(`Speech recognition error: ${event.error}`)
     }
-
     recognition.onend = () => {
       setIsRecording(false)
-      clearInterval(durationTimerRef.current)
+      stopTimer()
     }
-
-    return recognition
-  }, [lang])
-
-  // ---- 开始录音 ----
-
-  const start = useCallback(() => {
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort() } catch {}
-    }
-
-    const recognition = initRecognition()
-    if (!recognition) return
-
-    recognitionRef.current = recognition
     try {
       recognition.start()
-    } catch (err: any) {
-      setError(err?.message ?? '无法启动语音识别')
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : 'Unable to start speech recognition.')
       setIsRecording(false)
     }
-  }, [initRecognition])
+  }, [lang, startTimer, stopTimer])
 
-  // ---- 停止录音并提交 ----
+  const start = useCallback(() => {
+    cancelledRef.current = false
+    submittedRef.current = false
+    finalTextRef.current = ''
+    setPartialTranscript('')
+    setError(null)
+
+    if (!isDoubaoAsrSupported()) {
+      startBrowserFallback()
+      return
+    }
+
+    const session = new DoubaoAsrSession({
+      onReady: () => {
+        setIsRecording(true)
+        setError(null)
+        startTimer()
+      },
+      onPartial: (text) => {
+        finalTextRef.current = text
+        setPartialTranscript(text)
+      },
+      onFinal: (text) => {
+        finalTextRef.current = text
+      },
+      onError: (message) => setError(message),
+      onStopped: () => {
+        setIsRecording(false)
+        stopTimer()
+        submitFinalText()
+      },
+    })
+    cloudSessionRef.current = session
+    void session.start().catch((startError) => {
+      cloudSessionRef.current = null
+      setIsRecording(false)
+      stopTimer()
+      if (startError instanceof DOMException && startError.name === 'NotAllowedError') {
+        setError('Microphone permission was denied. Please allow microphone access and try again.')
+        return
+      }
+      startBrowserFallback()
+    })
+  }, [startBrowserFallback, startTimer, stopTimer, submitFinalText])
 
   const stop = useCallback(() => {
-    const recognition = recognitionRef.current
-    if (!recognition) return
-
-    clearInterval(durationTimerRef.current)
+    stopTimer()
     setIsRecording(false)
-
-    try {
-      recognition.stop()
-    } catch {}
-
-    // 延迟提交，等待 final result 落盘
-    setTimeout(() => {
-      const final = finalTextRef.current.trim()
-      if (final && onResultRef.current) {
-        // 去掉多余空格
-        const cleaned = final.replace(/\s+/g, ' ').trim()
-        setPartialTranscript('')
-        onResultRef.current(cleaned)
-      } else if (!final && onResultRef.current) {
-        // 没有识别到内容，也通知上游（可让用户重试）
-        setError('未识别到语音内容，请重试')
-      }
-    }, 300)
-  }, [])
-
-  // ---- 取消录音 ----
+    if (cloudSessionRef.current) {
+      cloudSessionRef.current.stop()
+      return
+    }
+    const recognition = browserRecognitionRef.current
+    if (!recognition) return
+    try { recognition.stop() } catch {}
+    window.setTimeout(submitFinalText, 350)
+  }, [stopTimer, submitFinalText])
 
   const cancel = useCallback(() => {
-    const recognition = recognitionRef.current
-    if (!recognition) return
-
-    clearInterval(durationTimerRef.current)
+    cancelledRef.current = true
+    stopTimer()
     setIsRecording(false)
     setPartialTranscript('')
     finalTextRef.current = ''
+    cloudSessionRef.current?.cancel()
+    cloudSessionRef.current = null
+    try { browserRecognitionRef.current?.abort() } catch {}
+    browserRecognitionRef.current = null
+  }, [stopTimer])
 
-    try {
-      recognition.abort()
-    } catch {}
-  }, [])
-
-  // ---- 清理 ----
-
-  useEffect(() => {
-    return () => {
-      clearInterval(durationTimerRef.current)
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort() } catch {}
-      }
-    }
-  }, [])
+  useEffect(() => cancel, [cancel])
 
   return {
     start,
@@ -208,9 +192,8 @@ export function useVoiceInput({
   }
 }
 
-/** 格式化录音时长 mm:ss */
 export function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return `${minutes.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`
 }

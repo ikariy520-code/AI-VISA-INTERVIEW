@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { doubaoRealtimeBridge } from './local/doubaoRealtimeBridge'
+import { doubaoSpeechBridge } from './local/doubaoSpeechBridge'
 import { doubaoTextBridge } from './local/doubaoTextBridge'
 
 // ========================================
@@ -19,7 +20,7 @@ import { doubaoTextBridge } from './local/doubaoTextBridge'
 export default defineConfig(({ command, mode }) => {
   // 加载 .env.local 中的所有变量（第三个参数 '' = 不过滤前缀）
   const env = loadEnv(mode, process.cwd(), '')
-  const configuredSpeechApiKey = env.DOUBAO_API_KEY || env.SPEECH_API_KEY || ''
+  const configuredSpeechApiKey = env.DOUBAO_SPEECH_API_KEY || env.DOUBAO_API_KEY || env.SPEECH_API_KEY || ''
   const arkKeyDetected = [configuredSpeechApiKey, env.ARK_API_KEY || '']
     .some(key => key.startsWith('ark-'))
   const doubaoApiKey = configuredSpeechApiKey.startsWith('ark-')
@@ -36,6 +37,14 @@ export default defineConfig(({ command, mode }) => {
         apiKey: textApiKey,
         model: textModel,
         endpoint: env.ARK_API_BASE,
+      })] : []),
+      ...(isLocalDev ? [doubaoSpeechBridge({
+        apiKey: doubaoApiKey,
+        asrUrl: env.DOUBAO_ASR_URL,
+        asrResourceId: env.DOUBAO_ASR_RESOURCE_ID,
+        ttsUrl: env.DOUBAO_TTS_URL,
+        ttsResourceId: env.DOUBAO_TTS_RESOURCE_ID,
+        ttsSpeaker: env.DOUBAO_TTS_SPEAKER,
       })] : []),
       ...(isLocalDev ? [doubaoRealtimeBridge({
         apiKey: doubaoApiKey,
