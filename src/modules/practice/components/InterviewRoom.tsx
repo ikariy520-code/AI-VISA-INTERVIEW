@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, type FormEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { HiOutlineArrowPath, HiOutlineSignal } from 'react-icons/hi2'
+import { HiOutlineArrowPath, HiOutlinePaperAirplane, HiOutlineSignal } from 'react-icons/hi2'
 import type { UserContext, ChatMessage, InterviewStatus, AIAnalysisResult, OfficerEmotion } from '../types'
 import type { OfficerType } from '../../voice/types'
 import { generateOfficerResponse, textToSpeech } from '../services/openai'
@@ -69,6 +69,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
   const [officerName] = useState(() => getRandomOfficerName())
   const [showIntro, setShowIntro] = useState(true)
   const [aiError, setAiError] = useState('')
+  const [typedAnswer, setTypedAnswer] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<ReturnType<typeof setInterval>>()
   const processingRef = useRef(false)
@@ -205,6 +206,14 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
     }
   }, [status, voice])
 
+  const handleTypedSubmit = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const answer = typedAnswer.trim()
+    if (!answer || status !== 'idle') return
+    setTypedAnswer('')
+    submitAnswer(answer)
+  }, [status, submitAnswer, typedAnswer])
+
   // ---- 监听录音结束（用户调用了 stop） ----
 
   // 当 isRecording 从 true 变成 false 且不是由 submitAnswer 触发的 processing
@@ -326,6 +335,36 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
             {aiError}
           </div>
         )}
+        <form
+          onSubmit={handleTypedSubmit}
+          className="border-t border-black/[0.06] bg-white px-4 py-3 sm:px-6"
+        >
+          <div className="mb-1.5 flex items-center justify-between px-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#86868b]">Text test mode</span>
+            <span className="text-[10px] text-[#a1a1a6]">English only</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              lang="en"
+              translate="no"
+              type="text"
+              value={typedAnswer}
+              onChange={event => setTypedAnswer(event.target.value)}
+              disabled={status !== 'idle'}
+              placeholder={status === 'idle' ? 'Type your answer in English…' : 'Wait for the next question…'}
+              aria-label="Type your interview answer in English"
+              className="h-11 min-w-0 flex-1 rounded-2xl border border-black/[0.09] bg-[#fbfbfd] px-4 text-[13px] text-[#1d1d1f] outline-none transition placeholder:text-[#a1a1a6] focus:border-[#0071e3]/50 focus:bg-white focus:ring-4 focus:ring-[#0071e3]/10 disabled:cursor-not-allowed disabled:opacity-55"
+            />
+            <button
+              type="submit"
+              disabled={status !== 'idle' || !typedAnswer.trim()}
+              className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-2xl bg-[#0071e3] text-white transition hover:bg-[#0062c3] disabled:cursor-not-allowed disabled:bg-[#d2d2d7]"
+              aria-label="Submit typed answer"
+            >
+              <HiOutlinePaperAirplane className="h-[18px] w-[18px]" />
+            </button>
+          </div>
+        </form>
         <VoiceControls
           status={status}
           elapsed={formatElapsed(elapsed)}

@@ -214,6 +214,12 @@ export async function generateOfficerResponse(
   userJustSaid: string,
   officerType: OfficerType = 'standard',
 ): Promise<{ text: string; emotion: string; isClosing?: boolean; isDocumentRequest?: boolean }> {
+  // F1 question selection is product-owned. The provider must not bypass the
+  // approved 22-question catalog or skip mandatory screening questions.
+  if (context.visaType === 'F1') {
+    return mockGenerateResponse(context, conversationHistory, userJustSaid, officerType)
+  }
+
   const systemPrompt = buildSystemPrompt(officerType)
 
   // 构建消息历史

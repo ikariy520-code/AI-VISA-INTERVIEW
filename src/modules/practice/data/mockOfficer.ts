@@ -17,8 +17,6 @@ import { createInterviewFlow } from '../services/interviewFlow'
 // ---- 状态机实例（F1 专用，按面试生命周期管理） ----
 
 let flowInstance: ReturnType<typeof createInterviewFlow> | null = null
-let lastQuestionId: string | null = null
-
 function ensureFlow(context: UserContext) {
   if (!flowInstance) {
     flowInstance = createInterviewFlow(context)
@@ -29,7 +27,6 @@ function ensureFlow(context: UserContext) {
 /** 重置状态机（新面试开始时调用） */
 export function resetInterviewFlow() {
   flowInstance = null
-  lastQuestionId = null
 }
 
 // ---- 分析阶段：按签证类型返回策略 ----
@@ -193,14 +190,7 @@ export function mockGenerateResponse(
   // ---- F1：使用状态机引擎 ----
   if (context.visaType === 'F1') {
     const flow = ensureFlow(context)
-
-    // 找到最近一个 officer 问的问题，用于评估回答
-    const lastOfficerMsg = [...history].reverse().find(m => m.role === 'officer')
-
-    // 评估用户回答
-    flow.evaluateAnswer(userJustSaid, null)
-
-    // 生成下一轮
+    // The state machine owns the current question, answer assessment and next turn.
     const turn = flow.nextTurn(userJustSaid)
 
     if (turn.isClosing) {

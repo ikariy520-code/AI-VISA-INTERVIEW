@@ -1,35 +1,40 @@
-// ========================================
-// F1 面签状态机引擎
-//
-// 管理面签全流程：
-//   1. 按阶段推进（7 个主阶段）
-//   2. 每阶段选什么问题（required → normal → optional）
-//   3. 何时追问、何时插入材料请求
-//   4. 答案风险评估
-//   5. 目标 8-14 题结束
-//
-// 入口：createInterviewFlow() → 工厂函数
-//   nextTurn(answer?) → { text, emotion, isClosing }
-// ========================================
-
-import type {
-  InterviewStage, InterviewState, OfficerTurn,
-  Question, OfficerEmotion, UserContext,
-} from '../types'
+import type { OfficerEmotion, OfficerTurn, UserContext } from '../types'
 import {
-  questionBank,
-  STAGE_ORDER, INSERTABLE_STAGES,
-  MIN_QUESTIONS, MAX_QUESTIONS,
-  MAX_CONSECUTIVE_SAME_CATEGORY,
-  SHORT_ANSWER_THRESHOLD, MAX_SHORT_ANSWERS_BEFORE_PROBE,
-  DOCUMENT_PROBABILITIES,
-  FALLBACK_FOLLOWUP_MAP,
-} from '../data/questionBank'
+  F1_MANDATORY_QUESTION_IDS,
+  F1_QUESTION_CATALOG,
+  getF1Question,
+  type F1FollowUpRule,
+  type F1QuestionDefinition,
+  type F1QuestionId,
+} from '../data/f1QuestionCatalog'
 
-// ---- 情绪分配 ----
+export interface F1InterviewFlowOptions {
+  /** Injectable seed keeps smoke tests deterministic. Production defaults to a fresh session seed. */
+  seed?: number
+  targetMainQuestions?: number
+}
 
-const EMOTIONS: Record<InterviewStage, OfficerEmotion> = {
-  START: 'friendly',
+interface AnswerSignals {
+  wordCount: number
+  affirmative: boolean
+  negative: boolean
+  uncertain: boolean
+  lower: string
+}
+
+interface ActiveTurn {
+  kind: 'opening' | 'main' | 'follow-up'
+  text: string
+  questionId?: F1QuestionId
+  followUpId?: string
+}
+
+const OPENING_TEXT = 'Good morning. May I see your passport and I-20, please?'
+const CLOSING_TEXT = 'Thank you. That concludes the interview. Your responses will now be reviewed for coaching feedback.'
+const MIN_TARGET = 11
+const MAX_TARGET = 13
+
+const STAGE_EMOTION: Record<string, OfficerEmotion> = {
   BASIC_INFO: 'friendly',
   SCHOOL_AND_MAJOR: 'neutral',
   ACADEMIC_PLAN: 'curious',
@@ -39,390 +44,169 @@ const EMOTIONS: Record<InterviewStage, OfficerEmotion> = {
   FUTURE_PLAN: 'thoughtful',
   TRAVEL_HISTORY: 'curious',
   SECURITY_AND_DS160: 'stern',
-  DOCUMENT_CHECK: 'neutral',
-  END: 'reassuring',
 }
 
-// ---- 已用问题跟踪 ----
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
+function createRandom(seed: number) {
+  let value = seed || 0x6d2b79f5
+  return () => {
+    value |= 0
+    value = (value + 0x6d2b79f5) | 0
+    let result = Math.imul(value ^ (value >>> 15), 1 | value)
+    result = (result + Math.imul(result ^ (result >>> 7), 61 | result)) ^ result
+    return ((result ^ (result >>> 14)) >>> 0) / 4294967296
   }
-  return a
 }
 
-// ---- 工厂 ----
+function shuffled<T>(items: readonly T[], random: () => number): T[] {
+  const result = [...items]
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(random() * (index + 1))
+    ;[result[index], result[target]] = [result[target], result[index]]
+  }
+  return result
+}
 
-export function createInterviewFlow(userContext: UserContext) {
-  const askedIds = new Set<string>()
-  const askedDocIds = new Set<string>()
+function classifyAnswer(answer: string): AnswerSignals {
+  const normalized = answer.trim()
+  const lower = normalized.toLowerCase()
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length
+  const affirmative = /^(yes|yeah|yep|i have|i did|i do|i am|i would)\b/.test(lower)
+  const negative = /^(no|nope|never|i have not|i haven't|i did not|i didn't|i do not|i don't|i would not|i wouldn't)\b/.test(lower)
+  const uncertain = [
+    'not sure', "don't know", 'do not know', 'maybe', 'probably', 'i guess',
+    'not certain', "can't remember", 'cannot remember', 'it depends',
+  ].some(phrase => lower.includes(phrase))
+  return { wordCount, affirmative, negative, uncertain, lower }
+}
 
-  const state: InterviewState = {
-    stage: 'START',
-    stageIndex: 0,
-    askedQuestionIds: askedIds,
-    totalQuestions: 0,
-    consecutiveCategoryCount: {},
-    pendingFollowUp: null,
-    askedDocumentQuestions: askedDocIds,
-    userShortAnswerCount: 0,
-    riskFlags: [],
+function followUpMatches(rule: F1FollowUpRule, signals: AnswerSignals): boolean {
+  if (rule.when === 'affirmative') return signals.affirmative
+  if (rule.when === 'negative') return signals.negative
+  if (rule.when === 'uncertain') return signals.uncertain
+  if (rule.when === 'short') return signals.wordCount > 0 && signals.wordCount < 5
+  return Boolean(rule.keywords?.some(keyword => signals.lower.includes(keyword.toLowerCase())))
+}
+
+export function buildF1QuestionPlan(
+  context: UserContext,
+  options: F1InterviewFlowOptions = {},
+): F1QuestionId[] {
+  const seed = options.seed ?? (Date.now() ^ Math.floor(Math.random() * 0x7fffffff))
+  const random = createRandom(seed)
+  const target = Math.min(MAX_TARGET, Math.max(MIN_TARGET, options.targetMainQuestions ?? 12))
+  const plan: F1QuestionId[] = ['f1_01', 'f1_04']
+  const add = (id: F1QuestionId) => {
+    if (!plan.includes(id)) plan.push(id)
   }
 
-  const isF1 = userContext.visaType === 'F1'
+  add(shuffled<F1QuestionId>(['f1_02', 'f1_03'], random)[0])
+  add(shuffled<F1QuestionId>(['f1_05', 'f1_06', 'f1_07'], random)[0])
+  add(shuffled<F1QuestionId>(['f1_08', 'f1_09', 'f1_10'], random)[0])
+  add('f1_11')
+  add('f1_12')
 
-  // ---- 工具 ----
+  const adaptive: F1QuestionId[] = []
+  if (context.hasUsRelatives) adaptive.push('f1_16')
+  if (context.previousVisa || context.previousVisaDenied) adaptive.push('f1_17')
+  if (context.usRelativeType) adaptive.push('f1_18')
+  if (context.fundingSource === 'parents' || context.fundingSource === 'combined') adaptive.push('f1_14')
+  else adaptive.push('f1_13')
+  adaptive.push('f1_15', 'f1_18', 'f1_17', 'f1_13', 'f1_14')
 
-  function countWords(text: string): number {
-    return text.trim().split(/\s+/).filter(w => w.length > 0).length
+  const reservedTail = [...F1_MANDATORY_QUESTION_IDS, 'f1_22'] as F1QuestionId[]
+  for (const id of adaptive) {
+    if (plan.length >= target - reservedTail.length) break
+    add(id)
   }
 
-  function hasUncertainLanguage(text: string): boolean {
-    const lower = text.toLowerCase()
-    const patterns = [
-      'not sure', 'i don\'t know', 'don\'t know', 'maybe',
-      'probably', 'i guess', 'kind of', 'sort of',
-      'i think so', 'not really', 'i\'m not', 'not certain',
-      'haven\'t thought', 'whatever',
-    ]
-    return patterns.some(p => lower.includes(p))
-  }
+  for (const id of reservedTail) add(id)
+  return plan.slice(0, target - reservedTail.length).concat(reservedTail)
+}
 
-  // ---- 问题选择 ----
+export function createInterviewFlow(
+  userContext: UserContext,
+  options: F1InterviewFlowOptions = {},
+) {
+  const plan = buildF1QuestionPlan(userContext, options)
+  const askedMainQuestionIds: F1QuestionId[] = []
+  const askedFollowUpIds: string[] = []
+  const answers: Array<{ questionId?: F1QuestionId; followUpId?: string; answer: string }> = []
+  const riskFlags: string[] = []
+  let planIndex = 0
+  let activeTurn: ActiveTurn | null = null
+  let pendingFollowUp: { question: F1QuestionDefinition; rule: F1FollowUpRule } | null = null
+  let ended = false
 
-  /** 从指定类别中选一个未问过的问题 */
-  function pickQuestion(stage: InterviewStage, preferPriority?: string): Question | null {
-    const pool = questionBank[stage]
-    if (!pool || pool.length === 0) return null
+  function evaluateActiveAnswer(answer: string) {
+    if (!activeTurn || !answer.trim()) return
+    answers.push({ questionId: activeTurn.questionId, followUpId: activeTurn.followUpId, answer: answer.trim() })
+    if (activeTurn.kind !== 'main' || !activeTurn.questionId) return
 
-    // 过滤已问过的
-    const candidates = pool.filter(q => !state.askedQuestionIds.has(q.id))
-    if (candidates.length === 0) return null
-
-    // 按优先级排序
-    if (preferPriority) {
-      const match = candidates.filter(q => q.priority === preferPriority)
-      if (match.length > 0) {
-        return match[Math.floor(Math.random() * match.length)]
-      }
+    const question = getF1Question(activeTurn.questionId)
+    const signals = classifyAnswer(answer)
+    if (signals.uncertain) riskFlags.push(`uncertain:${question.id}`)
+    if (question.answerShape === 'open' && signals.wordCount > 0 && signals.wordCount < 3) {
+      riskFlags.push(`short:${question.id}`)
     }
-
-    // required → normal → optional
-    const required = candidates.filter(q => q.priority === 'required')
-    if (required.length > 0) return required[Math.floor(Math.random() * required.length)]
-
-    const normal = candidates.filter(q => q.priority === 'normal')
-    if (normal.length > 0) return normal[Math.floor(Math.random() * normal.length)]
-
-    return candidates[Math.floor(Math.random() * candidates.length)]
+    const matchedRule = question.followUps.find(rule => followUpMatches(rule, signals))
+    if (matchedRule) pendingFollowUp = { question, rule: matchedRule }
   }
-
-  /** 从题库中按 ID 查找问题 */
-  function findQuestionById(id: string): Question | null {
-    for (const stage of Object.values(questionBank)) {
-      const found = stage.find(q => q.id === id)
-      if (found) return found
-    }
-    return null
-  }
-
-  // ---- 追问逻辑 ----
-
-  function shouldFollowUp(answer: string, question: Question): boolean {
-    if (!answer) return false
-    const lower = answer.toLowerCase()
-
-    // 1. 回答太短
-    if (countWords(answer) < SHORT_ANSWER_THRESHOLD) return true
-
-    // 2. 不确定语言
-    if (hasUncertainLanguage(answer)) return true
-
-    // 3. 问题自带的 trigger 命中
-    if (question.followUpTriggers.length > 0) {
-      for (const trigger of question.followUpTriggers) {
-        if (lower.includes(trigger.toLowerCase())) return true
-      }
-    }
-
-    return false
-  }
-
-  function pickFollowUp(question: Question): Question | null {
-    // 用 possibleFollowUps 的文本匹配题库中的问题
-    if (question.possibleFollowUps.length > 0) {
-      // 随机选一条追问文本，直接作为面签官的话
-      const text = question.possibleFollowUps[Math.floor(Math.random() * question.possibleFollowUps.length)]
-      return {
-        id: `followup_${question.id}_${Date.now()}`,
-        category: question.category,
-        text,
-        priority: 'normal',
-        riskTags: question.riskTags,
-        followUpTriggers: [],
-        possibleFollowUps: [],
-      }
-    }
-    return null
-  }
-
-  // ---- 材料请求 ----
-
-  function shouldRequestDocument(): boolean {
-    if (state.askedDocumentQuestions.size >= 3) return false
-    // 概率随问题数增长
-    const baseChance = 0.12 + state.totalQuestions * 0.02
-    return Math.random() < baseChance
-  }
-
-  function pickDocumentQuestion(): Question | null {
-    const pool = questionBank.DOCUMENT_CHECK.filter(
-      q => !state.askedDocumentQuestions.has(q.id)
-    )
-    if (pool.length === 0) return null
-
-    // 按概率加权选择
-    const weighted = pool.flatMap(q => {
-      const prob = DOCUMENT_PROBABILITIES[q.id] ?? 0.3
-      const count = Math.round(prob * 10)
-      return Array(count).fill(q)
-    })
-    if (weighted.length === 0) return null
-
-    return weighted[Math.floor(Math.random() * weighted.length)]
-  }
-
-  // ---- 阶段推进 ----
-
-  function advanceStage(): InterviewStage {
-    // 当前阶段还有 required 未问，继续
-    if (state.stage !== 'START' && state.stage !== 'END') {
-      const pool = questionBank[state.stage] ?? []
-      const hasRequired = pool.some(
-        q => q.priority === 'required' && !state.askedQuestionIds.has(q.id)
-      )
-      if (hasRequired) return state.stage
-    }
-
-    // 当前阶段还有 normal 未问（最多再问 1 个）
-    if (state.stage !== 'START' && state.stage !== 'END') {
-      const pool = questionBank[state.stage] ?? []
-      const hasUnasked = pool.some(q => !state.askedQuestionIds.has(q.id))
-      const consecutive = state.consecutiveCategoryCount[state.stage] ?? 0
-      if (hasUnasked && consecutive < MAX_CONSECUTIVE_SAME_CATEGORY && Math.random() < 0.4) {
-        return state.stage
-      }
-    }
-
-    // 随机插入可选类别
-    if (state.totalQuestions >= 3 && state.totalQuestions <= MAX_QUESTIONS - 2) {
-      if (Math.random() < 0.2) {
-        const insertable = shuffle(INSERTABLE_STAGES).find(
-          s => {
-            const pool = questionBank[s]
-            return pool && pool.some(q => !state.askedQuestionIds.has(q.id))
-          }
-        )
-        if (insertable) return insertable
-      }
-    }
-
-    // 进入下一个主阶段
-    const currentIdx = STAGE_ORDER.indexOf(state.stage as any)
-    const nextIdx = currentIdx + 1
-
-    if (nextIdx >= STAGE_ORDER.length) return 'END'
-
-    return STAGE_ORDER[nextIdx]
-  }
-
-  // ---- 主入口：生成下一轮面签官的话 ----
 
   function nextTurn(lastUserAnswer?: string): OfficerTurn {
-    // 1. 如果有待处理的追问
-    if (state.pendingFollowUp) {
-      const followUp = state.pendingFollowUp
-      state.pendingFollowUp = null
-      state.askedQuestionIds.add(followUp.id)
-      state.totalQuestions++
-      state.consecutiveCategoryCount[followUp.category] =
-        (state.consecutiveCategoryCount[followUp.category] ?? 0) + 1
+    if (ended) return { text: CLOSING_TEXT, emotion: 'reassuring', isClosing: true }
+    if (lastUserAnswer !== undefined) evaluateActiveAnswer(lastUserAnswer)
+
+    if (!activeTurn) {
+      activeTurn = { kind: 'opening', text: OPENING_TEXT }
+      return { text: OPENING_TEXT, emotion: 'friendly', isDocumentRequest: true }
+    }
+
+    if (pendingFollowUp) {
+      const { question, rule } = pendingFollowUp
+      pendingFollowUp = null
+      askedFollowUpIds.push(rule.id)
+      activeTurn = { kind: 'follow-up', text: rule.text, questionId: question.id, followUpId: rule.id }
       return {
-        text: followUp.text,
-        emotion: 'stern',
+        text: rule.text,
+        emotion: question.sensitive ? 'neutral' : 'stern',
         isDocumentRequest: false,
       }
     }
 
-    // 2. 检查是否到了结束条件
-    if (state.totalQuestions >= MAX_QUESTIONS || (state.totalQuestions >= MIN_QUESTIONS && state.stage === 'END')) {
-      return makeClosing()
-    }
-    if (state.totalQuestions >= MIN_QUESTIONS && state.stageIndex >= STAGE_ORDER.length) {
-      return makeClosing()
-    }
-
-    // 3. 评估上一次回答 → 决定是否追问
-    if (lastUserAnswer && state.stage !== 'START') {
-      // 找到刚才问的问题（最近一个已问的）
-      if (state.userShortAnswerCount >= MAX_SHORT_ANSWERS_BEFORE_PROBE) {
-        state.userShortAnswerCount = 0
-        // 生成追问
-        const fallbackIds = FALLBACK_FOLLOWUP_MAP[state.stage]
-        if (fallbackIds) {
-          const fbQuestion = shuffle(fallbackIds.map(id => findQuestionById(id)).filter(Boolean) as Question[])[0]
-          if (fbQuestion && !state.askedQuestionIds.has(fbQuestion.id)) {
-            state.pendingFollowUp = null
-            state.askedQuestionIds.add(fbQuestion.id)
-            state.totalQuestions++
-            state.consecutiveCategoryCount[fbQuestion.category] =
-              (state.consecutiveCategoryCount[fbQuestion.category] ?? 0) + 1
-            return { text: fbQuestion.text, emotion: 'stern', isDocumentRequest: false }
-          }
-        }
-      }
+    const nextId = plan[planIndex]
+    if (!nextId) {
+      ended = true
+      activeTurn = null
+      return { text: CLOSING_TEXT, emotion: 'reassuring', isClosing: true }
     }
 
-    // 4. 材料请求概率插入
-    if (shouldRequestDocument()) {
-      const docQ = pickDocumentQuestion()
-      if (docQ) {
-        state.askedDocumentQuestions.add(docQ.id)
-        state.askedQuestionIds.add(docQ.id)
-        state.totalQuestions++
-        state.consecutiveCategoryCount['DOCUMENT_CHECK'] =
-          (state.consecutiveCategoryCount['DOCUMENT_CHECK'] ?? 0) + 1
-        return { text: docQ.text, emotion: 'neutral', isDocumentRequest: true }
-      }
-    }
-
-    // 5. 推进阶段
-    const prevStage = state.stage
-    state.stage = advanceStage()
-
-    if (state.stage === 'END') return makeClosing()
-
-    if (state.stage !== prevStage) {
-      state.stageIndex++
-      state.consecutiveCategoryCount[prevStage] = 0
-    }
-
-    // 6. 选问题
-    const question = pickQuestion(state.stage, 'required')
-    if (!question) {
-      // 当前阶段没问题了，强制推进
-      state.stage = advanceStage()
-      if (state.stage === 'END') return makeClosing()
-      const nextQ = pickQuestion(state.stage)
-      if (!nextQ) return makeClosing()
-
-      state.askedQuestionIds.add(nextQ.id)
-      state.totalQuestions++
-      state.consecutiveCategoryCount[nextQ.category] =
-        (state.consecutiveCategoryCount[nextQ.category] ?? 0) + 1
-      return {
-        text: nextQ.text,
-        emotion: EMOTIONS[state.stage] ?? 'neutral',
-        isDocumentRequest: nextQ.category === 'DOCUMENT_CHECK',
-      }
-    }
-
-    state.askedQuestionIds.add(question.id)
-    state.totalQuestions++
-    state.consecutiveCategoryCount[question.category] =
-      (state.consecutiveCategoryCount[question.category] ?? 0) + 1
-
+    planIndex += 1
+    const question = getF1Question(nextId)
+    askedMainQuestionIds.push(nextId)
+    activeTurn = { kind: 'main', text: question.text, questionId: question.id }
     return {
       text: question.text,
-      emotion: EMOTIONS[state.stage] ?? 'neutral',
-      isDocumentRequest: question.category === 'DOCUMENT_CHECK',
+      emotion: STAGE_EMOTION[question.stage] ?? 'neutral',
+      isDocumentRequest: false,
     }
   }
-
-  // ---- 评估并记录上一次回答 ----
-
-  function evaluateAnswer(answer: string, lastQuestion: Question | null) {
-    if (!answer) return
-
-    const lower = answer.toLowerCase()
-
-    // 短回答
-    if (countWords(answer) < SHORT_ANSWER_THRESHOLD) {
-      state.userShortAnswerCount++
-    } else {
-      state.userShortAnswerCount = 0
-    }
-
-    // 风险标签命中
-    if (lastQuestion) {
-      for (const tag of lastQuestion.riskTags) {
-        if (tag === 'immigrant_intent') {
-          const immigrantKeywords = ['stay', 'live', 'work', 'green card', 'immigrate', 'permanent', 'citizen']
-          if (immigrantKeywords.some(k => lower.includes(k))) {
-            state.riskFlags.push('immigrant_intent')
-          }
-        }
-        if (tag === 'funding') {
-          const fundingKeywords = ['loan', 'borrow', 'not enough', 'just enough', 'barely', 'part time job', 'work']
-          if (fundingKeywords.some(k => lower.includes(k))) {
-            state.riskFlags.push('funding_concern')
-          }
-        }
-      }
-    }
-
-    // 不确定语言
-    if (hasUncertainLanguage(answer) && lastQuestion) {
-      state.riskFlags.push('uncertain_answer')
-    }
-
-    // 是否触发追问
-    if (lastQuestion && shouldFollowUp(answer, lastQuestion)) {
-      const followUp = pickFollowUp(lastQuestion)
-      if (followUp) {
-        state.pendingFollowUp = followUp
-      }
-    }
-  }
-
-  // ---- 结束语 ----
-
-  function makeClosing(): OfficerTurn {
-    const hasRisks = state.riskFlags.length > 0
-    const hasImmigrantIntent = state.riskFlags.includes('immigrant_intent')
-    const hasFundingConcern = state.riskFlags.includes('funding_concern')
-    const uncertainCount = state.riskFlags.filter(f => f === 'uncertain_answer').length
-
-    let text: string
-    if (hasImmigrantIntent && hasFundingConcern) {
-      text = "Alright, that's all for now. I have some concerns about your funding and your plans after graduation. We'll review your application and let you know. Do you have any other documents you'd like to submit?"
-    } else if (hasImmigrantIntent) {
-      text = "OK, I've noted your answers. I want you to think carefully about your plans after graduation — the F-1 visa requires non-immigrant intent. We'll process your application. You'll be notified of the result."
-    } else if (hasFundingConcern || uncertainCount >= 2) {
-      text = "Thank you. I need to review your financial situation more carefully. We have your documents, and you'll hear from us. That's all for today."
-    } else if (hasRisks) {
-      text = "Alright, I've completed my questions. We'll review everything and you'll be notified. Make sure your contact information is correct. Thank you."
-    } else {
-      text = "Alright, everything looks fine. We'll process your visa. You should receive your passport within a few days. Have a good trip and good luck with your studies!"
-    }
-
-    state.stage = 'END'
-    return { text, emotion: 'reassuring', isClosing: true }
-  }
-
-  // ---- 对外接口 ----
 
   return {
-    /** 生成面签官下一句话 */
     nextTurn,
-    /** 评估用户回答并记录状态 */
-    evaluateAnswer,
-    /** 当前状态快照 */
-    getState: (): InterviewState => state,
-    /** 是否已结束 */
-    isEnded: () => state.stage === 'END',
+    /** Compatibility hook. Prefer passing the answer directly to nextTurn(). */
+    evaluateAnswer: (answer: string) => evaluateActiveAnswer(answer),
+    getState: () => ({
+      plan: [...plan],
+      planIndex,
+      askedMainQuestionIds: [...askedMainQuestionIds],
+      askedFollowUpIds: [...askedFollowUpIds],
+      answers: [...answers],
+      riskFlags: [...riskFlags],
+      activeTurn: activeTurn ? { ...activeTurn } : null,
+      ended,
+    }),
+    isEnded: () => ended,
   }
 }
+
+export { F1_QUESTION_CATALOG }
