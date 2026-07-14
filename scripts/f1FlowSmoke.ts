@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { F1_MANDATORY_QUESTION_IDS, F1_QUESTION_CATALOG } from '../src/modules/practice/data/f1QuestionCatalog'
 import { createInterviewFlow } from '../src/modules/practice/services/interviewFlow'
-import type { UserContext } from '../src/modules/practice/types'
+import type { ChatMessage, UserContext } from '../src/modules/practice/types'
+import { extractQAPairs } from '../src/modules/shared/store/analysisEngine'
 import {
   classifyF1DialogueActLocally,
   parseDoubaoAssessment,
@@ -65,6 +66,24 @@ assert.deepEqual(sanitizedDecision?.candidateNextQuestions.map(item => item.id),
 assert.equal(classifyF1DialogueActLocally('Sorry, pardon?'), 'repeat_request')
 assert.equal(classifyF1DialogueActLocally("I couldn't hear that."), 'did_not_hear')
 assert.equal(classifyF1DialogueActLocally('[NO_SPEECH]'), 'silence')
+assert.equal(classifyF1DialogueActLocally('(No speech detected)'), 'silence')
+
+const reportMessages: ChatMessage[] = [
+  { id: 'o1', role: 'officer', text: 'Which school will you study at?', timestamp: '00:01' },
+  { id: 'u1', role: 'user', text: 'Sorry, pardon?', timestamp: '00:03' },
+  { id: 'o2', role: 'officer', text: 'Which school will you study at?', timestamp: '00:04' },
+  { id: 'u2', role: 'user', text: 'I will study at Example University.', timestamp: '00:07' },
+  { id: 'o3', role: 'officer', text: 'Why did you choose this school?', timestamp: '00:09' },
+  { id: 'u3', role: 'user', text: '(No speech detected)', timestamp: '00:13' },
+  { id: 'o4', role: 'officer', text: 'Why did you choose this school?', timestamp: '00:14' },
+  { id: 'u4', role: 'user', text: 'Its program fits my academic plan.', timestamp: '00:19' },
+]
+const reportPairs = extractQAPairs(reportMessages)
+assert.deepEqual(
+  reportPairs.map(pair => pair.answer),
+  ['I will study at Example University.', 'Its program fits my academic plan.'],
+  'Repeat requests and silence must not be scored as substantive answers in the final report',
+)
 
 const repeatFlow = createInterviewFlow(context, { seed: 2, targetMainQuestions: 11 })
 repeatFlow.nextTurn()

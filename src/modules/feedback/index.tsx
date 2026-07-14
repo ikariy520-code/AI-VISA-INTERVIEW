@@ -32,6 +32,17 @@ export default function FeedbackPage() {
 
       {session ? (
           <div id="feedback-report" className="mx-auto max-w-5xl px-5 py-8 sm:px-8 sm:py-12">
+            <div className={`print:hidden mb-4 rounded-[18px] border px-4 py-3 text-[12px] leading-5 ${
+              session.analysisSource === 'doubao'
+                ? 'border-emerald-200/70 bg-[#eaf8f2] text-[#146c50]'
+                : 'border-amber-200/70 bg-[#fff6e6] text-[#8a5818]'
+            }`}>
+              {session.analysisSource === 'doubao'
+                ? `豆包 AI 已完成本次面签分析，共评估 ${session.aiScoredAnswers ?? session.transcript.length} 条有效回答。`
+                : session.analysisSource === 'hybrid'
+                  ? `本次共有 ${session.aiScoredAnswers ?? 0} 条回答由豆包 AI 分析，其余内容使用本地规则补全。`
+                  : '豆包 AI 本次未能完成评分，当前报告由本地规则生成，可继续查看和下载。'}
+            </div>
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}

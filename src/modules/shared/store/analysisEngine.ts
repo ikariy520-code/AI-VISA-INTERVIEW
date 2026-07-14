@@ -19,6 +19,7 @@ import type {
   ContentAnalysis, ContentDimension,
   AnswerFeedback,
 } from '../../feedback/types'
+import { classifyF1DialogueActLocally } from '../../../shared/doubaoDecision'
 
 // ---- 填充词检测 ----
 
@@ -317,13 +318,15 @@ function getVerdict(voice: VoiceAnalysis, content: ContentAnalysis): AnswerFeedb
 // ---- QA 提取 ----
 
 /** 从对话消息中提取问答对 */
-function extractQAPairs(messages: ChatMessage[]): Array<{
+export function extractQAPairs(messages: ChatMessage[]): Array<{
   id: string; question: string; answer: string; timestamp: string
 }> {
   const pairs: Array<{ id: string; question: string; answer: string; timestamp: string }> = []
   let pairIndex = 0
   for (let i = 0; i < messages.length - 1; i++) {
     if (messages[i].role === 'officer' && messages[i + 1].role === 'user') {
+      const dialogueAct = classifyF1DialogueActLocally(messages[i + 1].text)
+      if (dialogueAct === 'repeat_request' || dialogueAct === 'did_not_hear' || dialogueAct === 'silence') continue
       pairIndex++
       pairs.push({
         id: `q${pairIndex}`,
@@ -384,6 +387,9 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
     title,
     overallScore,
     transcript,
+    analysisSource: 'local',
+    aiScoredAnswers: 0,
+    totalScoredAnswers: transcript.length,
   }
 }
 
@@ -434,12 +440,19 @@ async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPa
 
     const parsed: AIScoreResult = JSON.parse(content)
 
-    // 映射到现有类型
-    const voiceConfidence = parsed.voice?.confidence ?? 50
+    // Map provider output defensively so malformed scores cannot break the report page.
+    const normalizeScore = (value: unknown, fallback = 3) => typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(1, Math.min(5, Math.round(value)))
+      : fallback
+    const voiceConfidence = typeof parsed.voice?.confidence === 'number' && Number.isFinite(parsed.voice.confidence)
+      ? Math.max(1, Math.min(100, Math.round(parsed.voice.confidence)))
+      : 50
     const wpm = Math.round(65 + voiceConfidence * 0.9)
+    const allowedVerdicts = new Set(['favorable', 'neutral', 'unfavorable'])
+    const allowedEmotions = new Set(['calm', 'nervous', 'confident', 'hesitant', 'tense', 'natural'])
 
     const feedback: QAPair['feedback'] = {
-      verdict: (parsed.verdict as any) ?? 'neutral',
+      verdict: allowedVerdicts.has(parsed.verdict ?? '') ? parsed.verdict as AnswerFeedback['verdict'] : 'neutral',
       voice: {
         metrics: {
           wordsPerMinute: wpm,
@@ -450,7 +463,7 @@ async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPa
           paceStability: Math.max(1, Math.min(5, Math.round(1 + voiceConfidence * 0.04))),
         },
         emotion: {
-          primary: (parsed.voice?.emotion as any) ?? 'natural',
+          primary: allowedEmotions.has(parsed.voice?.emotion ?? '') ? parsed.voice?.emotion as VoiceEmotion['primary'] : 'natural',
           stability: Math.min(5, Math.round(2 + voiceConfidence * 0.03)),
           description: parsed.voice?.description ?? '',
         },
@@ -461,27 +474,29 @@ async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPa
         dimensions: [
           {
             label: '逻辑',
-            score: parsed.content?.logic?.score ?? 3,
+            score: normalizeScore(parsed.content?.logic?.score),
             comment: parsed.content?.logic?.comment ?? '',
           },
           {
             label: '具体性',
-            score: parsed.content?.specificity?.score ?? 3,
+            score: normalizeScore(parsed.content?.specificity?.score),
             comment: parsed.content?.specificity?.comment ?? '',
           },
           {
             label: '说服力',
-            score: parsed.content?.persuasion?.score ?? 3,
+            score: normalizeScore(parsed.content?.persuasion?.score),
             comment: parsed.content?.persuasion?.comment ?? '',
           },
           {
             label: '约束力',
-            score: parsed.content?.ties?.score ?? 3,
+            score: normalizeScore(parsed.content?.ties?.score),
             comment: parsed.content?.ties?.comment ?? '',
           },
         ],
         summary: parsed.summary ?? '',
-        suggestions: parsed.suggestions ?? [],
+        suggestions: Array.isArray(parsed.suggestions)
+          ? parsed.suggestions.filter((item): item is string => typeof item === 'string').slice(0, 2)
+          : [],
       },
     }
 
@@ -503,13 +518,13 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
   const pairs = extractQAPairs(record.messages)
 
   // 并行处理所有 QA pairs（每个独立评分）
-  const results = await Promise.all(
+  const scoredResults = await Promise.all(
     pairs.map(async ({ id, question, answer, timestamp }) => {
       // 尝试 AI 评分
       const aiFeedback = await scoreQAPairWithAI(question, answer)
 
       if (aiFeedback) {
-        return { id, question, answer, timestamp, feedback: aiFeedback }
+        return { qa: { id, question, answer, timestamp, feedback: aiFeedback }, usedAi: true }
       }
 
       // AI 不可用 → 降级到规则引擎
@@ -517,9 +532,11 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
       const content = analyzeContent(answer, question)
       const verdict = getVerdict(voice, content)
       const feedback: AnswerFeedback = { verdict, voice, content }
-      return { id, question, answer, timestamp, feedback }
+      return { qa: { id, question, answer, timestamp, feedback }, usedAi: false }
     }),
   )
+  const results = scoredResults.map(result => result.qa)
+  const aiScoredAnswers = scoredResults.filter(result => result.usedAi).length
 
   // 综合评分
   let totalScore = 0
@@ -547,5 +564,12 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
     title,
     overallScore,
     transcript: results,
+    analysisSource: aiScoredAnswers === results.length && results.length > 0
+      ? 'doubao'
+      : aiScoredAnswers > 0
+        ? 'hybrid'
+        : 'local',
+    aiScoredAnswers,
+    totalScoredAnswers: results.length,
   }
 }

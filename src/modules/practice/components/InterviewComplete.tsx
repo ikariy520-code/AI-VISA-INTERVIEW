@@ -36,7 +36,7 @@ const visaTypeLabel: Record<string, string> = {
   L1: 'L1 跨国经理',
 }
 
-const AI_FEEDBACK_TIMEOUT_MS = 8000
+const AI_FEEDBACK_TIMEOUT_MS = 30000
 
 interface FeedbackResult {
   session: InterviewSession
@@ -62,7 +62,7 @@ function waitForFeedback<T>(promise: Promise<T>, timeoutMs: number): Promise<T> 
 async function generateFeedbackResult(record: InterviewRecord): Promise<FeedbackResult> {
   try {
     const session = await waitForFeedback(analyzeInterviewWithAI(record), AI_FEEDBACK_TIMEOUT_MS)
-    return { session, usedLocalFallback: false }
+    return { session, usedLocalFallback: session.analysisSource !== 'doubao' }
   } catch (error) {
     console.warn('[InterviewComplete] AI scoring unavailable, using rule engine:', error)
     return { session: analyzeInterview(record), usedLocalFallback: true }
@@ -110,7 +110,11 @@ export default function InterviewComplete({ messages, context, analysis, duratio
       ({ session, usedLocalFallback }) => {
         if (!cancelled) {
           setFeedbackSession(session)
-          setFeedbackError(usedLocalFallback ? 'AI 服务未连接，已使用本地规则生成反馈。' : '')
+          setFeedbackError(usedLocalFallback
+            ? session.analysisSource === 'hybrid'
+              ? '部分回答使用豆包 AI 分析，其余回答已使用本地规则补全。'
+              : 'AI 服务未连接，已使用本地规则生成反馈。'
+            : '')
           setFeedbackState('ready')
         }
       },
@@ -125,6 +129,15 @@ export default function InterviewComplete({ messages, context, analysis, duratio
 
     return () => { cancelled = true }
   }, [analysis, context, duration, messages])
+
+  // Feedback is the natural next step: once ready, open the detailed report automatically.
+  useEffect(() => {
+    if (feedbackState !== 'ready' || !feedbackSession) return
+    const timer = window.setTimeout(() => {
+      navigate('/feedback', { state: { session: feedbackSession } })
+    }, 650)
+    return () => window.clearTimeout(timer)
+  }, [feedbackSession, feedbackState, navigate])
 
   // 跳转反馈页
   const handleViewFeedback = useCallback(() => {

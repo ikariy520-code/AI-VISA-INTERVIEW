@@ -5,7 +5,9 @@ import {
   getArkMessageContent,
   parseDoubaoAssessment,
   sanitizeF1DecisionRequest,
+  redactPotentialIdentifiers,
 } from '../src/shared/doubaoDecision'
+import { buildDoubaoScoreMessages } from '../src/shared/doubaoScore'
 
 const HANDLED_PATHS = new Set(['/api/ai-chat', '/api/ai-score', '/api/interview/decision'])
 const DEFAULT_ARK_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
@@ -105,16 +107,15 @@ export function doubaoTextBridge(options: DoubaoTextBridgeOptions): Plugin {
         }
 
         if (pathname === '/api/ai-score') {
-          const question = String(body?.question ?? '').trim().slice(0, 2_000)
-          const answer = String(body?.answer ?? '').trim().slice(0, 6_000)
+          const question = redactPotentialIdentifiers(String(body?.question ?? '').trim()).slice(0, 2_000)
+          const answer = redactPotentialIdentifiers(String(body?.answer ?? '').trim()).slice(0, 6_000)
           if (!question || !answer) return writeJson(response, 400, { error: 'MISSING_QUESTION_OR_ANSWER' })
           const provider = await callDoubao({
-            messages: [
-              { role: 'system', content: 'You are an expert visa interview coach. Return one valid JSON object and nothing else.' },
-              { role: 'user', content: `Evaluate this US visa interview answer.\nQuestion: ${question}\nAnswer: ${answer}\nReturn JSON with content scores for logic, specificity, persuasion and ties (1-5), voice confidence (1-100), verdict, summary and two suggestions.` },
-            ],
-            temperature: 0.3,
-            max_tokens: 800,
+            messages: buildDoubaoScoreMessages(question, answer),
+            temperature: 0.2,
+            thinking: { type: 'disabled' },
+            response_format: { type: 'json_object' },
+            max_tokens: 900,
           })
           return writeJson(response, provider.status, provider.payload)
         }

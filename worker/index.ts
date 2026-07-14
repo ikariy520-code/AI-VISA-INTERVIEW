@@ -3,7 +3,9 @@ import {
   getArkMessageContent,
   parseDoubaoAssessment,
   sanitizeF1DecisionRequest,
+  redactPotentialIdentifiers,
 } from '../src/shared/doubaoDecision'
+import { buildDoubaoScoreMessages } from '../src/shared/doubaoScore'
 
 interface Env {
   ASSETS: Fetcher
@@ -300,18 +302,16 @@ async function handleAiChat(request: Request, env: Env): Promise<Response> {
 async function handleAiScore(request: Request, env: Env): Promise<Response> {
   const body = await parseJsonBody(request, 32_000)
   if (body instanceof Response) return body
-  const question = String(body.question ?? '').trim().slice(0, 2000)
-  const answer = String(body.answer ?? '').trim().slice(0, 6000)
+  const question = redactPotentialIdentifiers(String(body.question ?? '').trim()).slice(0, 2000)
+  const answer = redactPotentialIdentifiers(String(body.answer ?? '').trim()).slice(0, 6000)
   if (!question || !answer) return json({ error: 'MISSING_QUESTION_OR_ANSWER' }, 400)
-  const prompt = `Evaluate this US visa interview answer.\nQuestion: ${question}\nAnswer: ${answer}\nReturn ONLY JSON with content scores for logic, specificity, persuasion and ties (1-5), voice confidence (1-100), verdict, summary and two suggestions.`
   return callDoubao(env, {
     model: env.ARK_TEXT_MODEL,
-    messages: [
-      { role: 'system', content: 'You are an expert visa interview coach. Always respond with valid JSON only.' },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.5,
-    max_tokens: 800,
+    messages: buildDoubaoScoreMessages(question, answer),
+    temperature: 0.2,
+    thinking: { type: 'disabled' },
+    response_format: { type: 'json_object' },
+    max_tokens: 900,
   })
 }
 

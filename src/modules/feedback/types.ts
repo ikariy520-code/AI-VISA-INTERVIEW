@@ -87,4 +87,7 @@ export interface InterviewSession {
   title: string
   overallScore: number     // 综合 1-5
   transcript: QAPair[]
+  analysisSource?: 'doubao' | 'hybrid' | 'local'
+  aiScoredAnswers?: number
+  totalScoredAnswers?: number
 }

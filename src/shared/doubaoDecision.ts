@@ -73,7 +73,7 @@ const SAFE_CONTEXT_KEYS = new Set([
   'hasPreviousVisaDenial', 'hasStudyOrWorkGap', 'postGraduationPlan', 'homeTies',
 ])
 
-function redactPotentialIdentifiers(value: string): string {
+export function redactPotentialIdentifiers(value: string): string {
   return value
     .replace(/\b(passport|sevis|ds-?160|confirmation)\s*(?:number|no\.?|id|code)?\s*(?:is\s*)?[:#-]?\s*[a-z0-9-]{5,}\b/gi, '$1 [redacted identifier]')
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[redacted email]')
@@ -299,7 +299,7 @@ export function parseDoubaoAssessment(
 /** Fast local guard used when the provider is slow or unavailable. */
 export function classifyF1DialogueActLocally(answer: string): F1DialogueAct {
   const normalized = answer.trim().toLowerCase().replace(/[.!?]+$/g, '').trim()
-  if (!normalized || normalized === '[no_speech]') return 'silence'
+  if (!normalized || normalized === '[no_speech]' || /^\(?no speech detected\)?$/.test(normalized)) return 'silence'
   if (/\b(i (?:could not|couldn't|did not|didn't) (?:hear|catch)(?: you| that)?|i can't hear you|i cannot hear you)\b/.test(normalized)) {
     return 'did_not_hear'
   }

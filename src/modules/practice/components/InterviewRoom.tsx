@@ -75,6 +75,20 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
   const timerRef = useRef<ReturnType<typeof setInterval>>()
   const processingRef = useRef(false)
   const lastUserAnswerRef = useRef('')
+  const messagesRef = useRef<ChatMessage[]>([])
+  const completionRequestedRef = useRef(false)
+
+  const appendMessage = useCallback((message: ChatMessage) => {
+    const nextMessages = [...messagesRef.current, message]
+    messagesRef.current = nextMessages
+    setMessages(nextMessages)
+  }, [])
+
+  const completeInterview = useCallback(() => {
+    if (completionRequestedRef.current) return
+    completionRequestedRef.current = true
+    onComplete([...messagesRef.current])
+  }, [onComplete])
 
   // ---- 语音输入 ----
 
@@ -117,6 +131,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
         timestamp: formatElapsed(elapsed),
         emotion: 'friendly',
       }
+      messagesRef.current = [msg]
       setMessages([msg])
       setStatus('officer-speaking')
       void textToSpeech(greeting, officerType).finally(() => {
@@ -155,11 +170,13 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
       timestamp: formatElapsed(elapsed),
     }
 
-    setMessages(prev => [...prev, userMsg])
+    appendMessage(userMsg)
     setStatus('processing')
     setAiError('')
 
-    const history = messages.map(m => ({ role: m.role, text: m.text }))
+    const history = messagesRef.current
+      .slice(0, -1)
+      .map(m => ({ role: m.role, text: m.text }))
 
     try {
       const response = await generateOfficerResponse(context, history, text.trim(), officerType)
@@ -176,7 +193,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
         isDocumentRequest: response.isDocumentRequest,
       }
 
-      setMessages(prev => [...prev, officerMsg])
+      appendMessage(officerMsg)
       setOfficerEmotion(response.emotion as OfficerEmotion)
 
       // Keep the microphone disabled until the officer has finished speaking.
@@ -187,12 +204,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
       if (response.isClosing || checkClosingText(response.text)) {
         processingRef.current = false
         setStatus('idle')
-        setTimeout(() => {
-          setMessages(prev => {
-            onComplete(prev)
-            return prev
-          })
-        }, 2500)
+        setTimeout(completeInterview, 2500)
       } else {
         processingRef.current = false
         setStatus('idle') // 等待用户下一轮录音
@@ -202,7 +214,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
       setStatus('idle')
       setAiError(error instanceof Error ? error.message : 'AI 暂时无法回答，请稍后重试。')
     }
-  }, [messages, context, elapsed, officerType, onComplete])
+  }, [appendMessage, completeInterview, context, elapsed, officerType])
 
   // ---- 麦克风点击 ----
 
@@ -252,11 +264,8 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
   const handleEnd = useCallback(() => {
     clearInterval(timerRef.current)
     voice.cancel()
-    setMessages(prev => {
-      onComplete(prev)
-      return prev
-    })
-  }, [voice, onComplete])
+    completeInterview()
+  }, [voice, completeInterview])
 
   return (
     <>
