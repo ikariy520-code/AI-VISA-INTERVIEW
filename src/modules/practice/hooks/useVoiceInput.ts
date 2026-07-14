@@ -3,6 +3,7 @@ import { DoubaoAsrSession, isDoubaoAsrSupported } from '../services/doubaoSpeech
 
 interface UseVoiceInputOptions {
   onResult?: (text: string) => void
+  onNoSpeech?: () => void
   lang?: string
 }
 
@@ -23,6 +24,7 @@ const BrowserSpeechRecognition = typeof window !== 'undefined'
 
 export function useVoiceInput({
   onResult,
+  onNoSpeech,
   lang = 'en-US',
 }: UseVoiceInputOptions = {}): UseVoiceInputReturn {
   const [isRecording, setIsRecording] = useState(false)
@@ -30,6 +32,7 @@ export function useVoiceInput({
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const onResultRef = useRef(onResult)
+  const onNoSpeechRef = useRef(onNoSpeech)
   const durationRef = useRef(0)
   const durationTimerRef = useRef<ReturnType<typeof setInterval>>()
   const cloudSessionRef = useRef<DoubaoAsrSession | null>(null)
@@ -38,6 +41,7 @@ export function useVoiceInput({
   const cancelledRef = useRef(false)
   const submittedRef = useRef(false)
   onResultRef.current = onResult
+  onNoSpeechRef.current = onNoSpeech
 
   const isSupported = isDoubaoAsrSupported() || Boolean(BrowserSpeechRecognition)
 
@@ -60,7 +64,9 @@ export function useVoiceInput({
     if (cancelledRef.current || submittedRef.current) return
     const cleaned = finalTextRef.current.replace(/\s+/g, ' ').trim()
     if (!cleaned) {
+      submittedRef.current = true
       setError('No speech was recognized. Please try again.')
+      onNoSpeechRef.current?.()
       return
     }
     submittedRef.current = true

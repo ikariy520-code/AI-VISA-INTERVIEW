@@ -327,8 +327,9 @@ async function handleInterviewDecision(request: Request, env: Env): Promise<Resp
     model: env.ARK_TEXT_MODEL,
     messages: buildDoubaoDecisionMessages(decisionRequest),
     temperature: 0.1,
-    reasoning_effort: 'low',
-    max_tokens: 500,
+    thinking: { type: 'disabled' },
+    response_format: { type: 'json_object' },
+    max_tokens: 350,
   })
   if (!providerResponse.ok) return providerResponse
 
@@ -340,10 +341,14 @@ async function handleInterviewDecision(request: Request, env: Env): Promise<Resp
   }
   const content = getArkMessageContent(providerPayload)
   const assessment = content
-    ? parseDoubaoAssessment(content, decisionRequest.allowedFollowUps.map(item => item.id))
+    ? parseDoubaoAssessment(
+      content,
+      decisionRequest.allowedFollowUps.map(item => item.id),
+      decisionRequest.candidateNextQuestions.map(item => item.id),
+    )
     : null
   if (!assessment) return json({ error: 'DOUBAO_INVALID_DECISION' }, 502)
-  return json({ assessment, provider: 'doubao', schemaVersion: 1 })
+  return json({ assessment, provider: 'doubao', schemaVersion: 2 })
 }
 
 function isAdmin(request: Request, env: Env): boolean {

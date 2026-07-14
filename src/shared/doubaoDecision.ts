@@ -6,6 +6,14 @@ export type DecisionReason =
   | 'needs_detail'
   | 'off_topic'
 
+export type F1DialogueAct =
+  | 'repeat_request'
+  | 'did_not_hear'
+  | 'silence'
+  | 'off_topic'
+  | 'partial_answer'
+  | 'valid_answer'
+
 export type DecisionRiskSignal =
   | 'off_topic'
   | 'too_vague'
@@ -17,6 +25,7 @@ export type DecisionRiskSignal =
   | 'background_mismatch'
 
 export interface F1AnswerAssessment {
+  dialogueAct: F1DialogueAct
   relevance: number
   specificity: number
   clarity: number
@@ -27,6 +36,14 @@ export interface F1AnswerAssessment {
   allowedFollowUpId: string | null
   riskSignals: DecisionRiskSignal[]
   decisionReason: DecisionReason
+  recommendedNextQuestionId: string | null
+}
+
+export interface F1NextQuestionCandidate {
+  id: string
+  text: string
+  stage: string
+  topic: string
 }
 
 export interface F1DecisionRequest {
@@ -34,12 +51,16 @@ export interface F1DecisionRequest {
   questionText: string
   answer: string
   allowedFollowUps: Array<{ id: string; text: string }>
+  candidateNextQuestions: F1NextQuestionCandidate[]
   recentTurns: Array<{ role: 'officer' | 'user'; text: string }>
   safeContext: Record<string, unknown>
 }
 
 const REASONS = new Set<DecisionReason>([
   'sufficient', 'too_vague', 'uncertain', 'inconsistent', 'needs_detail', 'off_topic',
+])
+const DIALOGUE_ACTS = new Set<F1DialogueAct>([
+  'repeat_request', 'did_not_hear', 'silence', 'off_topic', 'partial_answer', 'valid_answer',
 ])
 const RISK_SIGNALS = new Set<DecisionRiskSignal>([
   'off_topic', 'too_vague', 'uncertain', 'possible_inconsistency',
@@ -93,6 +114,18 @@ export function sanitizeF1DecisionRequest(input: unknown): F1DecisionRequest | n
     })
     : []
 
+  const candidateNextQuestions = Array.isArray(raw.candidateNextQuestions)
+    ? raw.candidateNextQuestions.slice(0, 16).flatMap(item => {
+      if (!item || typeof item !== 'object') return []
+      const candidate = item as Record<string, unknown>
+      const id = String(candidate.id ?? '').trim()
+      const text = redactPotentialIdentifiers(String(candidate.text ?? '').trim()).slice(0, 500)
+      const stage = String(candidate.stage ?? '').trim().slice(0, 80)
+      const topic = String(candidate.topic ?? '').trim().slice(0, 80)
+      return /^f1_\d{2}$/.test(id) && text && stage && topic ? [{ id, text, stage, topic }] : []
+    })
+    : []
+
   const recentTurns = Array.isArray(raw.recentTurns)
     ? raw.recentTurns.slice(-8).flatMap(item => {
       if (!item || typeof item !== 'object') return []
@@ -116,12 +149,14 @@ export function sanitizeF1DecisionRequest(input: unknown): F1DecisionRequest | n
       .map(([key, value]) => [key, sanitizeJsonValue(value)])
       .filter(([, value]) => value !== undefined),
   )
-  return { questionId, questionText, answer, allowedFollowUps, recentTurns, safeContext }
+  return { questionId, questionText, answer, allowedFollowUps, candidateNextQuestions, recentTurns, safeContext }
 }
 
 export function buildDoubaoDecisionMessages(input: F1DecisionRequest) {
   const allowedIds = input.allowedFollowUps.map(item => item.id)
+  const candidateNextIds = input.candidateNextQuestions.map(item => item.id)
   const outputExample = {
+    dialogueAct: 'valid_answer',
     relevance: 1,
     specificity: 1,
     clarity: 1,
@@ -132,6 +167,7 @@ export function buildDoubaoDecisionMessages(input: F1DecisionRequest) {
     allowedFollowUpId: null,
     riskSignals: [],
     decisionReason: 'sufficient',
+    recommendedNextQuestionId: candidateNextIds[0] ?? null,
   }
 
   return [
@@ -139,7 +175,22 @@ export function buildDoubaoDecisionMessages(input: F1DecisionRequest) {
       role: 'system',
       content: `You evaluate one answer in an F1 visa interview practice product. Return one JSON object and nothing else.
 
-Rules:
+First classify the applicant utterance into exactly one dialogueAct:
+- repeat_request: asks the officer to repeat or says pardon.
+- did_not_hear: explicitly says they could not hear or catch the question.
+- silence: the special [NO_SPEECH] marker or no meaningful spoken response.
+- off_topic: speech is understandable but does not answer the current question.
+- partial_answer: addresses the question but is materially incomplete or too vague.
+- valid_answer: directly answers the question, including a concise Yes or No when appropriate.
+
+Routing rules:
+- For repeat_request, did_not_hear, silence, or off_topic: recommendedNextQuestionId must be null and needsFollowUp must be false. The application will keep the same question active.
+- For partial_answer: prefer one approved follow-up when available; otherwise recommendedNextQuestionId must be null.
+- For valid_answer: recommend the most logical next question from candidateNextQuestions. Use only an exact supplied ID, or null when the list is empty.
+- Keep a coherent interview progression. Prefer a nearby topic unless the answer creates a material reason to switch topics.
+- Never invent a question or ID. Mandatory coverage and interview length are enforced by the application.
+
+Assessment rules:
 - Evaluate relevance, specificity and clarity from 1 to 5.
 - Compare only with the supplied non-identifying background and recent turns.
 - Never decide whether the applicant is truthful, eligible, approved, refused, or seeking asylum.
@@ -149,6 +200,7 @@ Rules:
 - Do not output names, addresses, document numbers, inferred identity, or free-form personal facts.
 - riskSignals may only contain: off_topic, too_vague, uncertain, possible_inconsistency, funding_concern, immigrant_intent_concern, timeline_mismatch, background_mismatch.
 - decisionReason must be one of: sufficient, too_vague, uncertain, inconsistent, needs_detail, off_topic.
+- dialogueAct must be one of: repeat_request, did_not_hear, silence, off_topic, partial_answer, valid_answer.
 
 Required JSON shape:
 ${JSON.stringify(outputExample)}`,
@@ -160,6 +212,8 @@ ${JSON.stringify(outputExample)}`,
         applicantAnswer: input.answer,
         allowedFollowUps: input.allowedFollowUps,
         allowedFollowUpIds: allowedIds,
+        candidateNextQuestions: input.candidateNextQuestions,
+        candidateNextQuestionIds: candidateNextIds,
         approvedNonIdentifyingBackground: input.safeContext,
         recentInterviewTurns: input.recentTurns,
       }),
@@ -180,6 +234,7 @@ function integerScore(value: unknown): number | null {
 export function parseDoubaoAssessment(
   content: string,
   allowedFollowUpIds: readonly string[],
+  allowedNextQuestionIds: readonly string[] = [],
 ): F1AnswerAssessment | null {
   let value: unknown
   try {
@@ -189,6 +244,7 @@ export function parseDoubaoAssessment(
   }
   if (!value || typeof value !== 'object') return null
   const raw = value as Record<string, unknown>
+  if (typeof raw.dialogueAct !== 'string' || !DIALOGUE_ACTS.has(raw.dialogueAct as F1DialogueAct)) return null
   const relevance = integerScore(raw.relevance)
   const specificity = integerScore(raw.specificity)
   const clarity = integerScore(raw.clarity)
@@ -206,6 +262,17 @@ export function parseDoubaoAssessment(
   if (raw.needsFollowUp && !allowedFollowUpId) return null
   if (!raw.needsFollowUp && allowedFollowUpId) return null
 
+  const recommendedNextQuestionId = raw.recommendedNextQuestionId === null
+    ? null
+    : typeof raw.recommendedNextQuestionId === 'string' && allowedNextQuestionIds.includes(raw.recommendedNextQuestionId)
+      ? raw.recommendedNextQuestionId
+      : undefined
+  if (recommendedNextQuestionId === undefined) return null
+  const dialogueAct = raw.dialogueAct as F1DialogueAct
+  const mustStayOnQuestion = ['repeat_request', 'did_not_hear', 'silence', 'off_topic'].includes(dialogueAct)
+  if (mustStayOnQuestion && (raw.needsFollowUp || recommendedNextQuestionId)) return null
+  if (dialogueAct === 'partial_answer' && recommendedNextQuestionId) return null
+
   const contradictsQuestionIds = raw.contradictsQuestionIds
     .filter((item): item is string => typeof item === 'string' && /^f1_\d{2}$/.test(item))
     .slice(0, 4)
@@ -214,6 +281,7 @@ export function parseDoubaoAssessment(
     .slice(0, 6)
 
   return {
+    dialogueAct,
     relevance,
     specificity,
     clarity,
@@ -224,7 +292,23 @@ export function parseDoubaoAssessment(
     allowedFollowUpId,
     riskSignals,
     decisionReason: raw.decisionReason as DecisionReason,
+    recommendedNextQuestionId,
   }
+}
+
+/** Fast local guard used when the provider is slow or unavailable. */
+export function classifyF1DialogueActLocally(answer: string): F1DialogueAct {
+  const normalized = answer.trim().toLowerCase().replace(/[.!?]+$/g, '').trim()
+  if (!normalized || normalized === '[no_speech]') return 'silence'
+  if (/\b(i (?:could not|couldn't|did not|didn't) (?:hear|catch)(?: you| that)?|i can't hear you|i cannot hear you)\b/.test(normalized)) {
+    return 'did_not_hear'
+  }
+  if (/^(sorry[, ]*)?(pardon(?: me)?|what|sorry what|say that again|come again)$/.test(normalized)
+    || /\b(could|can|would|will) you (?:please )?(?:repeat|say (?:it|that) again)\b/.test(normalized)
+    || /\bplease repeat(?: the question)?\b/.test(normalized)) {
+    return 'repeat_request'
+  }
+  return 'valid_answer'
 }
 
 export function getArkMessageContent(payload: unknown): string | null {

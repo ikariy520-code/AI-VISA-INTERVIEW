@@ -43,6 +43,7 @@ function formatElapsed(seconds: number): string {
 }
 
 const containsCjk = (value: string) => /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(value)
+const NO_SPEECH_MARKER = '[NO_SPEECH]'
 
 /** 检测结束语 */
 function checkClosingText(text: string): boolean {
@@ -83,8 +84,13 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
     submitAnswer(text)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleVoiceNoSpeech = useCallback(() => {
+    submitAnswer(NO_SPEECH_MARKER)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const voice = useVoiceInput({
     onResult: handleVoiceResult,
+    onNoSpeech: handleVoiceNoSpeech,
     lang: 'en-US',
   })
 
@@ -145,7 +151,7 @@ export default function InterviewRoom({ context, analysis, officerType, onComple
     const userMsg: ChatMessage = {
       id: nextId(),
       role: 'user',
-      text: text.trim(),
+      text: text.trim() === NO_SPEECH_MARKER ? '(No speech detected)' : text.trim(),
       timestamp: formatElapsed(elapsed),
     }
 

@@ -42,6 +42,15 @@ export function getF1DecisionContext(context: UserContext) {
     allowedFollowUps: activeTurn.kind === 'main'
       ? question.followUps.map(rule => ({ id: rule.id, text: rule.text }))
       : [],
+    candidateNextQuestions: state.remainingQuestionIds.map(id => {
+      const candidate = getF1Question(id)
+      return {
+        id: candidate.id,
+        text: candidate.text,
+        stage: candidate.stage,
+        topic: candidate.topic,
+      }
+    }),
   }
 }
 

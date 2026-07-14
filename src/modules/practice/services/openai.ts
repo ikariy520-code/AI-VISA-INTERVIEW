@@ -188,7 +188,11 @@ async function assessF1AnswerWithDoubao(
   if (!response.ok) throw new Error(`Doubao decision API error: ${response.status}`)
   const payload = await response.json() as { assessment?: unknown }
   const content = JSON.stringify(payload.assessment ?? null)
-  return parseDoubaoAssessment(content, decisionContext.allowedFollowUps.map(item => item.id)) ?? undefined
+  return parseDoubaoAssessment(
+    content,
+    decisionContext.allowedFollowUps.map(item => item.id),
+    decisionContext.candidateNextQuestions.map(item => item.id),
+  ) ?? undefined
 }
 
 // ============================================================

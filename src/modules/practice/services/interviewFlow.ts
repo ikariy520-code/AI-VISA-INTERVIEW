@@ -1,5 +1,9 @@
 import type { OfficerEmotion, OfficerTurn, UserContext } from '../types'
-import type { F1AnswerAssessment } from '../../../shared/doubaoDecision'
+import {
+  classifyF1DialogueActLocally,
+  type F1AnswerAssessment,
+  type F1DialogueAct,
+} from '../../../shared/doubaoDecision'
 import {
   F1_MANDATORY_QUESTION_IDS,
   F1_QUESTION_CATALOG,
@@ -28,6 +32,11 @@ interface ActiveTurn {
   text: string
   questionId?: F1QuestionId
   followUpId?: string
+}
+
+interface PendingRepair {
+  text: string
+  emotion: OfficerEmotion
 }
 
 const OPENING_TEXT = 'Good morning. May I see your passport and I-20, please?'
@@ -88,6 +97,22 @@ function followUpMatches(rule: F1FollowUpRule, signals: AnswerSignals): boolean 
   return Boolean(rule.keywords?.some(keyword => signals.lower.includes(keyword.toLowerCase())))
 }
 
+function buildRepairTurn(dialogueAct: F1DialogueAct, activeText: string): PendingRepair | null {
+  if (dialogueAct === 'repeat_request') {
+    return { text: `Of course. ${activeText}`, emotion: 'neutral' }
+  }
+  if (dialogueAct === 'did_not_hear') {
+    return { text: `Let me repeat that. ${activeText}`, emotion: 'neutral' }
+  }
+  if (dialogueAct === 'silence') {
+    return { text: `I didn't hear an answer. ${activeText}`, emotion: 'neutral' }
+  }
+  if (dialogueAct === 'off_topic') {
+    return { text: `Please answer the question directly. ${activeText}`, emotion: 'stern' }
+  }
+  return null
+}
+
 export function buildF1QuestionPlan(
   context: UserContext,
   options: F1InterviewFlowOptions = {},
@@ -129,21 +154,38 @@ export function createInterviewFlow(
   options: F1InterviewFlowOptions = {},
 ) {
   const plan = buildF1QuestionPlan(userContext, options)
+  const remainingQuestionIds = [...plan]
   const askedMainQuestionIds: F1QuestionId[] = []
   const askedFollowUpIds: string[] = []
   const answers: Array<{ questionId?: F1QuestionId; followUpId?: string; answer: string; assessment?: F1AnswerAssessment }> = []
   const riskFlags: string[] = []
-  let planIndex = 0
   let activeTurn: ActiveTurn | null = null
   let pendingFollowUp: { question: F1QuestionDefinition; rule: F1FollowUpRule } | null = null
+  let pendingRepair: PendingRepair | null = null
+  let preferredNextQuestionId: F1QuestionId | null = null
   let ended = false
 
   function evaluateActiveAnswer(answer: string, assessment?: F1AnswerAssessment) {
     if (!activeTurn || !answer.trim()) return
+    const dialogueAct = assessment?.dialogueAct ?? classifyF1DialogueActLocally(answer)
+    const repair = buildRepairTurn(dialogueAct, activeTurn.text)
+    if (repair) {
+      pendingRepair = repair
+      if (dialogueAct === 'off_topic' && activeTurn.questionId) {
+        answers.push({ questionId: activeTurn.questionId, followUpId: activeTurn.followUpId, answer: answer.trim(), assessment })
+        riskFlags.push(`off_topic:${activeTurn.questionId}`)
+      }
+      return
+    }
+
     answers.push({ questionId: activeTurn.questionId, followUpId: activeTurn.followUpId, answer: answer.trim(), assessment })
     if (assessment && activeTurn.questionId) {
       for (const signal of assessment.riskSignals) riskFlags.push(`doubao:${activeTurn.questionId}:${signal}`)
       if (assessment.isContradictory) riskFlags.push(`doubao:${activeTurn.questionId}:possible_inconsistency`)
+    }
+    if (assessment?.recommendedNextQuestionId
+      && remainingQuestionIds.includes(assessment.recommendedNextQuestionId as F1QuestionId)) {
+      preferredNextQuestionId = assessment.recommendedNextQuestionId as F1QuestionId
     }
     if (activeTurn.kind !== 'main' || !activeTurn.questionId) return
 
@@ -160,6 +202,9 @@ export function createInterviewFlow(
     const mustPreserveLocalScreeningFollowUp = ['f1_19', 'f1_20', 'f1_21', 'f1_22'].includes(question.id)
     const matchedRule = recommendedRule ?? (!assessment || mustPreserveLocalScreeningFollowUp ? localRule : undefined)
     if (matchedRule) pendingFollowUp = { question, rule: matchedRule }
+    else if (dialogueAct === 'partial_answer') {
+      pendingRepair = { text: 'Please give me a little more detail about that.', emotion: 'curious' }
+    }
   }
 
   function nextTurn(lastUserAnswer?: string, assessment?: F1AnswerAssessment): OfficerTurn {
@@ -169,6 +214,12 @@ export function createInterviewFlow(
     if (!activeTurn) {
       activeTurn = { kind: 'opening', text: OPENING_TEXT }
       return { text: OPENING_TEXT, emotion: 'friendly', isDocumentRequest: true }
+    }
+
+    if (pendingRepair) {
+      const repair = pendingRepair
+      pendingRepair = null
+      return { text: repair.text, emotion: repair.emotion, isDocumentRequest: activeTurn.kind === 'opening' }
     }
 
     if (pendingFollowUp) {
@@ -183,14 +234,17 @@ export function createInterviewFlow(
       }
     }
 
-    const nextId = plan[planIndex]
+    const nextId = preferredNextQuestionId && remainingQuestionIds.includes(preferredNextQuestionId)
+      ? preferredNextQuestionId
+      : remainingQuestionIds[0]
     if (!nextId) {
       ended = true
       activeTurn = null
       return { text: CLOSING_TEXT, emotion: 'reassuring', isClosing: true }
     }
 
-    planIndex += 1
+    preferredNextQuestionId = null
+    remainingQuestionIds.splice(remainingQuestionIds.indexOf(nextId), 1)
     const question = getF1Question(nextId)
     askedMainQuestionIds.push(nextId)
     activeTurn = { kind: 'main', text: question.text, questionId: question.id }
@@ -207,7 +261,8 @@ export function createInterviewFlow(
     evaluateAnswer: (answer: string, assessment?: F1AnswerAssessment) => evaluateActiveAnswer(answer, assessment),
     getState: () => ({
       plan: [...plan],
-      planIndex,
+      planIndex: askedMainQuestionIds.length,
+      remainingQuestionIds: [...remainingQuestionIds],
       askedMainQuestionIds: [...askedMainQuestionIds],
       askedFollowUpIds: [...askedFollowUpIds],
       answers: [...answers],

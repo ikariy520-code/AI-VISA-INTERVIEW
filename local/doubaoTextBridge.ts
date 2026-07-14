@@ -86,16 +86,21 @@ export function doubaoTextBridge(options: DoubaoTextBridgeOptions): Plugin {
           const provider = await callDoubao({
             messages: buildDoubaoDecisionMessages(decisionRequest),
             temperature: 0.1,
-            reasoning_effort: 'low',
-            max_tokens: 500,
+            thinking: { type: 'disabled' },
+            response_format: { type: 'json_object' },
+            max_tokens: 350,
           })
           if (!provider.ok) return writeJson(response, provider.status, provider.payload)
           const content = getArkMessageContent(provider.payload)
           const assessment = content
-            ? parseDoubaoAssessment(content, decisionRequest.allowedFollowUps.map(item => item.id))
+            ? parseDoubaoAssessment(
+              content,
+              decisionRequest.allowedFollowUps.map(item => item.id),
+              decisionRequest.candidateNextQuestions.map(item => item.id),
+            )
             : null
           return assessment
-            ? writeJson(response, 200, { assessment, provider: 'doubao', schemaVersion: 1 })
+            ? writeJson(response, 200, { assessment, provider: 'doubao', schemaVersion: 2 })
             : writeJson(response, 502, { error: 'DOUBAO_INVALID_DECISION' })
         }
 
