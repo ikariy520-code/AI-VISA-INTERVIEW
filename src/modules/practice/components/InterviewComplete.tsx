@@ -78,6 +78,10 @@ export default function InterviewComplete({ messages, context, analysis, duratio
 
   const officerQuestions = messages.filter(m => m.role === 'officer')
   const userAnswers = messages.filter(m => m.role === 'user')
+  const strategy = typeof analysis.strategy === 'string' ? analysis.strategy : ''
+  const riskPoints = Array.isArray(analysis.riskPoints)
+    ? analysis.riskPoints.filter((point): point is string => typeof point === 'string')
+    : []
 
   // 面签完成后仅生成本次反馈，不写入个人记录或云端数据库。
   useEffect(() => {
@@ -212,16 +216,16 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         </div>
 
         {/* AI 策略简述 */}
-        {analysis.strategy && (
+        {strategy && (
           <div className="col-span-2 rounded-2xl border border-black/[0.06] bg-white p-4 sm:col-span-4">
             <span className="text-[12px] font-semibold text-[#424245]">本次面签策略</span>
-            <p className="mt-1 text-[12px] leading-6 text-[#6e6e73]">{analysis.strategy}</p>
+            <p className="mt-1 text-[12px] leading-6 text-[#6e6e73]">{strategy}</p>
           </div>
         )}
       </motion.div>
 
       {/* 风险点提醒 */}
-      {analysis.riskPoints.length > 0 && (
+      {riskPoints.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -230,7 +234,7 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         >
           <p className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[#8a5818]"><HiOutlineExclamationTriangle className="h-[17px] w-[17px]" /> 本次需要留意</p>
           <ul className="space-y-1">
-            {analysis.riskPoints.map((point, i) => (
+            {riskPoints.map((point, i) => (
               <li key={i} className="text-[12px] text-amber-700 flex gap-2">
                 <span className="font-bold">{i + 1}.</span>
                 <span>{point}</span>

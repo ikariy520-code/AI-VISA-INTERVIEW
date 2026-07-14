@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { F1_MANDATORY_QUESTION_IDS, F1_QUESTION_CATALOG } from '../src/modules/practice/data/f1QuestionCatalog'
 import { createInterviewFlow } from '../src/modules/practice/services/interviewFlow'
+import { normalizeAIAnalysisResult } from '../src/modules/practice/services/openai'
 import type { ChatMessage, UserContext } from '../src/modules/practice/types'
 import { normalizeInterviewSession } from '../src/modules/feedback/normalizeSession'
 import { extractQAPairs } from '../src/modules/shared/store/analysisEngine'
@@ -27,6 +28,20 @@ const context: UserContext = {
   postGraduationPlan: 'return-work',
   homeTies: ['career', 'family-responsibility'],
 }
+
+const normalizedMalformedPreparation = normalizeAIAnalysisResult({
+  visaType: 'B2',
+  riskPoints: 'not-an-array',
+  suggestedQuestions: [{ invalid: true }],
+  strategy: { invalid: true },
+  greeting: 123,
+}, context)
+assert.equal(normalizedMalformedPreparation.visaType, 'F1')
+assert.ok(Array.isArray(normalizedMalformedPreparation.riskPoints))
+assert.ok(normalizedMalformedPreparation.riskPoints.length > 0)
+assert.ok(Array.isArray(normalizedMalformedPreparation.suggestedQuestions))
+assert.equal(typeof normalizedMalformedPreparation.strategy, 'string')
+assert.equal(typeof normalizedMalformedPreparation.greeting, 'string')
 
 assert.equal(F1_QUESTION_CATALOG.length, 22, 'The product catalog must contain exactly 22 F1 questions')
 assert.equal(new Set(F1_QUESTION_CATALOG.map(question => question.id)).size, 22, 'F1 question IDs must be unique')

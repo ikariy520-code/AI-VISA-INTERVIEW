@@ -38,6 +38,40 @@ const BASE_SYSTEM_PROMPT = `You are a US visa officer conducting an interview. Y
 const trimText = (value: string | undefined, maxLength: number) =>
   value?.trim().slice(0, maxLength) || undefined
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeText(value: unknown, fallback: string, maxLength: number): string {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, maxLength)
+    : fallback
+}
+
+function normalizeTextArray(value: unknown, fallback: string[], maxItems: number): string[] {
+  if (!Array.isArray(value)) return [...fallback]
+  const normalized = value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim().slice(0, 240))
+    .filter(Boolean)
+    .slice(0, maxItems)
+  return normalized.length > 0 ? normalized : [...fallback]
+}
+
+/** Keep model-generated preparation data safe for every downstream React screen. */
+export function normalizeAIAnalysisResult(value: unknown, context: UserContext): AIAnalysisResult {
+  const fallback = mockAnalyzeUser(context)
+  const candidate = isRecord(value) ? value : {}
+  return {
+    // The selected visa type is product-owned and must not be changed by the model.
+    visaType: context.visaType,
+    riskPoints: normalizeTextArray(candidate.riskPoints, fallback.riskPoints, 8),
+    suggestedQuestions: normalizeTextArray(candidate.suggestedQuestions, fallback.suggestedQuestions, 12),
+    strategy: normalizeText(candidate.strategy, fallback.strategy, 1_500),
+    greeting: normalizeText(candidate.greeting, fallback.greeting, 800),
+  }
+}
+
 /**
  * Only these product-approved, non-identifying fields may be placed in an AI prompt.
  * Keeping this mapping explicit prevents future UI fields from being sent by accident.
@@ -231,7 +265,7 @@ ${JSON.stringify(buildSafeInterviewContext(context), null, 2)}`
     })
 
     const parsed = JSON.parse(content)
-    return parsed.analysis ?? parsed
+    return normalizeAIAnalysisResult(parsed.analysis ?? parsed, context)
   } catch (err) {
     console.warn('[AI] analyzeUserContext failed, falling back to mock:', err)
     return mockAnalyzeUser(context)
