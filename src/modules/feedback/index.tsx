@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -9,11 +10,13 @@ import {
 } from 'react-icons/hi2'
 import type { InterviewSession } from './types'
 import SessionDetail from './components/SessionDetail'
+import { normalizeInterviewSession } from './normalizeSession'
 
 export default function FeedbackPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const session = (location.state as { session?: InterviewSession } | null)?.session ?? null
+  const rawSession = (location.state as { session?: InterviewSession } | null)?.session ?? null
+  const session = useMemo(() => normalizeInterviewSession(rawSession), [rawSession])
 
   return (
     <div className="app-page">

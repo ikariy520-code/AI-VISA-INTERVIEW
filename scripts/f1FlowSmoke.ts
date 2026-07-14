@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { F1_MANDATORY_QUESTION_IDS, F1_QUESTION_CATALOG } from '../src/modules/practice/data/f1QuestionCatalog'
 import { createInterviewFlow } from '../src/modules/practice/services/interviewFlow'
 import type { ChatMessage, UserContext } from '../src/modules/practice/types'
+import { normalizeInterviewSession } from '../src/modules/feedback/normalizeSession'
 import { extractQAPairs } from '../src/modules/shared/store/analysisEngine'
 import {
   classifyF1DialogueActLocally,
@@ -84,6 +85,35 @@ assert.deepEqual(
   ['I will study at Example University.', 'Its program fits my academic plan.'],
   'Repeat requests and silence must not be scored as substantive answers in the final report',
 )
+
+const normalizedMalformedReport = normalizeInterviewSession({
+  id: 'malformed-report',
+  title: 'F1 report',
+  overallScore: 'not-a-number',
+  transcript: [{
+    id: 'q1',
+    question: 'Which school will you study at?',
+    answer: 'Example University.',
+    feedback: {
+      verdict: 'unexpected-verdict',
+      voice: {
+        metrics: { fillers: { invalid: true }, wordsPerMinute: 'fast' },
+        emotion: { primary: 'unknown', description: { invalid: true } },
+      },
+      content: {
+        dimensions: [{ label: '逻辑', score: '7', comment: { invalid: true } }],
+        summary: { invalid: true },
+        suggestions: ['保持回答直接', { invalid: true }],
+      },
+    },
+  }],
+})
+assert.ok(normalizedMalformedReport, 'Malformed provider data must still produce a renderable report')
+assert.equal(normalizedMalformedReport?.overallScore, 3)
+assert.equal(normalizedMalformedReport?.transcript[0].feedback.verdict, 'neutral')
+assert.deepEqual(normalizedMalformedReport?.transcript[0].feedback.voice.metrics.fillers, [])
+assert.equal(normalizedMalformedReport?.transcript[0].feedback.content.dimensions[0].score, 5)
+assert.equal(typeof normalizedMalformedReport?.transcript[0].feedback.content.summary, 'string')
 
 const repeatFlow = createInterviewFlow(context, { seed: 2, targetMainQuestions: 11 })
 repeatFlow.nextTurn()
