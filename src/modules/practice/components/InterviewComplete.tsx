@@ -8,10 +8,9 @@ import {
   HiOutlineChartBarSquare,
   HiOutlineClock,
   HiOutlineDocumentArrowDown,
-  HiOutlineExclamationTriangle,
   HiOutlineQuestionMarkCircle,
 } from 'react-icons/hi2'
-import type { ChatMessage, UserContext, AIAnalysisResult, InterviewRecord } from '../types'
+import type { ChatMessage, UserContext, InterviewRecord } from '../types'
 import type { InterviewSession } from '../../feedback/types'
 import { analyzeInterview, analyzeInterviewWithAI } from '../../shared/store/analysisEngine'
 import { generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
@@ -24,7 +23,6 @@ import { generateSessionId, getNowFormatted } from '../../shared/store/interview
 interface Props {
   messages: ChatMessage[]
   context: UserContext
-  analysis: AIAnalysisResult
   duration: string
 }
 
@@ -36,7 +34,7 @@ const visaTypeLabel: Record<string, string> = {
   L1: 'L1 跨国经理',
 }
 
-const AI_FEEDBACK_TIMEOUT_MS = 30000
+const AI_FEEDBACK_TIMEOUT_MS = 55000
 
 interface FeedbackResult {
   session: InterviewSession
@@ -69,7 +67,7 @@ async function generateFeedbackResult(record: InterviewRecord): Promise<Feedback
   }
 }
 
-export default function InterviewComplete({ messages, context, analysis, duration }: Props) {
+export default function InterviewComplete({ messages, context, duration }: Props) {
   const navigate = useNavigate()
   const feedbackPromiseRef = useRef<Promise<FeedbackResult> | null>(null)
   const [feedbackState, setFeedbackState] = useState<'generating' | 'ready' | 'error'>('generating')
@@ -78,10 +76,6 @@ export default function InterviewComplete({ messages, context, analysis, duratio
 
   const officerQuestions = messages.filter(m => m.role === 'officer')
   const userAnswers = messages.filter(m => m.role === 'user')
-  const strategy = typeof analysis.strategy === 'string' ? analysis.strategy : ''
-  const riskPoints = Array.isArray(analysis.riskPoints)
-    ? analysis.riskPoints.filter((point): point is string => typeof point === 'string')
-    : []
 
   // 面签完成后仅生成本次反馈，不写入个人记录或云端数据库。
   useEffect(() => {
@@ -103,7 +97,6 @@ export default function InterviewComplete({ messages, context, analysis, duratio
         visaType: context.visaType,
         userContext: context,
         messages,
-        aiAnalysis: analysis,
       }
 
       feedbackPromiseRef.current = generateFeedbackResult(record)
@@ -132,7 +125,7 @@ export default function InterviewComplete({ messages, context, analysis, duratio
     )
 
     return () => { cancelled = true }
-  }, [analysis, context, duration, messages])
+  }, [context, duration, messages])
 
   // Feedback is the natural next step: once ready, open the detailed report automatically.
   useEffect(() => {
@@ -215,34 +208,7 @@ export default function InterviewComplete({ messages, context, analysis, duratio
           <span className="mt-1 block text-[13px] font-semibold text-[#1d1d1f]">{userAnswers.length} 条回答</span>
         </div>
 
-        {/* AI 策略简述 */}
-        {strategy && (
-          <div className="col-span-2 rounded-2xl border border-black/[0.06] bg-white p-4 sm:col-span-4">
-            <span className="text-[12px] font-semibold text-[#424245]">本次面签策略</span>
-            <p className="mt-1 text-[12px] leading-6 text-[#6e6e73]">{strategy}</p>
-          </div>
-        )}
       </motion.div>
-
-      {/* 风险点提醒 */}
-      {riskPoints.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="mb-4 w-full rounded-[20px] border border-amber-200/70 bg-[#fff6e6] p-5"
-        >
-          <p className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[#8a5818]"><HiOutlineExclamationTriangle className="h-[17px] w-[17px]" /> 本次需要留意</p>
-          <ul className="space-y-1">
-            {riskPoints.map((point, i) => (
-              <li key={i} className="text-[12px] text-amber-700 flex gap-2">
-                <span className="font-bold">{i + 1}.</span>
-                <span>{point}</span>
-              </li>
-            ))}
-          </ul>
-        </motion.div>
-      )}
 
       {/* 行动按钮 */}
       <motion.div

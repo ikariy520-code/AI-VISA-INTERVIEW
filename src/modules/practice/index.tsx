@@ -2,20 +2,19 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { HiOutlineArrowLeft, HiOutlineCheck } from 'react-icons/hi2'
-import type { VisaType, UserContext, InterviewStep, AIAnalysisResult, ChatMessage } from './types'
+import type { VisaType, UserContext, InterviewStep, ChatMessage } from './types'
 import type { OfficerType } from '../voice/types'
 import { officerTypes } from '../voice/data/officerTypes'
 import VisaTypeSelector from './components/VisaTypeSelector'
 import UserContextForm from './components/UserContextForm'
-import AIAnalysisScreen from './components/AIAnalysisScreen'
-import InterviewRoom from './components/InterviewRoom'
+import VoiceInterviewRoom from '../voice/components/VoiceInterviewRoom'
 import InterviewComplete from './components/InterviewComplete'
 
 // ========================================
 // 面签实战 — 主页面
 //
-// 5 步流程：
-//   select-type → context-form → ai-analysis → interview → complete
+// 4 步流程：
+//   select-type → context-form → interview → complete
 //
 // 模块独立：本文件夹可单独拆分给其他成员开发
 // 接口契约：导出的 InterviewRecord 对接反馈模块
@@ -37,11 +36,10 @@ const pageTransition = {
   transition: { duration: 0.36, ease: [0.28, 0.11, 0.32, 1] },
 }
 
-const steps: InterviewStep[] = ['select-type', 'context-form', 'ai-analysis', 'interview', 'complete']
+const steps: InterviewStep[] = ['select-type', 'context-form', 'interview', 'complete']
 const stepMeta: Record<InterviewStep, { label: string; short: string }> = {
   'select-type': { label: '选择签证类型', short: '类型' },
   'context-form': { label: '建立面签背景', short: '背景' },
-  'ai-analysis': { label: '准备面签策略', short: '准备' },
   'interview': { label: '模拟面签', short: '面签' },
   'complete': { label: '生成反馈', short: '反馈' },
 }
@@ -52,7 +50,6 @@ export default function PracticePage() {
   const [step, setStep] = useState<InterviewStep>('select-type')
   const [visaType, setVisaType] = useState<VisaType | null>(null)
   const [userContext, setUserContext] = useState<UserContext | null>(null)
-  const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [duration, setDuration] = useState('')
 
@@ -86,19 +83,13 @@ export default function PracticePage() {
     setStep('context-form')
   }, [])
 
-  // Step 2 → Step 3
+  // Step 2 → realtime interview
   const handleContextSubmit = useCallback((context: UserContext) => {
     setUserContext(context)
-    setStep('ai-analysis')
-  }, [])
-
-  // Step 3 → Step 4
-  const handleAnalysisComplete = useCallback((result: AIAnalysisResult) => {
-    setAnalysis(result)
     setStep('interview')
   }, [])
 
-  // Step 4 → Step 5
+  // Interview → report
   const handleInterviewComplete = useCallback((msgs: ChatMessage[]) => {
     setMessages(msgs)
     // 计算时长
@@ -119,7 +110,6 @@ export default function PracticePage() {
     setStep('select-type')
     setVisaType(null)
     setUserContext(null)
-    setAnalysis(null)
     setMessages([])
     setDuration('')
   }, [])
@@ -187,27 +177,18 @@ export default function PracticePage() {
                 />
               )}
 
-              {step === 'ai-analysis' && userContext && (
-                <AIAnalysisScreen
+              {step === 'interview' && userContext && (
+                <VoiceInterviewRoom
                   context={userContext}
-                  onComplete={handleAnalysisComplete}
-                />
-              )}
-
-              {step === 'interview' && userContext && analysis && (
-                <InterviewRoom
-                  context={userContext}
-                  analysis={analysis}
                   officerType={officerType}
                   onComplete={handleInterviewComplete}
                 />
               )}
 
-              {step === 'complete' && userContext && analysis && (
+              {step === 'complete' && userContext && (
                 <InterviewComplete
                   messages={messages}
                   context={userContext}
-                  analysis={analysis}
                   duration={duration}
                 />
               )}

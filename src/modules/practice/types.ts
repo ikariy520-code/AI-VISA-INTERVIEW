@@ -2,8 +2,8 @@
 // 面签实战模块 — 类型定义
 //
 // 流程：
-//   1. 选签证类型 → 2. 填写背景 → 3. AI分析 →
-//   4. 实时语音对话 → 5. 完成总结
+//   1. 选签证类型 → 2. 填写背景 →
+//   3. 端到端实时语音对话 → 4. 完成总结
 //
 // 与第三阶段反馈模块的数据对接：
 //   对话记录 → 可导出为 feedback/types.ts 的 InterviewSession
@@ -80,12 +80,12 @@ export interface UserContext {
   previousVisaAnswer?: 'yes' | 'no'
 }
 
-// ---- AI 对话 ----
+// ---- 面签对话 ----
 
 /** 消息角色 */
 export type MessageRole = 'officer' | 'user' | 'system'
 
-/** AI 面签官情绪 */
+/** 面签官情绪 */
 export type OfficerEmotion = 'neutral' | 'friendly' | 'stern' | 'curious' | 'reassuring' | 'thoughtful'
 
 /** 单条消息 */
@@ -98,9 +98,8 @@ export interface ChatMessage {
   isDocumentRequest?: boolean // 是否为材料请求
 }
 
-// ---- 面签状态机 ----
+// ---- 题库分类 ----
 
-/** 面签阶段 */
 export type InterviewStage =
   | 'START'
   | 'BASIC_INFO'
@@ -115,65 +114,13 @@ export type InterviewStage =
   | 'DOCUMENT_CHECK'
   | 'END'
 
-/** 问题对象 */
-export interface Question {
-  id: string
-  category: InterviewStage
-  text: string
-  priority: 'required' | 'normal' | 'optional'
-  riskTags: string[]
-  followUpTriggers: string[]
-  possibleFollowUps: string[]
-}
-
-/** 状态机内部状态 */
-export interface InterviewState {
-  stage: InterviewStage
-  stageIndex: number
-  askedQuestionIds: Set<string>
-  totalQuestions: number
-  consecutiveCategoryCount: Record<string, number>
-  pendingFollowUp: Question | null
-  askedDocumentQuestions: Set<string>
-  userShortAnswerCount: number
-  riskFlags: string[]
-}
-
-/** 状态机输出：面签官响应 */
-export interface OfficerTurn {
-  text: string
-  emotion: OfficerEmotion
-  isClosing?: boolean
-  isDocumentRequest?: boolean
-}
-
 // ---- 面试状态 ----
 
 export type InterviewStep =
   | 'select-type'
   | 'context-form'
-  | 'ai-analysis'
   | 'interview'
   | 'complete'
-
-export type InterviewStatus = 'idle' | 'officer-speaking' | 'user-speaking' | 'processing'
-
-// ---- OpenAI API 对接（占位 — 后续填入 API key 即可启用） ----
-
-export interface OpenAIConfig {
-  apiKey: string
-  model: string           // e.g. 'gpt-4o-realtime' or 'gpt-4o'
-  voice: string           // e.g. 'alloy', 'echo', 'shimmer'
-  systemPrompt: string
-}
-
-export interface AIAnalysisResult {
-  visaType: VisaType
-  riskPoints: string[]       // AI 判断的风险点
-  suggestedQuestions: string[]  // AI 准备问的问题方向
-  strategy: string           // AI 对本次面签的策略简述
-  greeting: string           // 开场白
-}
 
 // ---- 面试完整记录 — 可导出对接 feedback/types.ts ----
 
@@ -185,5 +132,4 @@ export interface InterviewRecord {
   visaType: VisaType
   userContext: UserContext
   messages: ChatMessage[]
-  aiAnalysis: AIAnalysisResult
 }

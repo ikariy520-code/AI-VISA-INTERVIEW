@@ -7,7 +7,6 @@ import HomePage from './pages/HomePage'
 // ========================================
 import VoicePage from './modules/voice'
 import CustomOfficerPage from './modules/voice/CustomOfficerPage'
-import VoiceInterviewRoom from './modules/voice/components/VoiceInterviewRoom'
 import PracticePage from './modules/practice'
 import FeedbackPage from './modules/feedback'
 import AdminInvitesPage from './pages/AdminInvitesPage'
@@ -26,7 +25,6 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/voice" element={<VoicePage />} />
         <Route path="/voice/custom" element={<CustomOfficerPage />} />
-        <Route path="/voice/live" element={<VoiceInterviewRoom />} />
         <Route path="/practice" element={<PracticePage />} />
         <Route path="/feedback" element={<FeedbackPage />} />
         <Route path="/admin/invites" element={<AdminInvitesPage />} />

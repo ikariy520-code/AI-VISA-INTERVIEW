@@ -19,7 +19,17 @@ import type {
   ContentAnalysis, ContentDimension,
   AnswerFeedback,
 } from '../../feedback/types'
-import { classifyF1DialogueActLocally } from '../../../shared/doubaoDecision'
+import { buildSafeInterviewContext } from '../../practice/services/realtimeInterviewPrompt'
+
+function classifyDialogueAct(answer: string) {
+  const normalized = answer.trim().toLowerCase().replace(/[.!?]+$/g, '').trim()
+  if (!normalized || normalized === '[no_speech]' || /^\(?no speech detected\)?$/.test(normalized)) return 'silence'
+  if (/\b(i (?:could not|couldn't|did not|didn't) (?:hear|catch)(?: you| that)?|i can't hear you|i cannot hear you)\b/.test(normalized)) return 'did_not_hear'
+  if (/^(sorry[, ]*)?(pardon(?: me)?|what|sorry what|say that again|come again)$/.test(normalized)
+    || /\b(could|can|would|will) you (?:please )?(?:repeat|say (?:it|that) again)\b/.test(normalized)
+    || /\bplease repeat(?: the question)?\b/.test(normalized)) return 'repeat_request'
+  return 'valid_answer'
+}
 
 // ---- 填充词检测 ----
 
@@ -325,7 +335,7 @@ export function extractQAPairs(messages: ChatMessage[]): Array<{
   let pairIndex = 0
   for (let i = 0; i < messages.length - 1; i++) {
     if (messages[i].role === 'officer' && messages[i + 1].role === 'user') {
-      const dialogueAct = classifyF1DialogueActLocally(messages[i + 1].text)
+      const dialogueAct = classifyDialogueAct(messages[i + 1].text)
       if (dialogueAct === 'repeat_request' || dialogueAct === 'did_not_hear' || dialogueAct === 'silence') continue
       pairIndex++
       pairs.push({
@@ -394,15 +404,13 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
 }
 
 // ========================================
-// AI 评分（调用 /api/ai-score 代理）
-//
-// 每个 QA pair 发送到豆包文本模型做多维度评分
-// API 不可用时自动降级到规则引擎
+// 整场 AI 报告（每次面试只调用一次 /api/ai-report）
 // ========================================
 
-const AI_SCORE_ENDPOINT = '/api/ai-score'
+const AI_REPORT_ENDPOINT = '/api/ai-report'
 
-interface AIScoreResult {
+interface AIAnswerResult {
+  index?: number
   content?: {
     logic?: { score: number; comment: string }
     specificity?: { score: number; comment: string }
@@ -419,157 +427,92 @@ interface AIScoreResult {
   suggestions?: string[]
 }
 
-/**
- * 使用 AI 对单个 QA 进行评分
- * 失败时返回 null，由调用方降级
- */
-async function scoreQAPairWithAI(question: string, answer: string): Promise<QAPair['feedback'] | null> {
-  try {
-    const response = await fetch(AI_SCORE_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, answer }),
-      signal: AbortSignal.timeout(20000),
-    })
+interface AIReportResult {
+  overallScore?: number
+  answers?: AIAnswerResult[]
+}
 
-    if (!response.ok) return null
+const normalizeScore = (value: unknown, fallback = 3) => typeof value === 'number' && Number.isFinite(value)
+  ? Math.max(1, Math.min(5, Math.round(value)))
+  : fallback
 
-    const data = await response.json() as any
-    const content = data.choices?.[0]?.message?.content
-    if (!content) return null
+function mapAIAnswer(parsed: AIAnswerResult, fallback: QAPair['feedback']): QAPair['feedback'] {
+  const voiceConfidence = typeof parsed.voice?.confidence === 'number' && Number.isFinite(parsed.voice.confidence)
+    ? Math.max(1, Math.min(100, Math.round(parsed.voice.confidence)))
+    : 50
+  const allowedVerdicts = new Set(['favorable', 'neutral', 'unfavorable'])
+  const allowedEmotions = new Set(['calm', 'nervous', 'confident', 'hesitant', 'tense', 'natural'])
+  const dimensions = [
+    ['逻辑', parsed.content?.logic],
+    ['具体性', parsed.content?.specificity],
+    ['说服力', parsed.content?.persuasion],
+    ['约束力', parsed.content?.ties],
+  ] as const
 
-    const parsed: AIScoreResult = JSON.parse(content)
-
-    // Map provider output defensively so malformed scores cannot break the report page.
-    const normalizeScore = (value: unknown, fallback = 3) => typeof value === 'number' && Number.isFinite(value)
-      ? Math.max(1, Math.min(5, Math.round(value)))
-      : fallback
-    const voiceConfidence = typeof parsed.voice?.confidence === 'number' && Number.isFinite(parsed.voice.confidence)
-      ? Math.max(1, Math.min(100, Math.round(parsed.voice.confidence)))
-      : 50
-    const wpm = Math.round(65 + voiceConfidence * 0.9)
-    const allowedVerdicts = new Set(['favorable', 'neutral', 'unfavorable'])
-    const allowedEmotions = new Set(['calm', 'nervous', 'confident', 'hesitant', 'tense', 'natural'])
-
-    const feedback: QAPair['feedback'] = {
-      verdict: allowedVerdicts.has(parsed.verdict ?? '') ? parsed.verdict as AnswerFeedback['verdict'] : 'neutral',
-      voice: {
-        metrics: {
-          wordsPerMinute: wpm,
-          longestPause: +(Math.max(0.2, 5.5 - voiceConfidence * 0.055)).toFixed(1),
-          fillerCount: 0,
-          fillers: [],
-          volumeStability: Math.max(1, Math.min(5, Math.round(1 + voiceConfidence * 0.04))),
-          paceStability: Math.max(1, Math.min(5, Math.round(1 + voiceConfidence * 0.04))),
-        },
-        emotion: {
-          primary: allowedEmotions.has(parsed.voice?.emotion ?? '') ? parsed.voice?.emotion as VoiceEmotion['primary'] : 'natural',
-          stability: Math.min(5, Math.round(2 + voiceConfidence * 0.03)),
-          description: parsed.voice?.description ?? '',
-        },
-        audioUrl: null,
-        duration: 0,
+  return {
+    verdict: allowedVerdicts.has(parsed.verdict ?? '') ? parsed.verdict as AnswerFeedback['verdict'] : fallback.verdict,
+    voice: {
+      ...fallback.voice,
+      emotion: {
+        primary: allowedEmotions.has(parsed.voice?.emotion ?? '') ? parsed.voice?.emotion as VoiceEmotion['primary'] : 'natural',
+        stability: Math.min(5, Math.round(2 + voiceConfidence * 0.03)),
+        description: parsed.voice?.description?.trim() || fallback.voice.emotion.description,
       },
-      content: {
-        dimensions: [
-          {
-            label: '逻辑',
-            score: normalizeScore(parsed.content?.logic?.score),
-            comment: parsed.content?.logic?.comment ?? '',
-          },
-          {
-            label: '具体性',
-            score: normalizeScore(parsed.content?.specificity?.score),
-            comment: parsed.content?.specificity?.comment ?? '',
-          },
-          {
-            label: '说服力',
-            score: normalizeScore(parsed.content?.persuasion?.score),
-            comment: parsed.content?.persuasion?.comment ?? '',
-          },
-          {
-            label: '约束力',
-            score: normalizeScore(parsed.content?.ties?.score),
-            comment: parsed.content?.ties?.comment ?? '',
-          },
-        ],
-        summary: parsed.summary ?? '',
-        suggestions: Array.isArray(parsed.suggestions)
-          ? parsed.suggestions.filter((item): item is string => typeof item === 'string').slice(0, 2)
-          : [],
-      },
-    }
-
-    return feedback
-  } catch {
-    return null
+    },
+    content: {
+      dimensions: dimensions.map(([label, item], index) => ({
+        label,
+        score: normalizeScore(item?.score, fallback.content.dimensions[index]?.score ?? 3),
+        comment: item?.comment?.trim() || fallback.content.dimensions[index]?.comment || '',
+      })),
+      summary: parsed.summary?.trim() || fallback.content.summary,
+      suggestions: Array.isArray(parsed.suggestions)
+        ? parsed.suggestions.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 2)
+        : fallback.content.suggestions,
+    },
   }
 }
 
-/**
- * 使用 AI 分析全部面签记录（异步版本）
- *
- * 流程：
- *   1. 逐个 QA pair 发送到 AI 评分
- *   2. AI 不可用或失败时，降级到规则引擎
- *   3. 返回完整的 InterviewSession
- */
 export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<InterviewSession> {
   const pairs = extractQAPairs(record.messages)
+  if (pairs.length === 0) return analyzeInterview(record)
 
-  // 并行处理所有 QA pairs（每个独立评分）
-  const scoredResults = await Promise.all(
-    pairs.map(async ({ id, question, answer, timestamp }) => {
-      // 尝试 AI 评分
-      const aiFeedback = await scoreQAPairWithAI(question, answer)
-
-      if (aiFeedback) {
-        return { qa: { id, question, answer, timestamp, feedback: aiFeedback }, usedAi: true }
-      }
-
-      // AI 不可用 → 降级到规则引擎
-      const voice = analyzeVoice(answer)
-      const content = analyzeContent(answer, question)
-      const verdict = getVerdict(voice, content)
-      const feedback: AnswerFeedback = { verdict, voice, content }
-      return { qa: { id, question, answer, timestamp, feedback }, usedAi: false }
+  const response = await fetch(AI_REPORT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      visaType: record.visaType,
+      safeContext: buildSafeInterviewContext(record.userContext),
+      transcript: record.messages
+        .filter(message => message.role === 'officer' || message.role === 'user')
+        .map(message => ({ role: message.role, text: message.text, timestamp: message.timestamp })),
     }),
-  )
-  const results = scoredResults.map(result => result.qa)
-  const aiScoredAnswers = scoredResults.filter(result => result.usedAi).length
+    signal: AbortSignal.timeout(45_000),
+  })
+  if (!response.ok) throw new Error(`AI_REPORT_FAILED_${response.status}`)
+  const payload = await response.json() as { report?: AIReportResult }
+  const report = payload.report
+  if (!report || !Array.isArray(report.answers)) throw new Error('AI_REPORT_INVALID')
 
-  // 综合评分
-  let totalScore = 0
-  let dimensionCount = 0
-  for (const qa of results) {
-    for (const dim of qa.feedback.content.dimensions) {
-      totalScore += dim.score
-      dimensionCount++
-    }
-  }
-  const overallScore = dimensionCount > 0 ? +(totalScore / dimensionCount).toFixed(1) : 3.0
+  let aiScoredAnswers = 0
+  const transcript = pairs.map((pair, index): QAPair => {
+    const voice = analyzeVoice(pair.answer)
+    const content = analyzeContent(pair.answer, pair.question)
+    const fallback: AnswerFeedback = { voice, content, verdict: getVerdict(voice, content) }
+    const aiAnswer = report.answers?.find(answer => answer?.index === index + 1) ?? report.answers?.[index]
+    if (aiAnswer) aiScoredAnswers += 1
+    return { ...pair, feedback: aiAnswer ? mapAIAnswer(aiAnswer, fallback) : fallback }
+  })
 
-  // 标题
-  const visaLabel: Record<string, string> = {
-    B2: 'B2 旅游签证', B1: 'B1 商务签证', F1: 'F1 学术签证',
-    H1B: 'H1B 工作签证', L1: 'L1 跨国经理',
-  }
-  const title = `${visaLabel[record.visaType] ?? record.visaType} · ${record.userContext.purpose || '面签练习'}`
-
+  const localSession = analyzeInterview(record)
   return {
-    id: record.id,
-    date: record.date,
-    time: record.time,
-    duration: record.duration,
-    title,
-    overallScore,
-    transcript: results,
-    analysisSource: aiScoredAnswers === results.length && results.length > 0
-      ? 'doubao'
-      : aiScoredAnswers > 0
-        ? 'hybrid'
-        : 'local',
+    ...localSession,
+    overallScore: typeof report.overallScore === 'number' && Number.isFinite(report.overallScore)
+      ? Math.max(1, Math.min(5, Number(report.overallScore.toFixed(1))))
+      : localSession.overallScore,
+    transcript,
+    analysisSource: aiScoredAnswers === transcript.length ? 'doubao' : 'hybrid',
     aiScoredAnswers,
-    totalScoredAnswers: results.length,
+    totalScoredAnswers: transcript.length,
   }
 }

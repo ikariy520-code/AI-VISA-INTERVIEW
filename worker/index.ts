@@ -1,11 +1,8 @@
 import {
-  buildDoubaoDecisionMessages,
+  buildDoubaoReportMessages,
   getArkMessageContent,
-  parseDoubaoAssessment,
-  sanitizeF1DecisionRequest,
-  redactPotentialIdentifiers,
-} from '../src/shared/doubaoDecision'
-import { buildDoubaoScoreMessages } from '../src/shared/doubaoScore'
+  sanitizeReportRequest,
+} from '../src/shared/doubaoReport'
 
 interface Env {
   ASSETS: Fetcher
@@ -279,57 +276,21 @@ async function callDoubao(env: Env, body: Record<string, unknown>): Promise<Resp
   }
 }
 
-async function handleAiChat(request: Request, env: Env): Promise<Response> {
-  const body = await parseJsonBody(request)
-  if (body instanceof Response) return body
-  const messages = Array.isArray(body.messages) ? body.messages : null
-  if (!messages || messages.length === 0 || messages.length > 30) return json({ error: 'INVALID_MESSAGES' }, 400)
-  const sanitized = messages.map((message: any) => ({
-    role: ['system', 'assistant', 'user'].includes(message?.role) ? message.role : 'user',
-    content: String(message?.content ?? '').slice(0, 6000),
-  }))
-  const totalLength = sanitized.reduce((sum: number, message: any) => sum + message.content.length, 0)
-  if (totalLength > 24_000) return json({ error: 'CONVERSATION_TOO_LONG' }, 400)
-  return callDoubao(env, {
-    model: env.ARK_TEXT_MODEL,
-    messages: sanitized,
-    temperature: Math.min(Math.max(Number(body.temperature ?? 0.7), 0), 1.5),
-    max_tokens: Math.min(Math.max(Number(body.max_tokens ?? 512), 1), 1000),
-    ...(body.response_format ? { response_format: body.response_format } : {}),
-  })
-}
-
-async function handleAiScore(request: Request, env: Env): Promise<Response> {
-  const body = await parseJsonBody(request, 32_000)
-  if (body instanceof Response) return body
-  const question = redactPotentialIdentifiers(String(body.question ?? '').trim()).slice(0, 2000)
-  const answer = redactPotentialIdentifiers(String(body.answer ?? '').trim()).slice(0, 6000)
-  if (!question || !answer) return json({ error: 'MISSING_QUESTION_OR_ANSWER' }, 400)
-  return callDoubao(env, {
-    model: env.ARK_TEXT_MODEL,
-    messages: buildDoubaoScoreMessages(question, answer),
-    temperature: 0.2,
-    thinking: { type: 'disabled' },
-    response_format: { type: 'json_object' },
-    max_tokens: 900,
-  })
-}
-
-async function handleInterviewDecision(request: Request, env: Env): Promise<Response> {
+async function handleAiReport(request: Request, env: Env): Promise<Response> {
   const access = await requireAccess(request, env)
   if (access instanceof Response) return access
-  const body = await parseJsonBody(request, 24_000)
+  const body = await parseJsonBody(request, 96_000)
   if (body instanceof Response) return body
-  const decisionRequest = sanitizeF1DecisionRequest(body)
-  if (!decisionRequest) return json({ error: 'INVALID_DECISION_REQUEST' }, 400)
+  const reportRequest = sanitizeReportRequest(body)
+  if (!reportRequest) return json({ error: 'INVALID_REPORT_REQUEST' }, 400)
 
   const providerResponse = await callDoubao(env, {
     model: env.ARK_TEXT_MODEL,
-    messages: buildDoubaoDecisionMessages(decisionRequest),
-    temperature: 0.1,
+    messages: buildDoubaoReportMessages(reportRequest),
+    temperature: 0.2,
     thinking: { type: 'disabled' },
     response_format: { type: 'json_object' },
-    max_tokens: 350,
+    max_tokens: 4_000,
   })
   if (!providerResponse.ok) return providerResponse
 
@@ -340,15 +301,12 @@ async function handleInterviewDecision(request: Request, env: Env): Promise<Resp
     return json({ error: 'DOUBAO_INVALID_RESPONSE' }, 502)
   }
   const content = getArkMessageContent(providerPayload)
-  const assessment = content
-    ? parseDoubaoAssessment(
-      content,
-      decisionRequest.allowedFollowUps.map(item => item.id),
-      decisionRequest.candidateNextQuestions.map(item => item.id),
-    )
-    : null
-  if (!assessment) return json({ error: 'DOUBAO_INVALID_DECISION' }, 502)
-  return json({ assessment, provider: 'doubao', schemaVersion: 2 })
+  if (!content) return json({ error: 'DOUBAO_INVALID_REPORT' }, 502)
+  try {
+    return json({ report: JSON.parse(content), provider: 'doubao', schemaVersion: 1 })
+  } catch {
+    return json({ error: 'DOUBAO_INVALID_REPORT' }, 502)
+  }
 }
 
 function isAdmin(request: Request, env: Env): boolean {
@@ -442,9 +400,7 @@ export default {
     if (url.pathname === '/api/access' && request.method === 'GET') return handleAccess(request, env)
     if (url.pathname === '/api/invite/redeem' && request.method === 'POST') return handleRedeem(request, env)
     if (url.pathname === '/api/interview/start' && request.method === 'POST') return handleInterviewStart(request, env)
-    if (url.pathname === '/api/interview/decision' && request.method === 'POST') return handleInterviewDecision(request, env)
-    if (url.pathname === '/api/ai-chat' && request.method === 'POST') return handleAiChat(request, env)
-    if (url.pathname === '/api/ai-score' && request.method === 'POST') return handleAiScore(request, env)
+    if (url.pathname === '/api/ai-report' && request.method === 'POST') return handleAiReport(request, env)
     if (url.pathname === '/api/admin/invites' && request.method === 'GET') return handleAdminList(request, env)
     if (url.pathname === '/api/admin/invites/generate' && request.method === 'POST') return handleAdminGenerate(request, env)
     const adminMatch = url.pathname.match(/^\/api\/admin\/invites\/([^/]+)$/)
