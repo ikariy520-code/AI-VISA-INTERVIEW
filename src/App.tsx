@@ -9,7 +9,7 @@ import VoicePage from './modules/voice'
 import CustomOfficerPage from './modules/voice/CustomOfficerPage'
 import PracticePage from './modules/practice'
 import FeedbackPage from './modules/feedback'
-import AdminInvitesPage from './pages/AdminInvitesPage'
+import VoiceInterviewRoute from './modules/voice/components/VoiceInterviewRoute'
 
 function App() {
   const location = useLocation()
@@ -26,8 +26,8 @@ function App() {
         <Route path="/voice" element={<VoicePage />} />
         <Route path="/voice/custom" element={<CustomOfficerPage />} />
         <Route path="/practice" element={<PracticePage />} />
+        <Route path="/voice/live" element={<VoiceInterviewRoute />} />
         <Route path="/feedback" element={<FeedbackPage />} />
-        <Route path="/admin/invites" element={<AdminInvitesPage />} />
       </Routes>
     </motion.div>
   )

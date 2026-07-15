@@ -119,8 +119,6 @@ export type InterviewStage =
 export type InterviewStep =
   | 'select-type'
   | 'context-form'
-  | 'interview'
-  | 'complete'
 
 // ---- 面试完整记录 — 可导出对接 feedback/types.ts ----
 

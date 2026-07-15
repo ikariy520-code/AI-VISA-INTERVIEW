@@ -2,33 +2,21 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { HiOutlineArrowLeft, HiOutlineCheck } from 'react-icons/hi2'
-import type { VisaType, UserContext, InterviewStep, ChatMessage } from './types'
+import type { VisaType, UserContext, InterviewStep } from './types'
 import type { OfficerType } from '../voice/types'
 import { officerTypes } from '../voice/data/officerTypes'
 import VisaTypeSelector from './components/VisaTypeSelector'
 import UserContextForm from './components/UserContextForm'
-import VoiceInterviewRoom from '../voice/components/VoiceInterviewRoom'
-import InterviewComplete from './components/InterviewComplete'
 
 // ========================================
 // 面签实战 — 主页面
 //
-// 4 步流程：
-//   select-type → context-form → interview → complete
+// 2 步流程：
+//   select-type → context-form → 实时语音面签
 //
-// 模块独立：本文件夹可单独拆分给其他成员开发
-// 接口契约：导出的 InterviewRecord 对接反馈模块
-//
-// 入口守卫：必须先从第一部分选择面签官类型才能进入
-//   无 officerType → 自动跳回 /voice 并弹窗提示
-//
-// 面签官类型来源（优先级从高到低）：
-//   1. react-router location.state.officerType（从声音选择页跳转来）
-//   2. sessionStorage['visa_officer_type']（页面刷新恢复）
-//   3. 无 → 跳回 /voice
+// 填完背景后，所有信息汇入 prompt，交给豆包端到端实时语音。
 // ========================================
 
-// 页面切换动画
 const pageTransition = {
   initial: { opacity: 0, y: 14, scale: 0.995 },
   animate: { opacity: 1, y: 0, scale: 1 },
@@ -36,12 +24,10 @@ const pageTransition = {
   transition: { duration: 0.36, ease: [0.28, 0.11, 0.32, 1] },
 }
 
-const steps: InterviewStep[] = ['select-type', 'context-form', 'interview', 'complete']
+const steps: InterviewStep[] = ['select-type', 'context-form']
 const stepMeta: Record<InterviewStep, { label: string; short: string }> = {
   'select-type': { label: '选择签证类型', short: '类型' },
   'context-form': { label: '建立面签背景', short: '背景' },
-  'interview': { label: '模拟面签', short: '面签' },
-  'complete': { label: '生成反馈', short: '反馈' },
 }
 
 export default function PracticePage() {
@@ -49,9 +35,6 @@ export default function PracticePage() {
   const location = useLocation()
   const [step, setStep] = useState<InterviewStep>('select-type')
   const [visaType, setVisaType] = useState<VisaType | null>(null)
-  const [userContext, setUserContext] = useState<UserContext | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [duration, setDuration] = useState('')
 
   // 面签官类型：从路由 state 读取，回退到 sessionStorage
   const officerType: OfficerType | null = useMemo(() => {
@@ -71,7 +54,6 @@ export default function PracticePage() {
     if (!officerType) navigate('/voice', { replace: true })
   }, [navigate, officerType])
 
-  // officerType 未就绪时不渲染（等待守卫跳转）
   const officerConfig = useMemo(
     () => officerType ? officerTypes.find(o => o.id === officerType) ?? null : null,
     [officerType],
@@ -83,36 +65,19 @@ export default function PracticePage() {
     setStep('context-form')
   }, [])
 
-  // Step 2 → realtime interview
+  // Step 2 → 跳转实时语音面签
   const handleContextSubmit = useCallback((context: UserContext) => {
-    setUserContext(context)
-    setStep('interview')
-  }, [])
+    navigate('/voice/live', {
+      state: {
+        officerType,
+        userContext: context,
+      },
+    })
+  }, [navigate, officerType])
 
-  // Interview → report
-  const handleInterviewComplete = useCallback((msgs: ChatMessage[]) => {
-    setMessages(msgs)
-    // 计算时长
-    const firstTs = msgs[0]?.timestamp ?? '00:00'
-    const lastTs = msgs[msgs.length - 1]?.timestamp ?? '00:00'
-    setDuration(lastTs)
-    setStep('complete')
-  }, [])
-
-  // 返回
   const handleBack = useCallback(() => {
     if (step === 'context-form') setStep('select-type')
-    else if (step === 'complete') setStep('select-type')
   }, [step])
-
-  // 重置
-  const handleReset = useCallback(() => {
-    setStep('select-type')
-    setVisaType(null)
-    setUserContext(null)
-    setMessages([])
-    setDuration('')
-  }, [])
 
   return (
     <div className="app-page">
@@ -161,7 +126,7 @@ export default function PracticePage() {
       </header>
 
       {/* ---- 步骤内容 ---- */}
-      <main className={step === 'interview' ? 'px-3 py-3 sm:px-5' : 'px-5 py-10 sm:px-8 sm:py-14'}>
+      <main className="px-5 py-10 sm:px-8 sm:py-14">
         {officerType && officerConfig ? (
           <AnimatePresence mode="wait">
             <motion.div key={step} {...pageTransition}>
@@ -176,26 +141,9 @@ export default function PracticePage() {
                   onBack={handleBack}
                 />
               )}
-
-              {step === 'interview' && userContext && (
-                <VoiceInterviewRoom
-                  context={userContext}
-                  officerType={officerType}
-                  onComplete={handleInterviewComplete}
-                />
-              )}
-
-              {step === 'complete' && userContext && (
-                <InterviewComplete
-                  messages={messages}
-                  context={userContext}
-                  duration={duration}
-                />
-              )}
             </motion.div>
           </AnimatePresence>
         ) : (
-          /* officerType 未就绪 — 等待守卫跳转回 /voice */
           <div className="flex items-center justify-center py-24">
             <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
           </div>
