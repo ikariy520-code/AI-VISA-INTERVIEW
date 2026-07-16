@@ -7,6 +7,8 @@ dotenv.config({ path: '.env.local', quiet: true })
 
 const appId = process.env.DOUBAO_APP_ID?.trim()
 const accessKey = process.env.DOUBAO_ACCESS_KEY?.trim()
+const smokeSystemRole = process.env.DOUBAO_SMOKE_SYSTEM_ROLE?.trim()
+  || 'You are a professional U.S. consular officer conducting a realistic visa interview in English.'
 const upstreamUrl = (
   process.env.DOUBAO_REALTIME_URL ||
   'wss://openspeech.bytedance.com/api/v3/realtime/dialogue'
@@ -147,7 +149,7 @@ try {
 
   const sessionId = randomUUID()
   socket.send(createFrame(100, {
-    asr: { extra: { end_smooth_window_ms: 900, enable_custom_vad: true } },
+    asr: { extra: { end_smooth_window_ms: 1800, enable_custom_vad: true } },
     tts: {
       speaker: 'en_female_dacey_uranus_bigtts',
       audio_config: { channel: 1, format: 'pcm_s16le', sample_rate: 24000 },
@@ -155,7 +157,7 @@ try {
     },
     dialog: {
       bot_name: 'U.S. Visa Officer',
-      system_role: 'You are a professional U.S. consular officer conducting a realistic visa interview in English.',
+      system_role: smokeSystemRole,
       speaking_style: 'Speak naturally, calmly, and concisely. Ask one question at a time.',
       extra: {
         strict_audit: true,

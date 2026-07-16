@@ -30,6 +30,9 @@ const INPUT_CHUNK_SAMPLES = 320 // 20 ms at 16 kHz
 const CONNECT_TIMEOUT_MS = 15_000
 const SESSION_TIMEOUT_MS = 20_000
 const GREETING_TIMEOUT_MS = 20_000
+// A slightly longer server-VAD window prevents normal thinking pauses from
+// being treated as the end of an answer while keeping the exchange responsive.
+const END_OF_TURN_SILENCE_MS = 1_800
 
 function createSessionId() {
   return typeof crypto.randomUUID === 'function'
@@ -386,7 +389,7 @@ export class DoubaoRealtimeClient {
     return {
       asr: {
         extra: {
-          end_smooth_window_ms: 900,
+          end_smooth_window_ms: END_OF_TURN_SILENCE_MS,
           enable_custom_vad: true,
         },
       },
@@ -565,6 +568,12 @@ export class DoubaoRealtimeClient {
 
       case DOUBAO_EVENT.SESSION_FINISHED:
         this.options.onEvent({ type: 'session.closed' })
+        break
+
+      case DOUBAO_EVENT.USAGE_RESPONSE:
+        // The provider automatically reports repeated context/system-prompt
+        // portions as cached_text_tokens / cached_audio_tokens each round.
+        this.options.onEvent({ type: 'usage.updated', usage: frame.json?.usage ?? frame.json })
         break
 
       default:

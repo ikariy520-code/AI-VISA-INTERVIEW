@@ -14,6 +14,10 @@ import { getRandomOfficerName } from '../data/officerNames'
 import OfficerIcon from '../OfficerIcon'
 import type { ChatMessage, UserContext } from '../../practice/types'
 import {
+  F1_INTERVIEW_HARD_LIMIT_SECONDS,
+  isF1InterviewClosingLine,
+} from '../../practice/data/f1InterviewStandard'
+import {
   buildRealtimeOpeningLine,
   buildRealtimeInterviewPrompt,
   resolveRealtimeVoice,
@@ -76,6 +80,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
   const mutedRef = useRef(false)
   const endingRef = useRef(false)
   const endedRef = useRef(false)
+  const autoEndAfterAudioRef = useRef(false)
   const elapsedRef = useRef(0)
   const messagesRef = useRef<RealtimeChatMessage[]>([])
 
@@ -91,21 +96,47 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
   ) => {
     setMessages(current => {
       const index = current.findIndex(message => message.id === id)
-      if (index === -1) return [...current, { id, role, text, streaming, timestamp: formatElapsed(elapsedRef.current) }]
-      const next = [...current]
-      next[index] = { ...next[index], text, streaming }
+      const next = index === -1
+        ? [...current, { id, role, text, streaming, timestamp: formatElapsed(elapsedRef.current) }]
+        : current.map((message, messageIndex) => messageIndex === index
+          ? { ...message, text, streaming }
+          : message)
+      messagesRef.current = next
       return next
     })
   }, [])
 
   const finishOfficerMessage = useCallback((finalText = '') => {
     const id = activeOfficerMessageRef.current
-    if (!id) return
+    if (!id) return finalText.trim()
     if (finalText) currentOfficerTextRef.current = finalText
-    upsertMessage(id, 'officer', currentOfficerTextRef.current, false)
+    const completedText = currentOfficerTextRef.current.trim()
+    upsertMessage(id, 'officer', completedText, false)
     activeOfficerMessageRef.current = null
     currentOfficerTextRef.current = ''
+    return completedText
   }, [upsertMessage])
+
+  const endInterview = useCallback(async () => {
+    if (endingRef.current) return
+    endingRef.current = true
+    endedRef.current = true
+    autoEndAfterAudioRef.current = false
+    setPhase('ending')
+    setMicLevel(0)
+    try {
+      await clientRef.current?.end()
+    } finally {
+      clientRef.current = null
+      connectedRef.current = false
+      setPhase('ended')
+      endingRef.current = false
+      const completedMessages = messagesRef.current
+        .filter(message => !message.streaming && message.text.trim())
+        .map(({ streaming: _streaming, ...message }) => message)
+      onComplete(completedMessages, formatElapsed(elapsedRef.current))
+    }
+  }, [onComplete])
 
   const handleRealtimeEvent = useCallback((event: DoubaoRealtimeEvent) => {
     switch (event.type) {
@@ -169,7 +200,13 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       }
 
       case 'response.output_text.done': {
-        finishOfficerMessage(realtimeEventText(event))
+        const completedText = finishOfficerMessage(realtimeEventText(event))
+        if (context.visaType === 'F1' && isF1InterviewClosingLine(completedText)) {
+          autoEndAfterAudioRef.current = true
+          mutedRef.current = true
+          setIsMuted(true)
+          clientRef.current?.setMuted(true)
+        }
         break
       }
 
@@ -179,6 +216,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
 
       case 'response.output_audio.done':
         returnToListening()
+        if (autoEndAfterAudioRef.current) void endInterview()
         break
 
       case 'response.done':
@@ -205,7 +243,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       default:
         break
     }
-  }, [finishOfficerMessage, returnToListening, upsertMessage])
+  }, [context.visaType, endInterview, finishOfficerMessage, returnToListening, upsertMessage])
 
   const startInterview = useCallback(async () => {
     clientRef.current?.destroy()
@@ -219,6 +257,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
     mutedRef.current = false
     endedRef.current = false
     endingRef.current = false
+    autoEndAfterAudioRef.current = false
     connectedRef.current = false
     activeUserMessageRef.current = null
     activeOfficerMessageRef.current = null
@@ -293,9 +332,16 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
     const timer = window.setInterval(() => {
       elapsedRef.current += 1
       setElapsed(elapsedRef.current)
+      if (
+        context.visaType === 'F1'
+        && elapsedRef.current >= F1_INTERVIEW_HARD_LIMIT_SECONDS
+        && !endingRef.current
+      ) {
+        void endInterview()
+      }
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [phase])
+  }, [context.visaType, endInterview, phase])
 
   const toggleMute = useCallback(() => {
     if (!connectedRef.current || endingRef.current) return
@@ -306,26 +352,6 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
     setMicLevel(0)
     setPhase(nextMuted ? 'muted' : 'listening')
   }, [])
-
-  const endInterview = useCallback(async () => {
-    if (endingRef.current) return
-    endingRef.current = true
-    endedRef.current = true
-    setPhase('ending')
-    setMicLevel(0)
-    try {
-      await clientRef.current?.end()
-    } finally {
-      clientRef.current = null
-      connectedRef.current = false
-      setPhase('ended')
-      endingRef.current = false
-      const completedMessages = messagesRef.current
-        .filter(message => !message.streaming && message.text.trim())
-        .map(({ streaming: _streaming, ...message }) => message)
-      onComplete(completedMessages, formatElapsed(elapsedRef.current))
-    }
-  }, [onComplete])
 
   const status = phaseStatus(phase)
   const isConnected = ['listening', 'thinking', 'speaking', 'muted'].includes(phase)
