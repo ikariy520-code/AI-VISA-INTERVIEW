@@ -274,6 +274,7 @@ function classifyAnswer(transcript: string, question: F1QuestionDefinition): F1A
   if (isRepeatRequest(text)) return 'repeat-request'
   if (/^(i do not know|i don't know|not sure|no idea|what|huh|sorry)$/i.test(text)) return 'unclear'
   const words = text.split(' ').filter(Boolean)
+  if (question.id === 'f1_16' && /^(yes|yeah|i do|i have)\b/.test(text) && words.length < 6) return 'unclear'
   if (question.answerShape !== 'yes-no' && words.length < 3) return 'unclear'
   return 'valid'
 }

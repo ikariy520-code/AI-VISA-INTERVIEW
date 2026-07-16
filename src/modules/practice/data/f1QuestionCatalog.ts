@@ -106,7 +106,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
   },
   {
     id: 'f1_16', number: 16, stage: 'FAMILY_AND_TIES', topic: 'us_relatives', selection: 'adaptive', answerShape: 'yes-no',
-    text: 'Do you have any relatives in the United States?',
+    text: 'Do you have any relatives in the United States? What is your relationship, which state do they live in, and what do they do?',
     evaluationFocus: ['ds160_consistency', 'relationship_context'],
     sensitive: true,
     privacyGuidance: 'Do not ask for a relative’s name, exact address, phone number, email address, or immigration document number.',
