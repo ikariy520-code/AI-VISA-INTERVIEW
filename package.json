@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "deploy": "bash scripts/deploy.sh",
-    "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs"
+    "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
+    "test:f1-controller": "node --experimental-strip-types scripts/f1InterviewController.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

@@ -4,8 +4,7 @@
 // Responsibilities:
 //   1. Serve Vite-built static files (dist/) with SPA fallback
 //   2. WebSocket proxy  /api/realtime-voice → Doubao
-//   3. HTTP POST        /api/ai-report       → Doubao Ark
-//   4. Health check     /api/realtime-health
+//   3. Health check     /api/realtime-health
 // ========================================
 
 import { createServer } from 'node:http'
@@ -16,7 +15,6 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 
 import { createWSProxy } from './wsProxy.mjs'
-import { createReportHandler } from './reportApi.mjs'
 import { createInviteAuth } from './inviteAuth.mjs'
 
 // ── config ───────────────────────────────────────────────
@@ -33,10 +31,6 @@ const DOUBAO_APP_ID = process.env.DOUBAO_APP_ID || ''
 const DOUBAO_ACCESS_KEY = process.env.DOUBAO_ACCESS_KEY || ''
 const UPSTREAM_URL = process.env.DOUBAO_REALTIME_URL || undefined
 const WS_MAX_CONNECTIONS = Number(process.env.WS_MAX_CONNECTIONS) || 30
-
-const ARK_API_KEY = process.env.ARK_API_KEY || ''
-const ARK_MODEL = process.env.ARK_TEXT_MODEL || ''
-const ARK_ENDPOINT = process.env.ARK_API_BASE || undefined
 
 const INVITE_CODES = process.env.INVITE_CODES || ''
 const INVITE_SESSION_SECRET = process.env.INVITE_SESSION_SECRET || ''
@@ -154,11 +148,6 @@ async function main() {
     process.exit(1)
   }
 
-  const reportHandler = createReportHandler({
-    apiKey: ARK_API_KEY,
-    model: ARK_MODEL,
-    endpoint: ARK_ENDPOINT,
-  })
   const inviteAuth = createInviteAuth({
     codes: INVITE_CODES,
     sessionSecret: INVITE_SESSION_SECRET,
@@ -180,11 +169,6 @@ async function main() {
 
       if (pathname === '/api/realtime-health' && (req.method === 'GET' || req.method === 'HEAD')) {
         return handleHealth(req, res)
-      }
-
-      if (pathname === '/api/ai-report') {
-        const handled = await reportHandler(req, res)
-        if (handled) return
       }
 
       // ── Static files + SPA fallback ──
@@ -240,7 +224,6 @@ async function main() {
     console.log(`[server] AI Visa Interview running at http://${HOST}:${PORT}`)
     console.log(`[server] Static files: ${DIST_DIR}`)
     console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
-    console.log(`[server] Report API  : http://${HOST}:${PORT}/api/ai-report`)
     console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
     console.log(`[server] Invite gate : ${inviteAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
   })

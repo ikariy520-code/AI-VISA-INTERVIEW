@@ -14,6 +14,7 @@ import { getRandomOfficerName } from '../data/officerNames'
 import OfficerIcon from '../OfficerIcon'
 import type { ChatMessage, UserContext } from '../../practice/types'
 import {
+  F1_INTERVIEW_CLOSING_LINE,
   F1_INTERVIEW_HARD_LIMIT_SECONDS,
   isF1InterviewClosingLine,
 } from '../../practice/data/f1InterviewStandard'
@@ -22,6 +23,12 @@ import {
   buildRealtimeInterviewPrompt,
   resolveRealtimeVoice,
 } from '../../practice/services/realtimeInterviewPrompt'
+import {
+  advanceF1Interview,
+  createF1InterviewState,
+  isApprovedF1OfficerText,
+  type F1InterviewState,
+} from '../../practice/services/f1InterviewController'
 import {
   DoubaoRealtimeClient,
   realtimeEventText,
@@ -83,6 +90,9 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
   const autoEndAfterAudioRef = useRef(false)
   const elapsedRef = useRef(0)
   const messagesRef = useRef<RealtimeChatMessage[]>([])
+  const f1StateRef = useRef<F1InterviewState | null>(
+    context.visaType === 'F1' ? createF1InterviewState(context) : null,
+  )
 
   const returnToListening = useCallback(() => {
     setPhase(mutedRef.current ? 'muted' : 'listening')
@@ -180,8 +190,50 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
         activeUserMessageRef.current = null
         currentUserTextRef.current = ''
         setPhase('thinking')
+        if (context.visaType === 'F1' && text && f1StateRef.current) {
+          const result = advanceF1Interview(f1StateRef.current, text, context)
+          f1StateRef.current = result.state
+          if (!isApprovedF1OfficerText(result.action.text)) {
+            setErrorMessage('The controlled interview blocked an unapproved officer question.')
+            setPhase('error')
+            break
+          }
+
+          if (result.action.type === 'CLOSE') {
+            autoEndAfterAudioRef.current = true
+            mutedRef.current = true
+            setIsMuted(true)
+            clientRef.current?.setMuted(true)
+          }
+
+          void clientRef.current?.speakControlled(result.action.text).catch(error => {
+            setErrorMessage(error instanceof Error ? error.message : 'The next controlled question could not be played.')
+            setPhase('error')
+          })
+        }
         break
       }
+
+      case 'controlled.speech.started': {
+        if (context.visaType !== 'F1') break
+        const text = realtimeEventText(event)
+        if (!text || !isApprovedF1OfficerText(text)) {
+          setErrorMessage('The controlled interview blocked an unapproved officer question.')
+          setPhase('error')
+          break
+        }
+        const id = nextMessageId()
+        upsertMessage(id, 'officer', text, false)
+        setPhase('speaking')
+        break
+      }
+
+      case 'controlled.speech.done':
+        if (context.visaType === 'F1') {
+          if (autoEndAfterAudioRef.current) void endInterview()
+          else returnToListening()
+        }
+        break
 
       case 'conversation.item.input_audio_transcription.failed':
         setErrorMessage('这句话没有听清，请靠近麦克风再说一次。')
@@ -216,7 +268,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
 
       case 'response.output_audio.done':
         returnToListening()
-        if (autoEndAfterAudioRef.current) void endInterview()
+        if (context.visaType !== 'F1' && autoEndAfterAudioRef.current) void endInterview()
         break
 
       case 'response.done':
@@ -263,12 +315,15 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
     activeOfficerMessageRef.current = null
     currentUserTextRef.current = ''
     currentOfficerTextRef.current = ''
+    f1StateRef.current = context.visaType === 'F1' ? createF1InterviewState(context) : null
     setPhase('connecting')
 
     const client = new DoubaoRealtimeClient({
       instructions: buildRealtimeInterviewPrompt(context, officerType),
       openingLine: buildRealtimeOpeningLine(context),
       voice: resolveRealtimeVoice(officerConfig.voiceProfile.gender),
+      controlledQuestions: context.visaType === 'F1',
+      validateControlledText: context.visaType === 'F1' ? isApprovedF1OfficerText : undefined,
       onEvent: handleRealtimeEvent,
       onInputLevel: setMicLevel,
       onConnectionState: (state) => {
@@ -336,8 +391,13 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
         context.visaType === 'F1'
         && elapsedRef.current >= F1_INTERVIEW_HARD_LIMIT_SECONDS
         && !endingRef.current
+        && !autoEndAfterAudioRef.current
       ) {
-        void endInterview()
+        autoEndAfterAudioRef.current = true
+        mutedRef.current = true
+        setIsMuted(true)
+        clientRef.current?.setMuted(true)
+        void clientRef.current?.speakControlled(F1_INTERVIEW_CLOSING_LINE).catch(() => endInterview())
       }
     }, 1000)
     return () => window.clearInterval(timer)
@@ -411,7 +471,9 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
               </div>
               <p className="mt-4 text-[15px] font-semibold text-[#1d1d1f]">实时语音面签</p>
               <p className="mt-2 text-[12px] leading-5 text-[#6e6e73]">
-                开始后保持自然对话即可。AI 面签官会实时听取、理解并用语音追问；面签官说话时也可以直接开口打断。
+                {context.visaType === 'F1'
+                  ? '端到端语音模型负责实时识别和自然发音；下一题由本地受控题库根据你的背景与回答选择。请听完问题后再回答。'
+                  : '开始后保持自然对话即可。AI 面签官会实时听取、理解并用语音追问；面签官说话时也可以直接开口打断。'}
               </p>
             </div>
           )}

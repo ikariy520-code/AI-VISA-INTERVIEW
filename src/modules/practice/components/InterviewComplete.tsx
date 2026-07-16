@@ -12,7 +12,7 @@ import {
 } from 'react-icons/hi2'
 import type { ChatMessage, UserContext, InterviewRecord } from '../types'
 import type { InterviewSession } from '../../feedback/types'
-import { analyzeInterview, analyzeInterviewWithAI } from '../../shared/store/analysisEngine'
+import { analyzeInterview } from '../../shared/store/analysisEngine'
 import { generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
 
 // ========================================
@@ -34,37 +34,13 @@ const visaTypeLabel: Record<string, string> = {
   L1: 'L1 跨国经理',
 }
 
-const AI_FEEDBACK_TIMEOUT_MS = 55000
-
 interface FeedbackResult {
   session: InterviewSession
   usedLocalFallback: boolean
 }
 
-function waitForFeedback<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error('AI_FEEDBACK_TIMEOUT')), timeoutMs)
-    promise.then(
-      value => {
-        window.clearTimeout(timer)
-        resolve(value)
-      },
-      error => {
-        window.clearTimeout(timer)
-        reject(error)
-      },
-    )
-  })
-}
-
 async function generateFeedbackResult(record: InterviewRecord): Promise<FeedbackResult> {
-  try {
-    const session = await waitForFeedback(analyzeInterviewWithAI(record), AI_FEEDBACK_TIMEOUT_MS)
-    return { session, usedLocalFallback: session.analysisSource !== 'doubao' }
-  } catch (error) {
-    console.warn('[InterviewComplete] AI scoring unavailable, using rule engine:', error)
-    return { session: analyzeInterview(record), usedLocalFallback: true }
-  }
+  return { session: analyzeInterview(record), usedLocalFallback: false }
 }
 
 export default function InterviewComplete({ messages, context, duration }: Props) {

@@ -5,8 +5,9 @@ export const F1_FAM_SOURCE_URL =
   'https://fam.state.gov/FAM/09FAM/09FAM040205.html'
 
 /** Product guardrails, not limits published by the U.S. Department of State. */
+// This is a safety ceiling, not a target. The controller normally closes as
+// soon as its dynamic evidence target and mandatory coverage are complete.
 export const F1_INTERVIEW_MAX_MAIN_QUESTIONS = 10
-export const F1_INTERVIEW_MAX_FOLLOW_UPS = 4
 export const F1_INTERVIEW_HARD_LIMIT_SECONDS = 10 * 60
 
 export const F1_INTERVIEW_CLOSING_LINE =

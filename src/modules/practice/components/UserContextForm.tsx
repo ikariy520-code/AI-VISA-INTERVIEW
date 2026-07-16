@@ -399,7 +399,7 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
               <div><p className="text-[13px] font-semibold text-[#146c50]">只发送本次面签需要的背景摘要</p>
               <p className="mt-1 text-[11px] leading-5 text-[#347861]">{isF1
                 ? '不包含 DS-160、I-20、护照号或 SEVIS ID，网站不会长期保存这份背景资料。'
-                : '不包含护照、银行流水、联系人身份信息、详细地址或行程订单，网站不会长期保存这份背景资料。'} 开始模拟后，你的面签回答会发送给 AI，用于生成追问和评分。</p></div>
+                : '不包含护照、银行流水、联系人身份信息、详细地址或行程订单，网站不会长期保存这份背景资料。'} 开始模拟后，你的语音只会发送给端到端语音模型用于实时识别和发音；当前问题控制与反馈分析在本地完成。</p></div>
             </div>
             <dl className="divide-y divide-black/[0.06] px-5 sm:px-6">
               {reviewItems.map(([label, value]) => (

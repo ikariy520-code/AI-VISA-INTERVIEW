@@ -147,8 +147,7 @@ try {
   if (connection.event !== 50) throw new Error(`StartConnection failed: ${safeMessage(connection.json?.error)}`)
   console.log('realtime-smoke=connection-started')
 
-  const sessionId = randomUUID()
-  socket.send(createFrame(100, {
+  const sessionPayload = {
     asr: { extra: { end_smooth_window_ms: 1800, enable_custom_vad: true } },
     tts: {
       speaker: 'en_female_dacey_uranus_bigtts',
@@ -167,7 +166,9 @@ try {
         model: '1.2.1.1',
       },
     },
-  }, sessionId))
+  }
+  const sessionId = randomUUID()
+  socket.send(createFrame(100, sessionPayload, sessionId))
   const session = await waitForEvent([150, 153])
   assertFrame(session, 'StartSession')
   if (session.event !== 150) throw new Error(`StartSession failed: ${safeMessage(session.json?.error)}`)
@@ -189,6 +190,29 @@ try {
   console.log('realtime-smoke=opening-greeting-complete')
 
   socket.send(createFrame(102, {}, sessionId))
+  await waitForEvent([152, 153], 5_000)
+
+  const nextSessionId = randomUUID()
+  socket.send(createFrame(100, sessionPayload, nextSessionId))
+  const nextSession = await waitForEvent([150, 153])
+  assertFrame(nextSession, 'StartNextSession')
+  if (nextSession.event !== 150) throw new Error(`StartNextSession failed: ${safeMessage(nextSession.json?.error)}`)
+
+  socket.send(createFrame(300, {
+    content: 'Do you fear harm or mistreatment if you return to China?',
+  }, nextSessionId))
+  let nextQuestionStarted = false
+  while (true) {
+    const frame = await waitForEvent([350, 352, 359, 599], 20_000)
+    assertFrame(frame, 'ControlledNextQuestion')
+    if (frame.event === 599) throw new Error(`ControlledNextQuestion failed: ${safeMessage(frame.json?.message)}`)
+    if (frame.event === 350 || frame.event === 352) nextQuestionStarted = true
+    if (frame.event === 359) break
+  }
+  if (!nextQuestionStarted) throw new Error('Controlled next question ended without audio')
+  console.log('realtime-smoke=controlled-session-rotation-complete')
+
+  socket.send(createFrame(102, {}, nextSessionId))
   await waitForEvent([152, 153], 5_000)
   socket.send(createFrame(2))
   await waitForEvent([52], 5_000)

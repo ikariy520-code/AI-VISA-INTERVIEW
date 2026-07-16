@@ -19,7 +19,6 @@ import type {
   ContentAnalysis, ContentDimension,
   AnswerFeedback,
 } from '../../feedback/types'
-import { buildSafeInterviewContext } from '../../practice/services/realtimeInterviewPrompt'
 
 function classifyDialogueAct(answer: string) {
   const normalized = answer.trim().toLowerCase().replace(/[.!?]+$/g, '').trim()
@@ -404,10 +403,9 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
 }
 
 // ========================================
-// 整场 AI 报告（每次面试只调用一次 /api/ai-report）
+// Legacy compatibility entry point; currently uses the local rule engine.
 // ========================================
 
-const AI_REPORT_ENDPOINT = '/api/ai-report'
 
 interface AIAnswerResult {
   index?: number
@@ -474,45 +472,5 @@ function mapAIAnswer(parsed: AIAnswerResult, fallback: QAPair['feedback']): QAPa
 }
 
 export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<InterviewSession> {
-  const pairs = extractQAPairs(record.messages)
-  if (pairs.length === 0) return analyzeInterview(record)
-
-  const response = await fetch(AI_REPORT_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      visaType: record.visaType,
-      safeContext: buildSafeInterviewContext(record.userContext),
-      transcript: record.messages
-        .filter(message => message.role === 'officer' || message.role === 'user')
-        .map(message => ({ role: message.role, text: message.text, timestamp: message.timestamp })),
-    }),
-    signal: AbortSignal.timeout(45_000),
-  })
-  if (!response.ok) throw new Error(`AI_REPORT_FAILED_${response.status}`)
-  const payload = await response.json() as { report?: AIReportResult }
-  const report = payload.report
-  if (!report || !Array.isArray(report.answers)) throw new Error('AI_REPORT_INVALID')
-
-  let aiScoredAnswers = 0
-  const transcript = pairs.map((pair, index): QAPair => {
-    const voice = analyzeVoice(pair.answer)
-    const content = analyzeContent(pair.answer, pair.question)
-    const fallback: AnswerFeedback = { voice, content, verdict: getVerdict(voice, content) }
-    const aiAnswer = report.answers?.find(answer => answer?.index === index + 1) ?? report.answers?.[index]
-    if (aiAnswer) aiScoredAnswers += 1
-    return { ...pair, feedback: aiAnswer ? mapAIAnswer(aiAnswer, fallback) : fallback }
-  })
-
-  const localSession = analyzeInterview(record)
-  return {
-    ...localSession,
-    overallScore: typeof report.overallScore === 'number' && Number.isFinite(report.overallScore)
-      ? Math.max(1, Math.min(5, Number(report.overallScore.toFixed(1))))
-      : localSession.overallScore,
-    transcript,
-    analysisSource: aiScoredAnswers === transcript.length ? 'doubao' : 'hybrid',
-    aiScoredAnswers,
-    totalScoredAnswers: transcript.length,
-  }
+  return analyzeInterview(record)
 }
