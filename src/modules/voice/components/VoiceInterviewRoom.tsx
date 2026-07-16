@@ -14,6 +14,7 @@ import { getRandomOfficerName } from '../data/officerNames'
 import OfficerIcon from '../OfficerIcon'
 import type { ChatMessage, UserContext } from '../../practice/types'
 import {
+  buildRealtimeOpeningLine,
   buildRealtimeInterviewPrompt,
   resolveRealtimeVoice,
 } from '../../practice/services/realtimeInterviewPrompt'
@@ -30,7 +31,7 @@ interface RealtimeChatMessage extends ChatMessage {
 interface Props {
   context: UserContext
   officerType: OfficerType
-  onComplete: (messages: ChatMessage[]) => void
+  onComplete: (messages: ChatMessage[], duration: string) => void
 }
 
 type Phase =
@@ -119,6 +120,16 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       }
 
       case 'conversation.item.input_audio_transcription.delta': {
+        const delta = realtimeEventText(event)
+        if (!delta) break
+        currentUserTextRef.current += delta
+        const id = activeUserMessageRef.current ?? nextMessageId()
+        activeUserMessageRef.current = id
+        upsertMessage(id, 'user', currentUserTextRef.current, true)
+        break
+      }
+
+      case 'conversation.item.input_audio_transcription.result': {
         const text = realtimeEventText(event)
         if (!text) break
         currentUserTextRef.current = text
@@ -217,6 +228,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
 
     const client = new DoubaoRealtimeClient({
       instructions: buildRealtimeInterviewPrompt(context, officerType),
+      openingLine: buildRealtimeOpeningLine(context),
       voice: resolveRealtimeVoice(officerConfig.voiceProfile.gender),
       onEvent: handleRealtimeEvent,
       onInputLevel: setMicLevel,
@@ -311,7 +323,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       const completedMessages = messagesRef.current
         .filter(message => !message.streaming && message.text.trim())
         .map(({ streaming: _streaming, ...message }) => message)
-      onComplete(completedMessages)
+      onComplete(completedMessages, formatElapsed(elapsedRef.current))
     }
   }, [onComplete])
 

@@ -1,3 +1,12 @@
+import {
+  DOUBAO_EVENT,
+  createAudioEventFrame,
+  createJsonEventFrame,
+  parseServerFrame,
+  protocolPayloadText,
+  type DoubaoServerFrame,
+} from './doubaoRealtimeProtocol'
+
 export type RealtimeConnectionState = 'idle' | 'connecting' | 'connected' | 'closed'
 
 export interface DoubaoRealtimeEvent {
@@ -7,6 +16,7 @@ export interface DoubaoRealtimeEvent {
 
 export interface DoubaoRealtimeClientOptions {
   instructions: string
+  openingLine: string
   voice: string
   onEvent: (event: DoubaoRealtimeEvent) => void
   onConnectionState: (state: RealtimeConnectionState) => void
@@ -16,32 +26,15 @@ export interface DoubaoRealtimeClientOptions {
 
 const INPUT_SAMPLE_RATE = 16_000
 const OUTPUT_SAMPLE_RATE = 24_000
-const INPUT_CHUNK_SAMPLES = 320 // 20ms at 16kHz
+const INPUT_CHUNK_SAMPLES = 320 // 20 ms at 16 kHz
 const CONNECT_TIMEOUT_MS = 15_000
 const SESSION_TIMEOUT_MS = 20_000
+const GREETING_TIMEOUT_MS = 20_000
 
-function createEventId() {
+function createSessionId() {
   return typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-function bytesToBase64(bytes: Uint8Array) {
-  let binary = ''
-  const step = 0x8000
-  for (let offset = 0; offset < bytes.length; offset += step) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + step))
-  }
-  return btoa(binary)
-}
-
-function base64ToBytes(value: string) {
-  const binary = atob(value)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-  return bytes
 }
 
 function downsampleToPcm16(input: Float32Array, inputRate: number) {
@@ -211,6 +204,14 @@ class PcmStreamPlayer {
     this.nextPlayTime = this.context?.currentTime ?? 0
   }
 
+  async waitUntilIdle() {
+    if (!this.context) return
+    const remainingMs = Math.max(0, (this.nextPlayTime - this.context.currentTime) * 1000)
+    if (remainingMs > 0) {
+      await new Promise<void>(resolve => window.setTimeout(resolve, remainingMs + 20))
+    }
+  }
+
   async close() {
     this.stopQueued()
     await this.context?.close().catch(() => undefined)
@@ -219,15 +220,26 @@ class PcmStreamPlayer {
   }
 }
 
+interface EventWaiter {
+  resolve: (frame: DoubaoServerFrame) => void
+  reject: (error: Error) => void
+  timeout: number
+}
+
 export class DoubaoRealtimeClient {
   private readonly options: DoubaoRealtimeClientOptions
   private readonly capture = new MicrophoneCapture()
   private readonly player = new PcmStreamPlayer()
+  private readonly waiters = new Map<number, Set<EventWaiter>>()
   private socket: WebSocket | null = null
+  private sessionId = ''
   private manuallyClosed = false
   private connected = false
   private responseActive = false
-  private cancelInFlight = false
+  private audioForwardingEnabled = false
+  private messageQueue = Promise.resolve()
+  private lastUserTranscript = ''
+  private userTranscriptFinalized = false
 
   constructor(options: DoubaoRealtimeClientOptions) {
     this.options = options
@@ -236,13 +248,14 @@ export class DoubaoRealtimeClient {
   async start() {
     if (this.socket) throw new Error('实时面签已经启动。')
     this.manuallyClosed = false
+    this.connected = false
     this.responseActive = false
-    this.cancelInFlight = false
+    this.audioForwardingEnabled = false
+    this.messageQueue = Promise.resolve()
+    this.sessionId = createSessionId()
     this.options.onConnectionState('connecting')
 
     try {
-      // Unlock audio synchronously from the user's click before the first network await.
-      // Browsers may otherwise leave AudioContext.resume() pending indefinitely.
       await this.player.prepare()
 
       const health = await fetch('/api/realtime-health', { cache: 'no-store' })
@@ -250,18 +263,53 @@ export class DoubaoRealtimeClient {
         const payload = await health.json().catch(() => null) as { message?: unknown } | null
         throw new Error(typeof payload?.message === 'string'
           ? payload.message
-          : '实时语音服务的 API Key 尚未在本地配置完成。')
+          : '实时语音服务凭证尚未配置完成。')
       }
 
       await this.openSocket()
-      this.sendSessionCreate()
-      await this.waitForSessionCreated()
+
+      const connectionStarted = this.waitForProviderEvent(
+        DOUBAO_EVENT.CONNECTION_STARTED,
+        SESSION_TIMEOUT_MS,
+        '实时语音连接初始化超时。',
+      )
+      this.sendFrame(createJsonEventFrame(DOUBAO_EVENT.START_CONNECTION))
+      await connectionStarted
+
+      const sessionStarted = this.waitForProviderEvent(
+        DOUBAO_EVENT.SESSION_STARTED,
+        SESSION_TIMEOUT_MS,
+        '实时语音会话初始化超时。',
+      )
+      this.sendFrame(createJsonEventFrame(
+        DOUBAO_EVENT.START_SESSION,
+        this.createStartSessionPayload(),
+        this.sessionId,
+      ))
+      await sessionStarted
+
+      // Ask for microphone access before the greeting, but do not upload anything yet.
+      // This follows the official SayHello flow and guarantees that the officer speaks first.
       await this.capture.start(
         chunk => this.sendAudio(chunk),
         level => this.options.onInputLevel?.(level),
       )
 
+      const greetingEnded = this.waitForProviderEvent(
+        DOUBAO_EVENT.TTS_ENDED,
+        GREETING_TIMEOUT_MS,
+        '面签官开场问候生成超时。',
+      )
+      this.sendFrame(createJsonEventFrame(
+        DOUBAO_EVENT.SAY_HELLO,
+        { content: this.options.openingLine },
+        this.sessionId,
+      ))
+      await greetingEnded
+      await this.player.waitUntilIdle()
+
       this.connected = true
+      this.audioForwardingEnabled = true
       this.options.onConnectionState('connected')
     } catch (error) {
       await this.cleanup()
@@ -277,82 +325,164 @@ export class DoubaoRealtimeClient {
   }
 
   cancelResponse() {
-    if (!this.connected || !this.responseActive) return
+    if (!this.responseActive) return
     this.player.stopQueued()
     this.responseActive = false
-    this.cancelInFlight = true
-    try {
-      this.send({ type: 'response.cancel', event_id: createEventId() })
-    } catch {
-      // A simultaneous upstream close can race with interruption.
-    }
   }
 
   async end() {
     this.manuallyClosed = true
     this.connected = false
+    this.audioForwardingEnabled = false
     await this.capture.stop()
     this.player.stopQueued()
 
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.send({ type: 'session.close', event_id: createEventId() })
-      await new Promise(resolve => window.setTimeout(resolve, 250))
+    if (this.socket?.readyState === WebSocket.OPEN && this.sessionId) {
+      const sessionFinished = this.waitForProviderEvent(
+        DOUBAO_EVENT.SESSION_FINISHED,
+        3_000,
+        '结束会话确认超时。',
+      )
+      this.sendFrame(createJsonEventFrame(DOUBAO_EVENT.FINISH_SESSION, {}, this.sessionId))
+      await sessionFinished.catch(() => undefined)
+
+      const connectionFinished = this.waitForProviderEvent(
+        DOUBAO_EVENT.CONNECTION_FINISHED,
+        2_000,
+        '结束连接确认超时。',
+      )
+      this.sendFrame(createJsonEventFrame(DOUBAO_EVENT.FINISH_CONNECTION))
+      await connectionFinished.catch(() => undefined)
       this.socket.close(1000, 'interview ended')
     }
+
     await this.cleanup()
     this.options.onConnectionState('closed')
+    this.options.onEvent({ type: 'session.closed' })
   }
 
   destroy() {
     this.manuallyClosed = true
     this.connected = false
+    this.audioForwardingEnabled = false
     void this.capture.stop()
     void this.player.close()
     if (this.socket?.readyState === WebSocket.OPEN) {
-      try { this.socket.send(JSON.stringify({ type: 'session.close' })) } catch {}
+      try {
+        if (this.sessionId) {
+          this.socket.send(createJsonEventFrame(DOUBAO_EVENT.FINISH_SESSION, {}, this.sessionId))
+        }
+        this.socket.send(createJsonEventFrame(DOUBAO_EVENT.FINISH_CONNECTION))
+      } catch {}
       this.socket.close(1000, 'page closed')
     } else {
       this.socket?.close()
     }
+    this.rejectAllWaiters(new Error('实时语音连接已关闭。'))
     this.socket = null
+  }
+
+  private createStartSessionPayload(): Record<string, unknown> {
+    return {
+      asr: {
+        extra: {
+          end_smooth_window_ms: 900,
+          enable_custom_vad: true,
+        },
+      },
+      tts: {
+        speaker: this.options.voice,
+        audio_config: {
+          channel: 1,
+          format: 'pcm_s16le',
+          sample_rate: OUTPUT_SAMPLE_RATE,
+        },
+        extra: {},
+      },
+      dialog: {
+        bot_name: 'U.S. Visa Officer',
+        system_role: this.options.instructions,
+        speaking_style:
+          'Speak in natural American English. Stay professional, concise, and realistic. Ask one question at a time and wait for the applicant to answer.',
+        extra: {
+          strict_audit: true,
+          input_mod: 'keep_alive',
+          enable_music: false,
+          enable_loudness_norm: true,
+          model: '1.2.1.1',
+        },
+      },
+    }
   }
 
   private async openSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const socket = new WebSocket(`${protocol}//${window.location.host}/api/realtime-voice`)
+    socket.binaryType = 'arraybuffer'
     this.socket = socket
 
     await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error('连接实时语音服务超时。')), CONNECT_TIMEOUT_MS)
+      let settled = false
+      const timeout = window.setTimeout(() => {
+        if (settled) return
+        settled = true
+        reject(new Error('连接实时语音服务超时。'))
+      }, CONNECT_TIMEOUT_MS)
 
       socket.onmessage = (message) => {
-        let event: DoubaoRealtimeEvent
-        try {
-          event = JSON.parse(String(message.data)) as DoubaoRealtimeEvent
-        } catch {
+        if (typeof message.data === 'string') {
+          let event: DoubaoRealtimeEvent
+          try {
+            event = JSON.parse(message.data) as DoubaoRealtimeEvent
+          } catch {
+            return
+          }
+
+          if (event.type === 'local.connected' && !settled) {
+            settled = true
+            window.clearTimeout(timeout)
+            resolve()
+            return
+          }
+          if (event.type === 'local.error') {
+            const error = new Error(String(event.message || '实时语音连接失败。'))
+            this.rejectAllWaiters(error)
+            if (!settled) {
+              settled = true
+              window.clearTimeout(timeout)
+              reject(error)
+            } else {
+              this.options.onError(error.message)
+            }
+          }
           return
         }
 
-        if (event.type === 'local.connected') {
-          window.clearTimeout(timeout)
-          resolve()
-          return
+        if (message.data instanceof ArrayBuffer) {
+          this.messageQueue = this.messageQueue
+            .then(() => this.handleBinaryMessage(message.data as ArrayBuffer))
+            .catch(error => this.handleProtocolError(error))
         }
-        if (event.type === 'local.error') {
-          window.clearTimeout(timeout)
-          reject(new Error(String(event.message || '实时语音连接失败。')))
-          return
-        }
-        this.handleEvent(event)
       }
 
       socket.onerror = () => {
-        window.clearTimeout(timeout)
-        reject(new Error('无法建立实时语音连接。'))
+        const error = new Error('无法建立实时语音连接。')
+        this.rejectAllWaiters(error)
+        if (!settled) {
+          settled = true
+          window.clearTimeout(timeout)
+          reject(error)
+        }
       }
 
       socket.onclose = () => {
         window.clearTimeout(timeout)
+        const error = new Error('实时语音连接已断开。')
+        this.rejectAllWaiters(error)
+        if (!settled) {
+          settled = true
+          reject(error)
+        }
         if (!this.manuallyClosed) {
           this.connected = false
           this.options.onConnectionState('closed')
@@ -362,136 +492,173 @@ export class DoubaoRealtimeClient {
     })
   }
 
-  private waitForSessionCreated() {
-    return new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        reject(new Error('实时语音会话初始化超时。'))
-      }, SESSION_TIMEOUT_MS)
+  private async handleBinaryMessage(buffer: ArrayBuffer) {
+    const frame = await parseServerFrame(buffer)
+    if (frame.event !== undefined) this.resolveWaiters(frame.event, frame)
 
-      const previousHandler = this.socket?.onmessage ?? null
-      if (!this.socket) {
-        window.clearTimeout(timeout)
-        reject(new Error('实时语音连接不存在。'))
-        return
+    if (
+      frame.errorCode !== undefined
+      || frame.event === DOUBAO_EVENT.CONNECTION_FAILED
+      || frame.event === DOUBAO_EVENT.SESSION_FAILED
+      || frame.event === DOUBAO_EVENT.DIALOG_ERROR
+    ) {
+      const message = this.frameErrorMessage(frame)
+      const error = new Error(message)
+      this.rejectAllWaiters(error)
+      this.options.onError(message)
+      this.options.onEvent({ type: 'error', message, code: frame.errorCode })
+      return
+    }
+
+    switch (frame.event) {
+      case DOUBAO_EVENT.SESSION_STARTED:
+        this.options.onEvent({ type: 'session.created' })
+        break
+
+      case DOUBAO_EVENT.TTS_SENTENCE_START:
+        this.responseActive = true
+        this.options.onEvent({ type: 'response.output_audio.started', ...frame.json })
+        break
+
+      case DOUBAO_EVENT.TTS_RESPONSE:
+        this.responseActive = true
+        await this.player.enqueue(frame.payload)
+        this.options.onEvent({ type: 'response.output_audio.delta' })
+        break
+
+      case DOUBAO_EVENT.TTS_ENDED:
+        this.responseActive = false
+        this.options.onEvent({ type: 'response.output_audio.done' })
+        this.options.onEvent({ type: 'response.done' })
+        break
+
+      case DOUBAO_EVENT.ASR_INFO:
+        this.cancelResponse()
+        this.lastUserTranscript = ''
+        this.userTranscriptFinalized = false
+        this.options.onEvent({ type: 'conversation.item.input_audio_transcription.started' })
+        break
+
+      case DOUBAO_EVENT.ASR_RESPONSE:
+        this.handleAsrResponse(frame)
+        break
+
+      case DOUBAO_EVENT.ASR_ENDED:
+        if (this.lastUserTranscript && !this.userTranscriptFinalized) {
+          this.options.onEvent({
+            type: 'conversation.item.input_audio_transcription.completed',
+            transcript: this.lastUserTranscript,
+          })
+        }
+        this.userTranscriptFinalized = true
+        break
+
+      case DOUBAO_EVENT.CHAT_RESPONSE: {
+        const content = typeof frame.json?.content === 'string' ? frame.json.content : ''
+        if (content) this.options.onEvent({ type: 'response.output_text.delta', delta: content })
+        break
       }
 
-      this.socket.onmessage = (message) => {
-        let event: DoubaoRealtimeEvent
-        try {
-          event = JSON.parse(String(message.data)) as DoubaoRealtimeEvent
-        } catch {
-          return
-        }
+      case DOUBAO_EVENT.CHAT_ENDED:
+        this.options.onEvent({ type: 'response.output_text.done' })
+        break
 
-        if (event.type === 'session.created') {
-          window.clearTimeout(timeout)
-          this.socket!.onmessage = previousHandler
-          this.handleEvent(event)
-          resolve()
-          return
-        }
-        if (event.type === 'error' || event.type === 'local.error') {
-          window.clearTimeout(timeout)
-          this.socket!.onmessage = previousHandler
-          reject(new Error(this.eventErrorMessage(event)))
-          return
-        }
-        this.handleEvent(event)
-      }
-    })
+      case DOUBAO_EVENT.SESSION_FINISHED:
+        this.options.onEvent({ type: 'session.closed' })
+        break
+
+      default:
+        break
+    }
   }
 
-  private sendSessionCreate() {
-    this.send({
-      type: 'session.create',
-      event_id: createEventId(),
-      session: {
-        model: '1.2.6.0',
-        instructions: this.options.instructions,
-        audio: {
-          input: { format: { type: 'pcm', sample_rate: INPUT_SAMPLE_RATE } },
-          output: {
-            format: { type: 'pcm_s16le', sample_rate: OUTPUT_SAMPLE_RATE },
-            voice: this.options.voice,
-            speed: 0,
-            loudness: 0,
-          },
-        },
-        tools: [],
-      },
-      extension: {
-        extra: { enable_proactive_speak: true },
-      },
+  private handleAsrResponse(frame: DoubaoServerFrame) {
+    const results = Array.isArray(frame.json?.results) ? frame.json.results : []
+    const validResults = results.filter(
+      (result): result is Record<string, unknown> => Boolean(result && typeof result === 'object'),
+    )
+    const text = validResults
+      .map(result => typeof result.text === 'string' ? result.text : '')
+      .join('')
+    if (!text) return
+
+    this.lastUserTranscript = text
+    const isInterim = validResults.some(result => result.is_interim === true)
+    this.userTranscriptFinalized = !isInterim
+    this.options.onEvent({
+      type: isInterim
+        ? 'conversation.item.input_audio_transcription.result'
+        : 'conversation.item.input_audio_transcription.completed',
+      transcript: text,
     })
   }
 
   private sendAudio(chunk: Uint8Array) {
-    if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) return
-    this.send({
-      type: 'input_audio_buffer.append',
-      event_id: createEventId(),
-      audio: bytesToBase64(chunk),
-    })
+    if (!this.connected || !this.audioForwardingEnabled) return
+    if (this.socket?.readyState !== WebSocket.OPEN || !this.sessionId) return
+    this.sendFrame(createAudioEventFrame(this.sessionId, chunk))
   }
 
-  private send(event: DoubaoRealtimeEvent) {
+  private sendFrame(frame: Uint8Array) {
     if (this.socket?.readyState !== WebSocket.OPEN) {
       throw new Error('实时语音连接尚未就绪。')
     }
-    this.socket.send(JSON.stringify(event))
+    this.socket.send(frame)
   }
 
-  private handleEvent(event: DoubaoRealtimeEvent) {
-    if (event.type === 'conversation.item.input_audio_transcription.started') {
-      this.cancelResponse()
+  private waitForProviderEvent(event: number, timeoutMs: number, timeoutMessage: string) {
+    return new Promise<DoubaoServerFrame>((resolve, reject) => {
+      const waiter: EventWaiter = {
+        resolve,
+        reject,
+        timeout: window.setTimeout(() => {
+          this.waiters.get(event)?.delete(waiter)
+          reject(new Error(timeoutMessage))
+        }, timeoutMs),
+      }
+      const eventWaiters = this.waiters.get(event) ?? new Set<EventWaiter>()
+      eventWaiters.add(waiter)
+      this.waiters.set(event, eventWaiters)
+    })
+  }
+
+  private resolveWaiters(event: number, frame: DoubaoServerFrame) {
+    const eventWaiters = this.waiters.get(event)
+    if (!eventWaiters) return
+    this.waiters.delete(event)
+    for (const waiter of eventWaiters) {
+      window.clearTimeout(waiter.timeout)
+      waiter.resolve(frame)
     }
+  }
 
-    // A few audio/text frames can already be in flight when response.cancel is sent.
-    // Ignore them until the provider confirms that the old response has ended.
-    if (this.cancelInFlight && event.type.startsWith('response.output_')) return
-
-    if (
-      event.type === 'response.output_text.delta'
-      || event.type === 'response.output_audio.started'
-      || event.type === 'response.output_audio.delta'
-    ) {
-      this.responseActive = true
-    }
-
-    if (event.type === 'response.done' || event.type === 'response.canceled') {
-      this.responseActive = false
-      this.cancelInFlight = false
-    }
-
-    if (event.type === 'response.output_audio.delta') {
-      const encoded = typeof event.delta === 'string'
-        ? event.delta
-        : typeof event.audio === 'string' ? event.audio : ''
-      if (encoded) {
-        void this.player.enqueue(base64ToBytes(encoded)).catch(error => {
-          this.options.onError(`音频播放失败：${extractMessage(error)}`)
-        })
+  private rejectAllWaiters(error: Error) {
+    for (const eventWaiters of this.waiters.values()) {
+      for (const waiter of eventWaiters) {
+        window.clearTimeout(waiter.timeout)
+        waiter.reject(error)
       }
     }
-
-    if (event.type === 'error') {
-      this.options.onError(this.eventErrorMessage(event))
-    }
-
-    this.options.onEvent(event)
+    this.waiters.clear()
   }
 
-  private eventErrorMessage(event: DoubaoRealtimeEvent) {
-    const error = typeof event.error === 'object' && event.error
-      ? event.error as Record<string, unknown>
-      : null
-    return publicServiceMessage(event.message || error?.message || event.error || '实时语音服务返回错误。')
+  private frameErrorMessage(frame: DoubaoServerFrame) {
+    const raw = frame.json?.error || frame.json?.message || protocolPayloadText(frame)
+    return publicServiceMessage(raw || `实时语音服务返回错误 ${frame.errorCode ?? ''}`)
+  }
+
+  private handleProtocolError(error: unknown) {
+    const message = publicServiceMessage(extractMessage(error))
+    this.rejectAllWaiters(new Error(message))
+    this.options.onError(message)
+    this.options.onEvent({ type: 'error', message })
   }
 
   private async cleanup() {
     this.connected = false
     this.responseActive = false
-    this.cancelInFlight = false
+    this.audioForwardingEnabled = false
+    this.rejectAllWaiters(new Error('实时语音连接已关闭。'))
     await this.capture.stop()
     await this.player.close()
     if (this.socket) {

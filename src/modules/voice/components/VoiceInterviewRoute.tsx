@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { OfficerType } from '../types'
 import type { ChatMessage, UserContext } from '../../practice/types'
 import VoiceInterviewRoom from './VoiceInterviewRoom'
+import InterviewComplete from '../../practice/components/InterviewComplete'
 
 /**
  * /voice/live 路由包装器
@@ -13,6 +15,10 @@ import VoiceInterviewRoom from './VoiceInterviewRoom'
 export default function VoiceInterviewRoute() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [completedInterview, setCompletedInterview] = useState<{
+    messages: ChatMessage[]
+    duration: string
+  } | null>(null)
   const state = location.state as {
     officerType?: OfficerType
     userContext?: UserContext
@@ -31,9 +37,18 @@ export default function VoiceInterviewRoute() {
     return null
   }
 
-  const handleComplete = (_messages: ChatMessage[]) => {
-    // 面签结束后回到首页
-    navigate('/', { replace: true })
+  const handleComplete = (messages: ChatMessage[], duration: string) => {
+    setCompletedInterview({ messages, duration })
+  }
+
+  if (completedInterview) {
+    return (
+      <InterviewComplete
+        messages={completedInterview.messages}
+        context={state.userContext}
+        duration={completedInterview.duration}
+      />
+    )
   }
 
   return (

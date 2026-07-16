@@ -3,45 +3,40 @@ import WebSocket, { WebSocketServer } from 'ws'
 
 const LOCAL_WS_PATH = '/api/realtime-voice'
 const HEALTH_PATH = '/api/realtime-health'
-const DEFAULT_UPSTREAM_URL = 'wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue'
+const DEFAULT_UPSTREAM_URL = 'wss://openspeech.bytedance.com/api/v3/realtime/dialogue'
 const MAX_CLIENT_MESSAGE_BYTES = 2 * 1024 * 1024
 const MAX_LOCAL_CONNECTIONS = 2
 const MAX_SESSION_DURATION_MS = 45 * 60 * 1000
 
 interface DoubaoRealtimeBridgeOptions {
-  apiKey: string
+  appId: string
+  accessKey: string
   upstreamUrl?: string
   configurationError?: string
 }
 
 function sendJson(socket: WebSocket, payload: Record<string, unknown>) {
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(payload))
-  }
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
 }
 
-function redact(message: string, secret: string) {
-  const withoutSecret = secret ? message.split(secret).join('[redacted]') : message
-  return withoutSecret.replace(/doubao|bytedance|volcengine|openspeech/gi, 'realtime-service')
+function redact(message: string, secrets: string[]) {
+  let safe = message
+  for (const secret of secrets) {
+    if (secret) safe = safe.split(secret).join('[redacted]')
+  }
+  return safe.replace(/doubao|bytedance|volcengine|openspeech/gi, 'realtime-service')
 }
 
 function closeUpstream(socket: WebSocket | null) {
   if (!socket) return
-  if (socket.readyState === WebSocket.OPEN) {
-    try {
-      socket.send(JSON.stringify({ type: 'session.close' }))
-    } catch {
-      // The connection is already on its way down.
-    }
-    const timer = setTimeout(() => socket.close(1000, 'local client closed'), 250)
-    timer.unref?.()
-    return
-  }
+  if (socket.readyState === WebSocket.OPEN) socket.close(1000, 'local browser closed')
   if (socket.readyState === WebSocket.CONNECTING) socket.terminate()
 }
 
 export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plugin {
-  const apiKey = options.apiKey.trim()
+  const appId = options.appId.trim()
+  const accessKey = options.accessKey.trim()
+  const secrets = [appId, accessKey]
   const configurationError = options.configurationError?.trim()
   const configuredUpstreamUrl = options.upstreamUrl?.trim() || DEFAULT_UPSTREAM_URL
   const parsedUpstreamUrl = new URL(configuredUpstreamUrl)
@@ -62,16 +57,17 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
           return
         }
 
-        response.statusCode = apiKey ? 200 : 503
+        const configured = Boolean(appId && accessKey)
+        response.statusCode = configured ? 200 : 503
         response.setHeader('Content-Type', 'application/json; charset=utf-8')
         response.setHeader('Cache-Control', 'no-store')
         response.end(JSON.stringify({
-          ok: Boolean(apiKey),
+          ok: configured,
           provider: 'realtime-voice',
           mode: 'local-only',
-          ...(!apiKey ? {
-            code: configurationError ? 'REALTIME_KEY_REQUIRED' : 'REALTIME_NOT_CONFIGURED',
-            message: configurationError || '尚未配置端到端实时语音 API Key。',
+          ...(!configured ? {
+            code: 'REALTIME_CREDENTIALS_REQUIRED',
+            message: configurationError || '请在 .env.local 配置实时语音 App ID 和 Access Token。',
           } : {}),
         }))
       })
@@ -131,13 +127,13 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
           activeLocalConnections = Math.max(0, activeLocalConnections - 1)
         }
 
-        if (!apiKey) {
+        if (!appId || !accessKey) {
           sendJson(browserSocket, {
             type: 'local.error',
-            code: configurationError ? 'REALTIME_KEY_REQUIRED' : 'REALTIME_NOT_CONFIGURED',
-            message: configurationError || '本地未配置端到端实时语音 API Key，请检查 .env.local。',
+            code: 'REALTIME_NOT_CONFIGURED',
+            message: configurationError || '本地未配置实时语音 App ID 或 Access Token。',
           })
-          browserSocket.close(1011, 'realtime api key is missing')
+          browserSocket.close(1011, 'realtime credentials missing')
           releaseConnection()
           return
         }
@@ -158,7 +154,13 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
 
         try {
           upstreamSocket = new WebSocket(upstreamUrl, {
-            headers: { 'X-Api-Key': apiKey },
+            headers: {
+              'X-Api-App-ID': appId,
+              'X-Api-Access-Key': accessKey,
+              'X-Api-Resource-Id': 'volc.speech.dialog',
+              'X-Api-App-Key': 'PlgvMymc7f3tQnJ6',
+              'X-Api-Connect-Id': crypto.randomUUID(),
+            },
             handshakeTimeout: 12_000,
             maxPayload: 8 * 1024 * 1024,
             perMessageDeflate: false,
@@ -167,7 +169,7 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
           sendJson(browserSocket, {
             type: 'local.error',
             code: 'UPSTREAM_CONNECT_FAILED',
-            message: redact(error instanceof Error ? error.message : String(error), apiKey),
+            message: redact(error instanceof Error ? error.message : String(error), secrets),
           })
           browserSocket.close(1011, 'upstream connection failed')
           clearTimeout(sessionLimitTimer)
@@ -175,9 +177,7 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
           return
         }
 
-        upstreamSocket.on('open', () => {
-          sendJson(browserSocket, { type: 'local.connected' })
-        })
+        upstreamSocket.on('open', () => sendJson(browserSocket, { type: 'local.connected' }))
 
         upstreamSocket.on('message', (data, isBinary) => {
           if (browserSocket.readyState !== WebSocket.OPEN) return
@@ -202,7 +202,7 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
           sendJson(browserSocket, {
             type: 'local.error',
             code: 'UPSTREAM_ERROR',
-            message: redact(error.message, apiKey),
+            message: redact(error.message, secrets),
           })
         })
 
@@ -210,7 +210,7 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
           sendJson(browserSocket, {
             type: 'local.closed',
             code,
-            reason: redact(reason.toString(), apiKey),
+            reason: redact(reason.toString(), secrets),
           })
           if (!browserClosed && browserSocket.readyState === WebSocket.OPEN) {
             browserSocket.close(code === 1000 ? 1000 : 1011, 'realtime connection closed')
@@ -218,8 +218,8 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
         })
 
         browserSocket.on('message', (data, isBinary) => {
-          if (isBinary) {
-            browserSocket.close(1003, 'text frames only')
+          if (!isBinary) {
+            browserSocket.close(1003, 'binary frames only')
             return
           }
           if (data.byteLength > MAX_CLIENT_MESSAGE_BYTES) {
@@ -234,18 +234,7 @@ export function doubaoRealtimeBridge(options: DoubaoRealtimeBridgeOptions): Plug
             })
             return
           }
-
-          const text = data.toString('utf8')
-          try {
-            const event = JSON.parse(text)
-            if (!event || typeof event.type !== 'string' || event.type.startsWith('local.')) {
-              throw new Error('invalid realtime event')
-            }
-          } catch {
-            browserSocket.close(1007, 'invalid json event')
-            return
-          }
-          upstreamSocket.send(text)
+          upstreamSocket.send(data, { binary: true })
         })
 
         browserSocket.on('close', () => {

@@ -66,8 +66,8 @@ export function buildSafeInterviewContext(context: UserContext): Record<string, 
 
 export function resolveRealtimeVoice(gender: 'male' | 'female') {
   return gender === 'female'
-    ? 'zh_female_vv_jupiter_bigtts'
-    : 'zh_male_yunzhou_jupiter_bigtts'
+    ? 'en_female_dacey_uranus_bigtts'
+    : 'en_male_tim_uranus_bigtts'
 }
 
 export function buildRealtimeInterviewPrompt(context: UserContext, officerType: OfficerType) {
@@ -94,7 +94,7 @@ Core conversation rules:
 - Proactively begin with the opening line below, then wait for the applicant.
 
 Opening line:
-${buildOpeningLine(context)}
+${buildRealtimeOpeningLine(context)}
 
 Officer style:
 ${customPrompt || config?.systemPromptAddition || 'Calm, professional, neutral, and concise.'}
@@ -125,7 +125,7 @@ function buildB2Rules() {
   return `Conduct a realistic B2 tourist/visitor interview of roughly 6-10 main questions. Cover travel purpose, itinerary, trip funding, current work or study, travel history, U.S. contacts when relevant, and concrete reasons to return home. Adapt follow-ups to the applicant's answers and end naturally when those areas are sufficiently covered.`
 }
 
-function buildOpeningLine(context: UserContext) {
+export function buildRealtimeOpeningLine(context: UserContext) {
   return context.visaType === 'F1'
     ? 'Good morning. Passport and I-20, please. Which school will you study at?'
     : 'Good morning. What is the purpose of your trip to the United States?'

@@ -1,63 +1,51 @@
-// ========================================
-// WebSocket proxy: browser → Doubao real-time voice API
-// Ported from local/doubaoRealtimeBridge.ts
-// ========================================
-
+import { randomUUID } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 
-const DEFAULT_UPSTREAM_URL = 'wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue'
-const MAX_MESSAGE_BYTES = 2 * 1024 * 1024 // 2 MB
+const DEFAULT_UPSTREAM_URL = 'wss://openspeech.bytedance.com/api/v3/realtime/dialogue'
+const MAX_MESSAGE_BYTES = 2 * 1024 * 1024
 const DEFAULT_MAX_CONNECTIONS = 30
-const DEFAULT_MAX_SESSION_MS = 45 * 60 * 1000 // 45 minutes
-
-// ── helpers ──────────────────────────────────────────────
+const DEFAULT_MAX_SESSION_MS = 45 * 60 * 1000
 
 function sendJson(socket, payload) {
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(payload))
-  }
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
 }
 
-function redact(message, secret) {
-  const withoutSecret = secret ? message.split(secret).join('[redacted]') : message
-  return withoutSecret.replace(/doubao|bytedance|volcengine|openspeech/gi, 'realtime-service')
+function redact(message, secrets) {
+  let safe = String(message)
+  for (const secret of secrets) {
+    if (secret) safe = safe.split(secret).join('[redacted]')
+  }
+  return safe.replace(/doubao|bytedance|volcengine|openspeech/gi, 'realtime-service')
 }
 
 function closeUpstream(socket) {
   if (!socket) return
-  if (socket.readyState === WebSocket.OPEN) {
-    try {
-      socket.send(JSON.stringify({ type: 'session.close' }))
-    } catch {
-      // connection already going down
-    }
-    const timer = setTimeout(() => socket.close(1000, 'server closing'), 250)
-    timer.unref?.()
-    return
-  }
+  if (socket.readyState === WebSocket.OPEN) socket.close(1000, 'browser closed')
   if (socket.readyState === WebSocket.CONNECTING) socket.terminate()
 }
 
-// ── main export ──────────────────────────────────────────
+function isSameOrigin(request) {
+  const host = String(request.headers.host || '')
+  const origin = String(request.headers.origin || '')
+  if (!host || !origin) return false
+  try {
+    return new URL(origin).host === host
+  } catch {
+    return false
+  }
+}
 
-/**
- * Attach a WebSocket proxy to an http.Server instance.
- *
- * @param {import('node:http').Server} httpServer
- * @param {object} options
- * @param {string} options.apiKey           - DOUBAO_SPEECH_API_KEY
- * @param {string} [options.upstreamUrl]    - Doubao realtime WS endpoint
- * @param {number} [options.maxConnections] - default 30
- * @param {number} [options.maxSessionMs]   - default 45 min
- * @returns {{ close: () => void }}
- */
 export function createWSProxy(httpServer, options) {
-  const apiKey = options.apiKey?.trim() || ''
+  const appId = options.appId?.trim() || ''
+  const accessKey = options.accessKey?.trim() || ''
   const upstreamUrl = options.upstreamUrl?.trim() || DEFAULT_UPSTREAM_URL
   const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS
   const maxSessionMs = options.maxSessionMs ?? DEFAULT_MAX_SESSION_MS
+  const secrets = [appId, accessKey]
+  const isAuthorized = typeof options.isAuthorized === 'function'
+    ? options.isAuthorized
+    : () => false
 
-  // Sanitise upstream URL — only allow known host
   let resolvedUpstreamUrl = upstreamUrl
   try {
     const parsed = new URL(upstreamUrl)
@@ -70,7 +58,6 @@ export function createWSProxy(httpServer, options) {
 
   let activeConnections = 0
   let started = false
-
   const browserServer = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_MESSAGE_BYTES,
@@ -81,15 +68,26 @@ export function createWSProxy(httpServer, options) {
     const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname
     if (pathname !== '/api/realtime-voice') return
 
+    if (!isSameOrigin(request)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
+
+    if (!isAuthorized(request)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
+
     browserServer.handleUpgrade(request, socket, head, (browserSocket) => {
       browserServer.emit('connection', browserSocket, request)
     })
   }
 
   browserServer.on('connection', (browserSocket) => {
-    // ── connection limiting ──
     if (activeConnections >= maxConnections) {
-      browserSocket.close(1013, 'server busy — please try again later')
+      browserSocket.close(1013, 'server busy - please try again later')
       return
     }
     activeConnections += 1
@@ -100,22 +98,19 @@ export function createWSProxy(httpServer, options) {
       activeConnections = Math.max(0, activeConnections - 1)
     }
 
-    // ── missing key ──
-    if (!apiKey) {
+    if (!appId || !accessKey) {
       sendJson(browserSocket, {
         type: 'local.error',
         code: 'REALTIME_NOT_CONFIGURED',
-        message: 'Server real-time voice API key is not configured.',
+        message: 'Server real-time voice App ID or Access Token is not configured.',
       })
-      browserSocket.close(1011, 'realtime api key missing')
+      browserSocket.close(1011, 'realtime credentials missing')
       releaseConnection()
       return
     }
 
     let upstreamSocket = null
     let browserClosed = false
-
-    // ── session time limit ──
     const sessionLimitTimer = setTimeout(() => {
       sendJson(browserSocket, {
         type: 'local.error',
@@ -126,13 +121,17 @@ export function createWSProxy(httpServer, options) {
     }, maxSessionMs)
     sessionLimitTimer.unref?.()
 
-    // ── tell browser we're connecting ──
     sendJson(browserSocket, { type: 'local.connecting' })
 
-    // ── open upstream to Doubao ──
     try {
       upstreamSocket = new WebSocket(resolvedUpstreamUrl, {
-        headers: { 'X-Api-Key': apiKey },
+        headers: {
+          'X-Api-App-ID': appId,
+          'X-Api-Access-Key': accessKey,
+          'X-Api-Resource-Id': 'volc.speech.dialog',
+          'X-Api-App-Key': 'PlgvMymc7f3tQnJ6',
+          'X-Api-Connect-Id': randomUUID(),
+        },
         handshakeTimeout: 12_000,
         maxPayload: 8 * 1024 * 1024,
         perMessageDeflate: false,
@@ -141,7 +140,7 @@ export function createWSProxy(httpServer, options) {
       sendJson(browserSocket, {
         type: 'local.error',
         code: 'UPSTREAM_CONNECT_FAILED',
-        message: redact(error instanceof Error ? error.message : String(error), apiKey),
+        message: redact(error instanceof Error ? error.message : error, secrets),
       })
       browserSocket.close(1011, 'upstream connection failed')
       clearTimeout(sessionLimitTimer)
@@ -149,7 +148,6 @@ export function createWSProxy(httpServer, options) {
       return
     }
 
-    // ── upstream → browser ──
     upstreamSocket.on('open', () => {
       sendJson(browserSocket, { type: 'local.connected' })
     })
@@ -177,7 +175,7 @@ export function createWSProxy(httpServer, options) {
       sendJson(browserSocket, {
         type: 'local.error',
         code: 'UPSTREAM_ERROR',
-        message: redact(error.message, apiKey),
+        message: redact(error.message, secrets),
       })
     })
 
@@ -185,17 +183,16 @@ export function createWSProxy(httpServer, options) {
       sendJson(browserSocket, {
         type: 'local.closed',
         code,
-        reason: redact(reason.toString(), apiKey),
+        reason: redact(reason.toString(), secrets),
       })
       if (!browserClosed && browserSocket.readyState === WebSocket.OPEN) {
         browserSocket.close(code === 1000 ? 1000 : 1011, 'realtime connection closed')
       }
     })
 
-    // ── browser → upstream ──
     browserSocket.on('message', (data, isBinary) => {
-      if (isBinary) {
-        browserSocket.close(1003, 'text frames only')
+      if (!isBinary) {
+        browserSocket.close(1003, 'binary frames only')
         return
       }
       if (data.byteLength > MAX_MESSAGE_BYTES) {
@@ -210,21 +207,9 @@ export function createWSProxy(httpServer, options) {
         })
         return
       }
-
-      const text = data.toString('utf8')
-      try {
-        const event = JSON.parse(text)
-        if (!event || typeof event.type !== 'string' || event.type.startsWith('local.')) {
-          throw new Error('invalid realtime event')
-        }
-      } catch {
-        browserSocket.close(1007, 'invalid json event')
-        return
-      }
-      upstreamSocket.send(text)
+      upstreamSocket.send(data, { binary: true })
     })
 
-    // ── browser disconnect ──
     browserSocket.on('close', () => {
       browserClosed = true
       clearTimeout(sessionLimitTimer)
@@ -240,7 +225,6 @@ export function createWSProxy(httpServer, options) {
     })
   })
 
-  // ── attach to HTTP server ──
   httpServer.on('upgrade', handleUpgrade)
   httpServer.once('close', () => {
     httpServer.off('upgrade', handleUpgrade)

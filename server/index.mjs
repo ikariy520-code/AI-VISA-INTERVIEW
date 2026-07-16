@@ -13,23 +13,33 @@ import { readFile, stat } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { join, extname, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import 'dotenv/config'
+import dotenv from 'dotenv'
 
 import { createWSProxy } from './wsProxy.mjs'
 import { createReportHandler } from './reportApi.mjs'
+import { createInviteAuth } from './inviteAuth.mjs'
 
 // ── config ───────────────────────────────────────────────
 
+dotenv.config({
+  path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env',
+})
+
 const PORT = Number(process.env.PORT) || 3000
+const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0')
 const DIST_DIR = join(fileURLToPath(import.meta.url), '..', '..', 'dist')
 
-const API_KEY = process.env.DOUBAO_SPEECH_API_KEY || ''
+const DOUBAO_APP_ID = process.env.DOUBAO_APP_ID || ''
+const DOUBAO_ACCESS_KEY = process.env.DOUBAO_ACCESS_KEY || ''
 const UPSTREAM_URL = process.env.DOUBAO_REALTIME_URL || undefined
 const WS_MAX_CONNECTIONS = Number(process.env.WS_MAX_CONNECTIONS) || 30
 
 const ARK_API_KEY = process.env.ARK_API_KEY || ''
 const ARK_MODEL = process.env.ARK_TEXT_MODEL || ''
 const ARK_ENDPOINT = process.env.ARK_API_BASE || undefined
+
+const INVITE_CODES = process.env.INVITE_CODES || ''
+const INVITE_SESSION_SECRET = process.env.INVITE_SESSION_SECRET || ''
 
 // ── MIME map ─────────────────────────────────────────────
 
@@ -117,7 +127,7 @@ async function serveIndexFallback(res) {
 // ── health endpoint ──────────────────────────────────────
 
 function handleHealth(_req, res) {
-  const ok = Boolean(API_KEY)
+  const ok = Boolean(DOUBAO_APP_ID && DOUBAO_ACCESS_KEY)
   res.statusCode = ok ? 200 : 503
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
@@ -125,7 +135,10 @@ function handleHealth(_req, res) {
     JSON.stringify({
       ok,
       provider: 'realtime-voice',
-      ...(ok ? {} : { code: 'REALTIME_NOT_CONFIGURED', message: 'Realtime voice API key not configured.' }),
+      ...(ok ? {} : {
+        code: 'REALTIME_NOT_CONFIGURED',
+        message: 'Realtime voice App ID or Access Token is not configured.',
+      }),
     }),
   )
 }
@@ -146,12 +159,25 @@ async function main() {
     model: ARK_MODEL,
     endpoint: ARK_ENDPOINT,
   })
+  const inviteAuth = createInviteAuth({
+    codes: INVITE_CODES,
+    sessionSecret: INVITE_SESSION_SECRET,
+    secureCookies: process.env.NODE_ENV === 'production',
+  })
 
   const server = createServer(async (req, res) => {
     try {
       const pathname = req.url?.split('?')[0] ?? ''
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+
+      const authHandled = await inviteAuth.handleRequest(req, res, pathname)
+      if (authHandled) return
 
       // ── API routes ──
+      if (pathname.startsWith('/api/') && !inviteAuth.isAuthorized(req)) {
+        return inviteAuth.unauthorized(res)
+      }
+
       if (pathname === '/api/realtime-health' && (req.method === 'GET' || req.method === 'HEAD')) {
         return handleHealth(req, res)
       }
@@ -186,9 +212,11 @@ async function main() {
 
   // ── WebSocket proxy ──
   const wsProxy = createWSProxy(server, {
-    apiKey: API_KEY,
+    appId: DOUBAO_APP_ID,
+    accessKey: DOUBAO_ACCESS_KEY,
     upstreamUrl: UPSTREAM_URL,
     maxConnections: WS_MAX_CONNECTIONS,
+    isAuthorized: inviteAuth.isAuthorized,
   })
 
   // ── graceful shutdown ──
@@ -208,12 +236,13 @@ async function main() {
   process.on('SIGINT', shutdown)
 
   // ── listen ──
-  server.listen(PORT, () => {
-    console.log(`[server] AI Visa Interview running at http://0.0.0.0:${PORT}`)
+  server.listen(PORT, HOST, () => {
+    console.log(`[server] AI Visa Interview running at http://${HOST}:${PORT}`)
     console.log(`[server] Static files: ${DIST_DIR}`)
-    console.log(`[server] WebSocket   : ws://0.0.0.0:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
-    console.log(`[server] Report API  : http://0.0.0.0:${PORT}/api/ai-report`)
-    console.log(`[server] Health      : http://0.0.0.0:${PORT}/api/realtime-health`)
+    console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
+    console.log(`[server] Report API  : http://${HOST}:${PORT}/api/ai-report`)
+    console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
+    console.log(`[server] Invite gate : ${inviteAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
   })
 }
 
