@@ -302,4 +302,12 @@ details > summary::-webkit-details-marker {
     border: 0 !important;
     box-shadow: none !important;
   }
+
+  #feedback-report nav {
+    display: none !important;
+  }
+
+  #feedback-report section {
+    break-inside: avoid;
+  }
 }

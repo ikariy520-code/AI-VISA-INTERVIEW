@@ -5,18 +5,19 @@ import {
   HiOutlineArrowLeft,
   HiOutlineArrowPath,
   HiOutlineDocumentArrowDown,
-  HiOutlineDocumentChartBar,
   HiOutlineLockClosed,
 } from 'react-icons/hi2'
 import type { InterviewSession } from './types'
-import SessionDetail from './components/SessionDetail'
 import { normalizeInterviewSession } from './normalizeSession'
+import FeedbackReportView from './components/FeedbackReportView'
+import { buildFeedbackReport, sampleFeedbackReport } from './reportViewModel'
 
 export default function FeedbackPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const rawSession = (location.state as { session?: InterviewSession } | null)?.session ?? null
   const session = useMemo(() => normalizeInterviewSession(rawSession), [rawSession])
+  const report = useMemo(() => session ? buildFeedbackReport(session) : sampleFeedbackReport, [session])
 
   return (
     <div className="app-page">
@@ -26,70 +27,42 @@ export default function FeedbackPage() {
             <HiOutlineArrowLeft className="h-[18px] w-[18px]" />
           </button>
           <div className="text-center">
-            <p className="text-[13px] font-semibold text-[#1d1d1f]">本次面签反馈</p>
-            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#86868b]">Review & improve</p>
+            <p className="text-[13px] font-semibold text-[#1d1d1f]">面签反馈报告</p>
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#86868b]">Review · Improve · Repeat</p>
           </div>
-          <div className="w-10" />
+          <button onClick={() => window.print()} className="app-icon-button" aria-label="保存为 PDF">
+            <HiOutlineDocumentArrowDown className="h-[18px] w-[18px]" />
+          </button>
         </div>
       </header>
 
-      {session ? (
-          <div id="feedback-report" className="mx-auto max-w-5xl px-5 py-8 sm:px-8 sm:py-12">
-            <div className={`print:hidden mb-4 rounded-[18px] border px-4 py-3 text-[12px] leading-5 ${
-              session.analysisSource === 'doubao'
-                ? 'border-emerald-200/70 bg-[#eaf8f2] text-[#146c50]'
-                : 'border-amber-200/70 bg-[#fff6e6] text-[#8a5818]'
-            }`}>
-              {session.analysisSource === 'doubao'
-                ? `豆包 AI 已完成本次面签分析，共评估 ${session.aiScoredAnswers ?? session.transcript.length} 条有效回答。`
-                : session.analysisSource === 'hybrid'
-                  ? `本次共有 ${session.aiScoredAnswers ?? 0} 条回答由豆包 AI 分析，其余内容使用本地规则补全。`
-                  : '豆包 AI 本次未能完成评分，当前报告由本地规则生成，可继续查看和下载。'}
-            </div>
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="print:hidden mb-4 rounded-[20px] border border-emerald-200/70 bg-[#eaf8f2] px-4 py-4 sm:flex sm:items-center sm:justify-between sm:px-5"
-            >
-              <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[13px] bg-white text-[#158f65] shadow-sm"><HiOutlineLockClosed className="h-[17px] w-[17px]" /></span>
-                <div>
-                  <p className="text-[13px] font-semibold text-[#146c50]">这份反馈只属于本次练习</p>
-                  <p className="mt-1 text-[12px] leading-5 text-[#347861]">网站不会长期保存面签记录，离开前请下载 PDF 或截图留存。</p>
-                </div>
-              </div>
-              <button
-                onClick={() => window.print()}
-                className="app-button-secondary mt-3 w-full bg-white sm:mt-0 sm:w-auto"
-              >
-                <HiOutlineDocumentArrowDown className="h-4 w-4" /> 下载 PDF
-              </button>
-            </motion.div>
-
-            <div className="app-card overflow-hidden print:border-0 print:shadow-none">
-              <SessionDetail session={session} />
-            </div>
-
-            <div className="print:hidden mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center">
-              <button onClick={() => window.print()} className="app-button-primary"><HiOutlineDocumentArrowDown className="h-4 w-4" /> 下载 / 打印 PDF</button>
-              <button
-                onClick={() => navigate('/practice', { replace: true })}
-                className="app-button-secondary"
-              >
-                <HiOutlineArrowPath className="h-4 w-4" /> 再练一次
-              </button>
+      <div id="feedback-report" className="mx-auto max-w-6xl px-5 py-8 sm:px-8 sm:py-12">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="print:hidden mb-5 rounded-[20px] border border-emerald-200/70 bg-[#eaf8f2] px-4 py-4 sm:flex sm:items-center sm:justify-between sm:px-5"
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[13px] bg-white text-[#158f65] shadow-sm"><HiOutlineLockClosed className="h-[17px] w-[17px]" /></span>
+            <div>
+              <p className="text-[13px] font-semibold text-[#146c50]">只在当前页面保留</p>
+              <p className="mt-1 text-[12px] leading-5 text-[#347861]">不会写入历史记录或服务器。刷新、关闭页面后无法找回，请离开前保存。</p>
             </div>
           </div>
-        ) : (
-          <div className="flex min-h-[70vh] items-center justify-center px-6 text-center">
-            <div className="max-w-md">
-              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-[22px] bg-[#eaf4ff] text-[#0071e3]"><HiOutlineDocumentChartBar className="h-7 w-7" /></div>
-              <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">完成一次练习，反馈才会出现。</h1>
-              <p className="mt-3 text-[13px] leading-6 text-[#6e6e73]">我们不会保存历史记录。面签结束后，请在当前页面立即查看并下载本次总结。</p>
-              <button onClick={() => navigate('/voice')} className="app-button-primary mt-7">开始面签</button>
-            </div>
-          </div>
-        )}
+          <button onClick={() => window.print()} className="app-button-secondary mt-3 w-full bg-white sm:mt-0 sm:w-auto">
+            <HiOutlineDocumentArrowDown className="h-4 w-4" /> 保存为 PDF
+          </button>
+        </motion.div>
+
+        <FeedbackReportView report={report} />
+
+        <div className="print:hidden mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+          <button onClick={() => window.print()} className="app-button-primary"><HiOutlineDocumentArrowDown className="h-4 w-4" /> 保存为 PDF</button>
+          <button onClick={() => navigate('/practice', { replace: true })} className="app-button-secondary">
+            <HiOutlineArrowPath className="h-4 w-4" /> 再练一次
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
