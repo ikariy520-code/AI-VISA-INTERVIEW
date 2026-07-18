@@ -141,22 +141,22 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
           <p className="text-[12px] leading-5"><span className="font-semibold">这是反馈页面样例。</span> 其中分数和内容均为演示数据，用来确认信息层级与操作方式，不代表你的真实评估。</p>
         </div>
       )}
-      {report.source === 'doubao' && (
+      {report.source === 'deepseek' && (
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-emerald-200/70 bg-[#eefaf5] px-4 py-3 text-[#216b52]">
           <HiOutlineShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p className="text-[12px] leading-5"><span className="font-semibold">本报告由豆包方舟完成综合分析。</span> 结论依据脱敏背景、实际回答和报告中标注的官方规则；它用于练习准备，不预测签证结果。</p>
+          <p className="text-[12px] leading-5"><span className="font-semibold">本报告由 DeepSeek 按受控规则完成综合分析。</span> 结论依据脱敏背景、实际回答和报告中标注的官方规则；它用于练习准备，不预测签证结果。</p>
         </div>
       )}
       {report.source === 'local' && (
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-blue-200/70 bg-[#f3f8ff] px-4 py-3 text-[#315f8d]">
           <HiOutlineShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p className="text-[12px] leading-5"><span className="font-semibold">这是本地基础检查。</span> 当前只用于尚未接入综合报告的签证类型，不应视为豆包分析或官方结论。</p>
+          <p className="text-[12px] leading-5"><span className="font-semibold">这是本地基础检查。</span> 当前只用于尚未接入综合报告的签证类型，不应视为 DeepSeek 分析或官方结论。</p>
         </div>
       )}
       {report.source === 'unavailable' && (
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-amber-200/70 bg-[#fff8ea] px-4 py-3 text-[#855817]">
           <HiOutlineExclamationTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p className="text-[12px] leading-5"><span className="font-semibold">豆包综合分析暂不可用。</span> 为避免误导，本页只展示本次问答，不显示本地推测性评分。</p>
+          <p className="text-[12px] leading-5"><span className="font-semibold">DeepSeek 综合分析暂不可用。</span> 为避免误导，本页只展示本次问答，不显示本地推测性评分。</p>
         </div>
       )}
 

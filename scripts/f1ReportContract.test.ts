@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import {
   F1_REPORT_DIMENSION_IDS,
-  buildDoubaoReportMessages,
+  buildF1ReportMessages,
   sanitizeReportRequest,
   validateF1StructuredReport,
-} from '../src/shared/doubaoReport.ts'
+} from '../src/shared/f1ReportContract.ts'
 import {
   F1_OFFICIAL_CRITERIA,
   F1_OFFICIAL_CRITERIA_VERSION,
@@ -14,7 +14,7 @@ import {
   F1_OFFICIAL_CRITERIA as SERVER_CRITERIA,
   F1_OFFICIAL_CRITERIA_VERSION as SERVER_CRITERIA_VERSION,
 } from '../server/shared/f1OfficialCriteria.mjs'
-import { validateF1StructuredReport as validateServerReport } from '../server/shared/doubaoReport.mjs'
+import { validateF1StructuredReport as validateServerReport } from '../server/shared/f1ReportContract.mjs'
 
 const input = sanitizeReportRequest({
   visaType: 'F1',
@@ -131,7 +131,7 @@ const prediction = structuredClone(validReport)
 prediction.summary = '获签概率为 90%。'
 assert.equal(validateF1StructuredReport(prediction, input), null)
 
-const messages = buildDoubaoReportMessages(input)
+const messages = buildF1ReportMessages(input)
 assert.match(messages[0].content, /Never reward length/)
 assert.match(messages[0].content, /A direct yes\/no can fully answer/)
 assert.match(messages[0].content, /never approval\/refusal probability/)

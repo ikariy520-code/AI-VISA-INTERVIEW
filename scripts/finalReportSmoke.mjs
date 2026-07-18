@@ -1,22 +1,24 @@
 import dotenv from 'dotenv'
 import {
-  buildDoubaoReportMessages,
-  getArkMessageContent,
+  buildF1ReportMessages,
+  getModelMessageContent,
   sanitizeReportRequest,
   validateF1StructuredReport,
-} from '../server/shared/doubaoReport.mjs'
+} from '../server/shared/f1ReportContract.mjs'
 
 dotenv.config({ path: '.env.local', quiet: true })
 
-const apiKey = process.env.ARK_API_KEY?.trim()
-const model = process.env.ARK_TEXT_MODEL?.trim()
-const configuredEndpoint = process.env.ARK_API_BASE?.trim()
-  || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
-const endpoint = new URL(configuredEndpoint)
+const apiKey = process.env.DEEPSEEK_API_KEY?.trim()
+const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-flash'
+const endpoint = new URL(process.env.DEEPSEEK_BASE_URL?.trim() || 'https://api.deepseek.com')
 
-if (!apiKey || !model) throw new Error('Ark API Key or text model is not configured')
-if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'ark.cn-beijing.volces.com') {
-  throw new Error('Ark endpoint is not allowed')
+if (!apiKey) throw new Error('DeepSeek API key is not configured')
+if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'api.deepseek.com') {
+  throw new Error('DeepSeek endpoint is not allowed')
+}
+endpoint.pathname = endpoint.pathname.replace(/\/$/, '')
+if (!endpoint.pathname.endsWith('/chat/completions')) {
+  endpoint.pathname = `${endpoint.pathname}/chat/completions`.replace(/\/+/g, '/')
 }
 
 const input = sanitizeReportRequest({
@@ -52,19 +54,20 @@ const response = await fetch(endpoint, {
   },
   body: JSON.stringify({
     model,
-    messages: buildDoubaoReportMessages(input),
-    temperature: 0.1,
-    thinking: { type: 'disabled' },
+    messages: buildF1ReportMessages(input),
     response_format: { type: 'json_object' },
-    max_tokens: 4_500,
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high',
+    max_tokens: 8_000,
+    stream: false,
   }),
-  signal: AbortSignal.timeout(90_000),
+  signal: AbortSignal.timeout(120_000),
 })
 
 const payload = await response.json().catch(() => null)
-if (!response.ok) throw new Error(`Ark final-report request failed with status ${response.status}`)
-const content = getArkMessageContent(payload)
-if (!content) throw new Error('Ark returned no final-report content')
+if (!response.ok) throw new Error(`DeepSeek final-report request failed with status ${response.status}`)
+const content = getModelMessageContent(payload)
+if (!content) throw new Error('DeepSeek returned no final-report content')
 
 const parsed = JSON.parse(content)
 const report = validateF1StructuredReport(parsed, input)
@@ -93,7 +96,7 @@ if (!report) {
     questionReviews: parsed?.questionReviews,
     actionPlan: parsed?.actionPlan,
   }, null, 2))
-  throw new Error('Ark report did not pass the evidence contract')
+  throw new Error('DeepSeek report did not pass the evidence contract')
 }
 
-console.log(`ark-final-report-smoke=passed model=${model} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)
+console.log(`deepseek-final-report-smoke=passed model=${model} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)

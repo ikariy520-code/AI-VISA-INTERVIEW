@@ -1,3 +1,4 @@
+// Provider-neutral F-1 report prompt, privacy filter, and validation contract.
 import {
   F1_OFFICIAL_CRITERIA,
   F1_OFFICIAL_CRITERIA_VERSION,
@@ -215,7 +216,7 @@ export function validateF1StructuredReport(value, input) {
   }
 }
 
-export function buildDoubaoReportMessages(input) {
+export function buildF1ReportMessages(input) {
   return [
     {
       role: 'system',
@@ -243,7 +244,7 @@ Evaluate in concise Chinese: application/profile consistency; genuine study purp
   ]
 }
 
-export function getArkMessageContent(payload) {
+export function getModelMessageContent(payload) {
   if (!isRecord(payload) || !Array.isArray(payload.choices)) return null
   const first = payload.choices[0]
   return isRecord(first) && isRecord(first.message) && typeof first.message.content === 'string' ? first.message.content : null

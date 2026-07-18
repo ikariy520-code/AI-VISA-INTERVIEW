@@ -1,7 +1,7 @@
 import type { InterviewSession, QAPair } from './types'
 import { F1_OFFICIAL_CRITERIA } from '../practice/data/f1OfficialCriteria'
 
-export type ReportSource = 'sample' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
+export type ReportSource = 'sample' | 'deepseek' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
 
 export interface ReportDimension {
   id: string
@@ -57,6 +57,120 @@ export interface FeedbackReport {
   priorities: ReportInsight[]
   questionReviews: QuestionReview[]
   actionPlan: PracticeStep[]
+  policyVersion?: string
+}
+
+type UnknownRecord = Record<string, unknown>
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizedText(value: unknown, fallback = '', maxLength = 2_000) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) || fallback : fallback
+}
+
+function normalizedScore(value: unknown, fallback = 50) {
+  const score = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : fallback
+}
+
+function normalizedStrings(value: unknown, maxItems: number) {
+  return Array.isArray(value)
+    ? value.map(item => normalizedText(item, '', 1_000)).filter(Boolean).slice(0, maxItems)
+    : []
+}
+
+export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
+  if (!isRecord(value)) return null
+  const rawDimensions = Array.isArray(value.dimensions) ? value.dimensions : []
+  const rawReviews = Array.isArray(value.questionReviews) ? value.questionReviews : []
+  if (rawDimensions.length !== 6 || rawReviews.length === 0) return null
+
+  const dimensions = rawDimensions.map(item => {
+    if (!isRecord(item)) return null
+    const score = normalizedScore(item.score)
+    return {
+      id: normalizedText(item.id, '', 60),
+      label: normalizedText(item.label, '', 60),
+      score,
+      status: (['稳固', '需补充', '优先改进'].includes(String(item.status))
+        ? item.status
+        : score >= 80 ? '稳固' : score >= 65 ? '需补充' : '优先改进') as ReportDimension['status'],
+      summary: normalizedText(item.summary, '本次对话证据不足。', 1_000),
+      evidence: normalizedText(item.evidence, '本次对话证据不足', 1_200),
+    }
+  }).filter((item): item is ReportDimension => item !== null && Boolean(item.id && item.label))
+  if (dimensions.length !== 6) return null
+
+  const normalizeInsights = (raw: unknown, fallbackTitle: string): ReportInsight[] => (
+    Array.isArray(raw) ? raw : []
+  ).map(item => {
+    if (!isRecord(item)) return null
+    return {
+      title: normalizedText(item.title, fallbackTitle, 120),
+      detail: normalizedText(item.detail, '本次对话证据不足。', 800),
+    }
+  }).filter((item): item is ReportInsight => item !== null).slice(0, 3)
+
+  const questionReviews = rawReviews.map<QuestionReview | null>((item, index) => {
+    if (!isRecord(item)) return null
+    const score = normalizedScore(item.score, 55)
+    const verdict = ['回答有效', '基本回答', '需要重答'].includes(String(item.verdict))
+      ? item.verdict as QuestionReview['verdict']
+      : score >= 80 ? '回答有效' : score >= 60 ? '基本回答' : '需要重答'
+    return {
+      id: normalizedText(item.id, `q${index + 1}`, 100),
+      question: normalizedText(item.question, '', 4_000),
+      answer: normalizedText(item.answer, '', 8_000),
+      score,
+      verdict,
+      summary: normalizedText(item.summary, '本次回答需要进一步具体化。', 1_000),
+      didWell: normalizedStrings(item.didWell, 3),
+      improve: normalizedStrings(item.improve, 4),
+      betterAnswer: normalizedText(item.betterAnswer, '请使用你的真实信息重新组织回答。', 2_000),
+    }
+  }).filter((item): item is QuestionReview => item !== null && Boolean(item.question && item.answer))
+  if (questionReviews.length === 0) return null
+
+  const rawPlan = Array.isArray(value.actionPlan) ? value.actionPlan : []
+  const actionPlan = rawPlan.map((item, index) => {
+    if (!isRecord(item)) return null
+    return {
+      label: normalizedText(item.label, `第 ${index + 1} 步`, 40),
+      title: normalizedText(item.title, '继续练习', 160),
+      detail: normalizedText(item.detail, '使用真实信息完成下一轮重答。', 800),
+    }
+  }).filter((item): item is PracticeStep => item !== null).slice(0, 3)
+  if (actionPlan.length !== 3) return null
+
+  const source = ['deepseek', 'doubao', 'hybrid', 'local', 'sample', 'unavailable'].includes(String(value.source))
+    ? value.source as ReportSource
+    : 'deepseek'
+
+  return {
+    id: normalizedText(value.id, `report-${Date.now()}`, 120),
+    source,
+    title: normalizedText(value.title, '美国签证模拟面签', 200),
+    subtitle: normalizedText(value.subtitle, 'AI 模拟面签表现报告', 120),
+    date: normalizedText(value.date, '本次练习', 40),
+    time: normalizedText(value.time, '', 40),
+    duration: normalizedText(value.duration, '00:00', 20),
+    questionCount: Math.max(0, Math.round(Number(value.questionCount) || questionReviews.length)),
+    profile: normalizedText(value.profile, '基于本次面签对话', 100),
+    evaluationLabel: normalizedText(value.evaluationLabel, 'Interview evaluation', 100),
+    dimensionIntro: normalizedText(value.dimensionIntro, '依据本次回答进行综合评估。', 500),
+    overallScore: normalizedScore(value.overallScore),
+    readiness: normalizedText(value.readiness, '需要补强', 60),
+    headline: normalizedText(value.headline, '本次反馈已经生成。', 500),
+    summary: normalizedText(value.summary, '本报告不预测真实签证结果。', 1_500),
+    dimensions,
+    strengths: normalizeInsights(value.strengths, '相对稳定项'),
+    priorities: normalizeInsights(value.priorities, '优先改进项'),
+    questionReviews,
+    actionPlan,
+    policyVersion: normalizedText(value.policyVersion, '', 80) || undefined,
+  }
 }
 
 const clampScore = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
@@ -78,14 +192,14 @@ function buildStructuredFeedbackReport(session: InterviewSession): FeedbackRepor
   if (!report) return null
   return {
     id: session.id,
-    source: 'doubao',
+    source: 'deepseek',
     title: session.title,
     subtitle: '模拟面签证据报告',
     date: session.date,
     time: session.time,
     duration: session.duration,
     questionCount: session.transcript.length,
-    profile: `豆包方舟综合分析 · 官方依据 ${report.criteriaVersion}`,
+    profile: `DeepSeek 约束分析 · 官方依据 ${report.criteriaVersion}`,
     evaluationLabel: 'F-1 evidence review',
     dimensionIntro: '根据脱敏背景、实际回答和当前版本的美国国务院公开依据检查准备情况。',
     overallScore: report.overallScore,
@@ -138,7 +252,7 @@ function buildUnavailableFeedbackReport(session: InterviewSession): FeedbackRepo
     time: session.time,
     duration: session.duration,
     questionCount: session.transcript.length,
-    profile: '豆包综合分析暂不可用',
+    profile: 'DeepSeek 综合分析暂不可用',
     evaluationLabel: 'Transcript only',
     dimensionIntro: '为避免产生没有依据的判断，本页不显示本地推测性评分。',
     overallScore: null,
@@ -154,7 +268,7 @@ function buildUnavailableFeedbackReport(session: InterviewSession): FeedbackRepo
       answer: qa.answer,
       score: null,
       verdict: '待分析',
-      summary: '豆包综合分析暂不可用，本题暂不生成评价。',
+      summary: 'DeepSeek 综合分析暂不可用，本题暂不生成评价。',
       didWell: [],
       improve: [],
       betterAnswer: '请保留自己的真实回答；当前没有生成参考方向。',

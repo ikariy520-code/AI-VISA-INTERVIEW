@@ -11,7 +11,7 @@
     "start": "node server/index.mjs",
     "deploy": "bash scripts/deploy.sh",
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
-    "smoke:ark": "node scripts/arkConnectivitySmoke.mjs",
+    "smoke:deepseek": "node scripts/deepseekConnectivitySmoke.mjs",
     "smoke:report": "node scripts/finalReportSmoke.mjs",
     "test:f1-controller": "node --experimental-strip-types scripts/f1InterviewController.test.ts",
     "test:f1-report": "node --experimental-strip-types scripts/f1ReportContract.test.ts",

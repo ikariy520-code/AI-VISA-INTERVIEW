@@ -12,6 +12,7 @@ import {
 } from 'react-icons/hi2'
 import type { ChatMessage, UserContext, InterviewRecord } from '../types'
 import type { InterviewSession } from '../../feedback/types'
+import type { OfficerType } from '../../voice/types'
 import {
   analyzeInterview,
   analyzeInterviewWithAI,
@@ -28,6 +29,7 @@ interface Props {
   messages: ChatMessage[]
   context: UserContext
   duration: string
+  officerType: OfficerType
 }
 
 const visaTypeLabel: Record<string, string> = {
@@ -50,12 +52,12 @@ async function generateFeedbackResult(record: InterviewRecord): Promise<Feedback
   try {
     return { session: await analyzeInterviewWithAI(record), usedLocalFallback: false }
   } catch (error) {
-    console.warn('[InterviewComplete] Doubao final report unavailable:', error)
+    console.warn('[InterviewComplete] DeepSeek final report unavailable:', error)
     return { session: createUnavailableInterviewSession(record), usedLocalFallback: true }
   }
 }
 
-export default function InterviewComplete({ messages, context, duration }: Props) {
+export default function InterviewComplete({ messages, context, duration, officerType }: Props) {
   const navigate = useNavigate()
   const feedbackPromiseRef = useRef<Promise<FeedbackResult> | null>(null)
   const [feedbackState, setFeedbackState] = useState<'generating' | 'ready' | 'error'>('generating')
@@ -65,7 +67,7 @@ export default function InterviewComplete({ messages, context, duration }: Props
   const officerQuestions = messages.filter(m => m.role === 'officer')
   const userAnswers = messages.filter(m => m.role === 'user')
 
-  // 面签完成后发送脱敏背景与转写给豆包生成一次报告；本站不长期保存。
+  // 面签完成后发送脱敏背景与转写给 DeepSeek 生成一次受约束报告；本站不长期保存。
   useEffect(() => {
     if (messages.length === 0) {
       setFeedbackError('暂无可分析的对话记录。')
@@ -83,6 +85,7 @@ export default function InterviewComplete({ messages, context, duration }: Props
         time,
         duration,
         visaType: context.visaType,
+        officerType,
         userContext: context,
         messages,
       }
@@ -97,9 +100,9 @@ export default function InterviewComplete({ messages, context, duration }: Props
           setFeedbackSession(session)
           setFeedbackError(usedLocalFallback
             ? session.analysisSource === 'unavailable'
-              ? '豆包综合分析暂不可用；报告页将只保留本次问答记录，不显示推测性评分。'
+              ? 'DeepSeek 综合分析暂不可用；报告页将只保留本次问答记录，不显示推测性评分。'
               : session.analysisSource === 'hybrid'
-              ? '部分回答使用豆包 AI 分析，其余回答已使用本地规则补全。'
+              ? '部分回答使用 AI 分析，其余回答已使用本地规则补全。'
               : '当前签证类型暂时显示本地基础检查，并会明确标注来源。'
             : '')
           setFeedbackState('ready')
@@ -115,7 +118,7 @@ export default function InterviewComplete({ messages, context, duration }: Props
     )
 
     return () => { cancelled = true }
-  }, [context, duration, messages])
+  }, [context, duration, messages, officerType])
 
   // Feedback is the natural next step: once ready, open the detailed report automatically.
   useEffect(() => {

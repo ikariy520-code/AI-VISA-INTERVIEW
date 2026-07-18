@@ -1,4 +1,6 @@
 // ========================================
+
+import type { OfficerType } from '../voice/types'
 // 面签实战模块 — 类型定义
 //
 // 流程：
@@ -128,6 +130,7 @@ export interface InterviewRecord {
   time: string
   duration: string           // "14:32"
   visaType: VisaType
+  officerType?: OfficerType
   userContext: UserContext
   messages: ChatMessage[]
 }

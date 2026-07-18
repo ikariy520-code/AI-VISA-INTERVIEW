@@ -1,10 +1,10 @@
 # AI Visa Interview
 
-这是一个面向 F1 / B2 的 AI 模拟面签项目。当前 F1 方案把“实时面签”和“最终报告”明确拆开，但外部 AI 仍全部使用豆包：
+这是一个面向 F1 / B2 的 AI 模拟面签项目。当前 F1 方案把“实时面签”和“最终报告”明确拆开：
 
 - 豆包端到端实时语音负责听取回答和朗读面签官问题。
 - 本地 `f1InterviewController` 负责从固定 22 题中选择、重复或结束，豆包不能在面签中自由编题。
-- 面试结束后，豆包方舟文本模型只调用一次，用于生成最终综合报告。
+- 面试结束后，DeepSeek 只调用一次，并严格按照 F1 官方依据、证据引用和结构化报告合同生成最终综合报告。
 
 ## F1 面签规则
 
@@ -40,9 +40,9 @@ DOUBAO_APP_ID=端到端语音应用ID
 DOUBAO_ACCESS_KEY=端到端语音Access Token
 DOUBAO_REALTIME_URL=wss://openspeech.bytedance.com/api/v3/realtime/dialogue
 
-ARK_API_KEY=方舟API Key
-ARK_API_BASE=https://ark.cn-beijing.volces.com/api/v3/chat/completions
-ARK_TEXT_MODEL=doubao-seed-2-1-turbo-260628
+DEEPSEEK_API_KEY=DeepSeek API Key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
 
 VITE_DEV_PORT=5173
 ```
@@ -56,15 +56,15 @@ npm run dev
 npm test
 npm run build
 npm run smoke:realtime
-npm run smoke:ark
+npm run smoke:deepseek
 npm run smoke:report
 ```
 
 - `test:f1-controller`：验证 22 题边界、必问题、动态题量、重复和超时。
 - `test:f1-report`：验证隐私脱敏、证据真实性、官方依据、简短回答和禁用获签预测。
-- `test:architecture`：确保只有豆包实时语音和豆包方舟最终报告两条外部 AI 通道。
-- `smoke:ark`：用极小请求检查方舟密钥、模型和网络连接。
-- `smoke:report`：使用非真实个人资料调用方舟，验证最终报告能够被严格数据合同接收。
+- `test:architecture`：确保浏览器只访问同源报告接口，豆包只负责实时语音，DeepSeek 只负责最终报告。
+- `smoke:deepseek`：用极小请求检查 DeepSeek 密钥、模型和网络连接。
+- `smoke:report`：使用非真实个人资料调用 DeepSeek，验证最终报告能够被严格数据合同接收。
 
 ## 团队协作
 

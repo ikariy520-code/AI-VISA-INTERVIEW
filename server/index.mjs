@@ -4,8 +4,8 @@
 // Responsibilities:
 //   1. Serve Vite-built static files (dist/) with SPA fallback
 //   2. WebSocket proxy  /api/realtime-voice → Doubao
-//   3. Final report     /api/ai-report → Doubao Ark text model
-//   4. Health check     /api/realtime-health
+//   3. Final report     /api/ai-report → DeepSeek constrained evaluator
+//   4. Health checks    /api/realtime-health, /api/report-health
 // ========================================
 
 import { createServer } from 'node:http'
@@ -33,12 +33,13 @@ const DOUBAO_APP_ID = process.env.DOUBAO_APP_ID || ''
 const DOUBAO_ACCESS_KEY = process.env.DOUBAO_ACCESS_KEY || ''
 const UPSTREAM_URL = process.env.DOUBAO_REALTIME_URL || undefined
 const WS_MAX_CONNECTIONS = Number(process.env.WS_MAX_CONNECTIONS) || 30
-const ARK_API_KEY = process.env.ARK_API_KEY || ''
-const ARK_API_BASE = process.env.ARK_API_BASE || ''
-const ARK_TEXT_MODEL = process.env.ARK_TEXT_MODEL || ''
 
 const INVITE_CODES = process.env.INVITE_CODES || ''
 const INVITE_SESSION_SECRET = process.env.INVITE_SESSION_SECRET || ''
+
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || ''
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
+const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || ''
 
 // ── MIME map ─────────────────────────────────────────────
 
@@ -159,9 +160,9 @@ async function main() {
     secureCookies: process.env.NODE_ENV === 'production',
   })
   const reportHandler = createReportHandler({
-    apiKey: ARK_API_KEY,
-    endpoint: ARK_API_BASE,
-    model: ARK_TEXT_MODEL,
+    apiKey: DEEPSEEK_API_KEY,
+    model: DEEPSEEK_MODEL,
+    baseUrl: DEEPSEEK_BASE_URL,
   })
 
   const server = createServer(async (req, res) => {
@@ -237,7 +238,7 @@ async function main() {
     console.log(`[server] Static files: ${DIST_DIR}`)
     console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
     console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
-    console.log(`[server] AI report   : http://${HOST}:${PORT}/api/ai-report`)
+    console.log(`[server] AI report   : ${reportHandler.configured ? `DeepSeek ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
     console.log(`[server] Invite gate : ${inviteAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
   })
 }

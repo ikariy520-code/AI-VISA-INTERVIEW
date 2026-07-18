@@ -25,7 +25,7 @@ import {
   sanitizeReportRequest,
   validateF1StructuredReport,
   type InterviewReportAnswer,
-} from '../../../shared/doubaoReport'
+} from '../../../shared/f1ReportContract'
 
 function classifyDialogueAct(answer: string) {
   const normalized = answer.trim().toLowerCase().replace(/[.!?]+$/g, '').trim()
@@ -409,7 +409,7 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
   }
 }
 
-// ---- One evidence-bound Ark report call after the complete F-1 interview ----
+// ---- One evidence-bound DeepSeek report call after the complete F-1 interview ----
 
 const AI_REPORT_ENDPOINT = '/api/ai-report'
 
@@ -495,7 +495,7 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
   return {
     ...transcriptSession,
     overallScore: structuredReport.overallScore / 20,
-    analysisSource: 'doubao',
+    analysisSource: 'deepseek',
     aiScoredAnswers: input.answers.length,
     totalScoredAnswers: input.answers.length,
     structuredReport,

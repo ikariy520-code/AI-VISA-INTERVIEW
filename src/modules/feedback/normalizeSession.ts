@@ -5,13 +5,13 @@ import type {
   QAPair,
   VoiceEmotion,
 } from './types'
-import type { F1StructuredReport } from '../../shared/doubaoReport'
+import type { F1StructuredReport } from '../../shared/f1ReportContract'
 
 type UnknownRecord = Record<string, unknown>
 
 const VERDICTS = new Set<AnswerFeedback['verdict']>(['favorable', 'neutral', 'unfavorable'])
 const EMOTIONS = new Set<VoiceEmotion['primary']>(['calm', 'nervous', 'confident', 'hesitant', 'tense', 'natural'])
-const SOURCES = new Set<NonNullable<InterviewSession['analysisSource']>>(['doubao', 'hybrid', 'local', 'unavailable'])
+const SOURCES = new Set<NonNullable<InterviewSession['analysisSource']>>(['deepseek', 'doubao', 'hybrid', 'local', 'unavailable'])
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
