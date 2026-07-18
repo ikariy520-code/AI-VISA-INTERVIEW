@@ -3,7 +3,7 @@ import dotenv from 'dotenv'
 dotenv.config({ path: '.env.local', quiet: true })
 
 const apiKey = process.env.DEEPSEEK_API_KEY?.trim()
-const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-flash'
+const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-pro'
 const baseUrl = new URL(process.env.DEEPSEEK_BASE_URL?.trim() || 'https://api.deepseek.com')
 
 if (!apiKey) throw new Error('DeepSeek API key is not configured')

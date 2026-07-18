@@ -4,15 +4,23 @@ import {
   sanitizeReportRequest,
   validateF1StructuredReport,
 } from './shared/f1ReportContract.mjs'
+import { createHash } from 'node:crypto'
 
 const REPORT_PATH = '/api/ai-report'
 const HEALTH_PATH = '/api/report-health'
 const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 const MAX_BODY_BYTES = 96_000
 const REQUEST_TIMEOUT_MS = 120_000
+const MAX_REPORT_ATTEMPTS = 2
+const MAX_OUTPUT_TOKENS_PER_ATTEMPT = 32_000
 const RATE_WINDOW_MS = 15 * 60 * 1000
 const MAX_REQUESTS_PER_WINDOW = 6
 const MAX_ACTIVE_REQUESTS = 4
+const TOKEN_BUDGET_WINDOW_MS = 60 * 60 * 1000
+const MAX_IP_COMPLETION_TOKENS_PER_WINDOW = 192_000
+const MAX_GLOBAL_COMPLETION_TOKENS_PER_WINDOW = 768_000
+const REPORT_CACHE_TTL_MS = 10 * 60 * 1000
+const MAX_REPORT_CACHE_ENTRIES = 200
 
 function writeJson(res, status, body, extraHeaders = {}) {
   res.statusCode = status
@@ -53,9 +61,9 @@ function safeEndpoint(value) {
   }
 }
 
-function clientIp(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-  return forwarded || req.socket.remoteAddress || 'unknown'
+export function clientIp(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',').map(value => value.trim()).filter(Boolean)
+  return forwarded.at(-1) || req.socket.remoteAddress || 'unknown'
 }
 
 function isSameOrigin(req) {
@@ -76,9 +84,70 @@ function parseModelContent(payload) {
   return JSON.parse(normalized)
 }
 
-async function callDeepSeek({ apiKey, endpoint, model, input }) {
+export function createTokenBudget(options = {}) {
+  const windowMs = Number(options.windowMs) || TOKEN_BUDGET_WINDOW_MS
+  const perIpLimit = Number(options.perIpLimit) || MAX_IP_COMPLETION_TOKENS_PER_WINDOW
+  const globalLimit = Number(options.globalLimit) || MAX_GLOBAL_COMPLETION_TOKENS_PER_WINDOW
+  const reservationSize = Number(options.reservationSize) || MAX_OUTPUT_TOKENS_PER_ATTEMPT
+  const now = typeof options.now === 'function' ? options.now : Date.now
+  const ipWindows = new Map()
+  let globalWindow = { used: 0, startedAt: now() }
+
+  function currentWindow(bucket, timestamp) {
+    return !bucket || timestamp - bucket.startedAt >= windowMs
+      ? { used: 0, startedAt: timestamp }
+      : bucket
+  }
+
+  function reserve(ip) {
+    const timestamp = now()
+    globalWindow = currentWindow(globalWindow, timestamp)
+    if (ipWindows.size > 1_000) {
+      for (const [key, bucket] of ipWindows) {
+        if (timestamp - bucket.startedAt >= windowMs) ipWindows.delete(key)
+      }
+      while (ipWindows.size > 2_000) ipWindows.delete(ipWindows.keys().next().value)
+    }
+    const ipWindow = currentWindow(ipWindows.get(ip), timestamp)
+    ipWindows.set(ip, ipWindow)
+
+    const ipRetryAfter = Math.max(1, Math.ceil((windowMs - (timestamp - ipWindow.startedAt)) / 1_000))
+    const globalRetryAfter = Math.max(1, Math.ceil((windowMs - (timestamp - globalWindow.startedAt)) / 1_000))
+    if (ipWindow.used + reservationSize > perIpLimit) return { allowed: false, retryAfter: ipRetryAfter, scope: 'ip' }
+    if (globalWindow.used + reservationSize > globalLimit) return { allowed: false, retryAfter: globalRetryAfter, scope: 'global' }
+
+    ipWindow.used += reservationSize
+    globalWindow.used += reservationSize
+    let settled = false
+    return {
+      allowed: true,
+      settle(actualTokens) {
+        if (settled) return
+        settled = true
+        const reported = Number(actualTokens)
+        if (!Number.isFinite(reported) || reported < 0) return
+        const actual = Math.min(reservationSize, Math.ceil(reported))
+        const refund = reservationSize - actual
+        ipWindow.used = Math.max(0, ipWindow.used - refund)
+        globalWindow.used = Math.max(0, globalWindow.used - refund)
+      },
+    }
+  }
+
+  return { reserve }
+}
+
+async function callDeepSeek({ apiKey, endpoint, model, input, tokenBudget, ip, signal }) {
   let lastError
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < MAX_REPORT_ATTEMPTS; attempt += 1) {
+    const reservation = tokenBudget.reserve(ip)
+    if (!reservation.allowed) {
+      throw Object.assign(new Error('REPORT_TOKEN_BUDGET_EXCEEDED'), {
+        code: 'REPORT_TOKEN_BUDGET_EXCEEDED',
+        retryAfter: reservation.retryAfter,
+        budgetScope: reservation.scope,
+      })
+    }
     try {
       const upstream = await fetch(endpoint, {
         method: 'POST',
@@ -92,13 +161,16 @@ async function callDeepSeek({ apiKey, endpoint, model, input }) {
           response_format: { type: 'json_object' },
           thinking: { type: 'enabled' },
           reasoning_effort: 'high',
-          max_tokens: 8_000,
+          max_tokens: MAX_OUTPUT_TOKENS_PER_ATTEMPT,
           stream: false,
         }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       })
 
       const payload = await upstream.json().catch(() => null)
+      reservation.settle(payload?.usage?.completion_tokens)
       if (!upstream.ok) {
         const error = Object.assign(new Error('DEEPSEEK_REPORT_SERVICE_ERROR'), {
           code: 'DEEPSEEK_REPORT_SERVICE_ERROR',
@@ -135,11 +207,32 @@ async function callDeepSeek({ apiKey, endpoint, model, input }) {
 
 export function createReportHandler(options = {}) {
   const apiKey = String(options.apiKey || '').trim()
-  const model = String(options.model || 'deepseek-v4-flash').trim()
+  const model = String(options.model || 'deepseek-v4-pro').trim()
   const endpoint = safeEndpoint(options.baseUrl)
   const configured = Boolean(apiKey && model)
   const requestWindows = new Map()
+  const tokenBudget = createTokenBudget()
+  const reportCache = new Map()
+  const activeReportKeys = new Set()
   let activeRequests = 0
+
+  function reportKey(ip, input) {
+    const digest = createHash('sha256').update(JSON.stringify(input)).digest('hex')
+    return `${ip}:${digest}`
+  }
+
+  function cachedReport(key) {
+    const now = Date.now()
+    const cached = reportCache.get(key)
+    if (cached && cached.expiresAt > now) return cached.report
+    if (cached) reportCache.delete(key)
+    if (reportCache.size > MAX_REPORT_CACHE_ENTRIES) {
+      for (const [cacheKey, value] of reportCache) {
+        if (value.expiresAt <= now || reportCache.size > MAX_REPORT_CACHE_ENTRIES) reportCache.delete(cacheKey)
+      }
+    }
+    return null
+  }
 
   function takeRateSlot(ip) {
     const now = Date.now()
@@ -188,7 +281,8 @@ export function createReportHandler(options = {}) {
       return true
     }
 
-    const rate = takeRateSlot(clientIp(req))
+    const ip = clientIp(req)
+    const rate = takeRateSlot(ip)
     if (!rate.allowed) {
       writeJson(res, 429, { error: 'REPORT_RATE_LIMITED' }, { 'Retry-After': String(rate.retryAfter) })
       return true
@@ -214,23 +308,49 @@ export function createReportHandler(options = {}) {
       return true
     }
 
+    const key = reportKey(ip, input)
+    const cached = cachedReport(key)
+    if (cached) {
+      writeJson(res, 200, { report: cached, provider: 'deepseek', model, schemaVersion: 2, cached: true })
+      return true
+    }
+    if (activeReportKeys.has(key)) {
+      writeJson(res, 409, { error: 'REPORT_ALREADY_IN_PROGRESS' })
+      return true
+    }
+
+    activeReportKeys.add(key)
     activeRequests += 1
+    const clientAbort = new AbortController()
+    const abortOnDisconnect = () => {
+      if (!res.writableEnded) {
+        clientAbort.abort(Object.assign(new Error('CLIENT_DISCONNECTED'), { code: 'CLIENT_DISCONNECTED' }))
+      }
+    }
+    res.once('close', abortOnDisconnect)
     try {
-      const report = await callDeepSeek({ apiKey, endpoint, model, input })
+      const report = await callDeepSeek({ apiKey, endpoint, model, input, tokenBudget, ip, signal: clientAbort.signal })
+      reportCache.set(key, { report, expiresAt: Date.now() + REPORT_CACHE_TTL_MS })
       writeJson(res, 200, { report, provider: 'deepseek', model, schemaVersion: 2 })
     } catch (error) {
+      if (error?.code === 'CLIENT_DISCONNECTED') return true
       const upstreamStatus = Number(error?.upstreamStatus)
       const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError'
-      const status = timeout ? 504 : upstreamStatus === 429 ? 429 : 502
+      const tokenBudgetExceeded = error?.code === 'REPORT_TOKEN_BUDGET_EXCEEDED'
+      const status = tokenBudgetExceeded || upstreamStatus === 429 ? 429 : timeout ? 504 : 502
       console.error('[report] DeepSeek final report failed:', error?.code || error?.name || 'UNKNOWN')
       writeJson(res, status, {
-        error: timeout
-          ? 'DEEPSEEK_REPORT_TIMEOUT'
-          : upstreamStatus === 429
-            ? 'DEEPSEEK_REPORT_RATE_LIMITED'
-            : error?.code || 'DEEPSEEK_REPORT_SERVICE_UNAVAILABLE',
-      })
+        error: tokenBudgetExceeded
+          ? 'REPORT_TOKEN_BUDGET_EXCEEDED'
+          : timeout
+            ? 'DEEPSEEK_REPORT_TIMEOUT'
+            : upstreamStatus === 429
+              ? 'DEEPSEEK_REPORT_RATE_LIMITED'
+              : error?.code || 'DEEPSEEK_REPORT_SERVICE_UNAVAILABLE',
+      }, tokenBudgetExceeded ? { 'Retry-After': String(error.retryAfter || 3600) } : {})
     } finally {
+      res.off('close', abortOnDisconnect)
+      activeReportKeys.delete(key)
       activeRequests -= 1
     }
     return true

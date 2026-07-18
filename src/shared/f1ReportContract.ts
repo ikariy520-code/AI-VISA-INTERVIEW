@@ -99,6 +99,15 @@ const DIMENSION_LABELS: Record<F1ReportDimensionId, string> = {
 
 export const F1_REPORT_DIMENSION_IDS = Object.keys(DIMENSION_LABELS) as F1ReportDimensionId[]
 
+const DIMENSION_DEFAULT_RULE_IDS: Record<F1ReportDimensionId, readonly F1OfficialRuleId[]> = {
+  application_consistency: ['DOS_ACADEMIC_PREPARATION'],
+  study_authenticity: ['FAM_EDUCATION_HOME_COUNTRY_CALIBRATION'],
+  academic_plan: ['DOS_ACADEMIC_PREPARATION'],
+  financial_capacity: ['DOS_FINANCIAL_CAPACITY'],
+  departure_intent: ['DOS_DEPARTURE_INTENT', 'FAM_RESIDENCE_ABROAD', 'FAM_PRESENT_INTENT_CALIBRATION'],
+  overall_credibility: ['FAM_PRESENT_INTENT_CALIBRATION'],
+}
+
 const IDENTIFIER_PATTERNS: Array<[RegExp, string]> = [
   [/\bN\d{9}\b/gi, '[REDACTED_SEVIS_ID]'],
   [/\bAA\d{8}\b/gi, '[REDACTED_DS160_ID]'],
@@ -200,6 +209,11 @@ function cleanFeedbackArray(value: unknown) {
   return cleanStringArray(value, 3, 500)
 }
 
+function cleanActionArray(value: unknown) {
+  if (typeof value === 'string') return value.trim() ? [value.trim().slice(0, 500)] : []
+  return cleanStringArray(value, 4, 500)
+}
+
 function normalizeEvidence(value: unknown, input: InterviewReportRequest): F1ReportEvidence | null {
   if (!isRecord(value)) return null
   const source = value.source === 'profile' ? 'profile' : value.source === 'answer' ? 'answer' : null
@@ -213,6 +227,14 @@ function normalizeEvidence(value: unknown, input: InterviewReportRequest): F1Rep
     ? includesGroundedProfileEvidence(corpus, quote)
     : includesExactEvidence(corpus, quote)
   return grounded ? { source, reference, quote } : null
+}
+
+function normalizeQuestionAnswerEvidence(value: unknown, sourceAnswer: InterviewReportAnswer): string | null {
+  const directQuote = cleanText(value, 500)
+  if (directQuote && includesExactEvidence(sourceAnswer.answer, directQuote)) return directQuote
+  if (!isRecord(value) || value.source !== 'answer' || value.reference !== sourceAnswer.questionId) return null
+  const nestedQuote = cleanText(value.quote, 500)
+  return nestedQuote && includesExactEvidence(sourceAnswer.answer, nestedQuote) ? nestedQuote : null
 }
 
 export function validateF1StructuredReport(value: unknown, input: InterviewReportRequest): F1StructuredReport | null {
@@ -233,12 +255,13 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
     const rawEvidence = Array.isArray(item.evidence) ? item.evidence.slice(0, 5) : []
     const evidence = rawEvidence.map(entry => normalizeEvidence(entry, input)).filter((entry): entry is F1ReportEvidence => entry !== null)
     const rawOfficialRuleIds = cleanStringArray(item.officialRuleIds, 6, 80)
-    const officialRuleIds = rawOfficialRuleIds
-      .filter((id): id is F1OfficialRuleId => F1_OFFICIAL_RULE_IDS.includes(id as F1OfficialRuleId))
-    const actions = cleanStringArray(item.actions, 4, 500)
+    const officialRuleIds = rawOfficialRuleIds.length === 0
+      ? [...DIMENSION_DEFAULT_RULE_IDS[id]]
+      : rawOfficialRuleIds.filter((ruleId): ruleId is F1OfficialRuleId => F1_OFFICIAL_RULE_IDS.includes(ruleId as F1OfficialRuleId))
+    const actions = cleanActionArray(item.actions)
     const summary = cleanText(item.summary, 1_000)
     const reasoning = cleanText(item.reasoning, 1_500)
-    if (score === null || !status || evidence.length === 0 || evidence.length !== rawEvidence.length || officialRuleIds.length === 0 || officialRuleIds.length !== rawOfficialRuleIds.length || actions.length === 0 || !summary || !reasoning) return null
+    if (score === null || !status || evidence.length === 0 || evidence.length !== rawEvidence.length || officialRuleIds.length === 0 || (rawOfficialRuleIds.length > 0 && officialRuleIds.length !== rawOfficialRuleIds.length) || actions.length === 0 || !summary || !reasoning) return null
     return {
       id,
       label: DIMENSION_LABELS[id],
@@ -260,10 +283,10 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
     const sourceAnswer = input.answers[index - 1]
     const score = cleanScore(item.score)
     const verdict = item.verdict === 'complete' || item.verdict === 'partial' || item.verdict === 'needs_preparation' ? item.verdict : null
-    const answerEvidence = cleanText(item.answerEvidence, 500)
+    const answerEvidence = sourceAnswer ? normalizeQuestionAnswerEvidence(item.answerEvidence, sourceAnswer) : null
     const summary = cleanText(item.summary, 800)
     const preparationDirection = cleanText(item.preparationDirection, 1_000)
-    if (!sourceAnswer || item.questionId !== sourceAnswer.questionId || score === null || !verdict || !summary || !preparationDirection || !includesExactEvidence(sourceAnswer.answer, answerEvidence)) return null
+    if (!sourceAnswer || item.questionId !== sourceAnswer.questionId || score === null || !verdict || !summary || !preparationDirection || !answerEvidence) return null
     return {
       index,
       questionId: sourceAnswer.questionId,
@@ -354,6 +377,9 @@ Each question review: {index,questionId,score,verdict:"complete"|"partial"|"need
 Each strength/priority: {title,detail,evidenceRefs,officialRuleIds}.
 Each action-plan item: {label:"STEP 1"|"STEP 2"|"STEP 3",title,detail}. strengths and improvements in question reviews must be JSON arrays, even when empty.
 For profile evidence, quote one exact value or one or more exact "field: value" pairs separated by commas. Never paraphrase a profile quote.
+For every question review, answerEvidence must be the exact original answer text as a JSON string, never an evidence object.
+For every dimension, actions must be a JSON array containing one or two strings, never a single string.
+Every dimension must contain its own numeric score from 0 to 100. Never omit a dimension score, even when its status is stable.
 
 Be concise: dimension summary <= 60 Chinese characters, reasoning <= 100, one or two actions; exactly 1-3 strengths and 1-3 priorities; question summary <= 50, at most one strength and one improvement, preparationDirection <= 80; each action-plan detail <= 80. Use one exact quote per dimension unless a second quote is necessary to prove a contradiction.
 
