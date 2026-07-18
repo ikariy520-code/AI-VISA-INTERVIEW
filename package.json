@@ -4,14 +4,16 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "npm run test:f1-controller && npm run test:architecture",
+    "test": "npm run test:f1-controller && npm run test:feedback && npm run test:architecture",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "deploy": "bash scripts/deploy.sh",
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
+    "smoke:feedback": "node scripts/deepseekFeedbackSmoke.mjs",
     "test:f1-controller": "node --experimental-strip-types scripts/f1InterviewController.test.ts",
+    "test:feedback": "node scripts/deepseekFeedback.test.mjs",
     "test:architecture": "node scripts/singleExternalAiAudit.mjs"
   },
   "dependencies": {

@@ -4,6 +4,8 @@ import {
   HiMiniMicrophone,
   HiMiniStop,
   HiOutlineArrowPath,
+  HiOutlineEye,
+  HiOutlineEyeSlash,
   HiOutlineExclamationTriangle,
   HiOutlineShieldCheck,
   HiOutlineSignal,
@@ -34,6 +36,7 @@ import {
   realtimeEventText,
   type DoubaoRealtimeEvent,
 } from '../services/doubaoRealtime'
+import RealtimeVoiceOrb from './RealtimeVoiceOrb'
 
 interface RealtimeChatMessage extends ChatMessage {
   streaming?: boolean
@@ -74,6 +77,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
   const [errorMessage, setErrorMessage] = useState('')
   const [micLevel, setMicLevel] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
+  const [captionsVisible, setCaptionsVisible] = useState(true)
   const [elapsed, setElapsed] = useState(0)
   const [officerName] = useState(() => getRandomOfficerName())
 
@@ -378,9 +382,9 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
   }, [])
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (captionsVisible) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     messagesRef.current = messages
-  }, [messages])
+  }, [captionsVisible, messages])
 
   useEffect(() => {
     if (!connectedRef.current || phase === 'ending' || phase === 'ended') return
@@ -441,29 +445,50 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
         ) : <span className="w-12" />}
       </header>
 
-      <section className="flex shrink-0 flex-col items-center px-5 pb-3 pt-1">
+      <section className={`flex shrink-0 flex-col items-center px-5 pt-1 transition-all ${captionsVisible ? 'pb-3' : 'pb-1'}`}>
         <motion.div
           animate={phase === 'speaking' ? { scale: [1, 1.035, 1] } : { scale: 1 }}
           transition={{ repeat: phase === 'speaking' ? Infinity : 0, duration: 1.3 }}
           className="relative"
         >
-          <OfficerIcon type={officerType} className="h-20 w-20 rounded-[26px] shadow-lg" />
+          <OfficerIcon
+            type={officerType}
+            className={`${captionsVisible ? 'h-20 w-20 rounded-[26px]' : 'h-12 w-12 rounded-[17px]'} shadow-lg transition-all duration-300`}
+          />
           {isConnected && (
             <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-[#147a58] text-white shadow-sm">
               <HiOutlineSignal className="h-3.5 w-3.5" />
             </span>
           )}
         </motion.div>
-        <h1 className="mt-3 text-[17px] font-semibold tracking-[-0.02em] text-[#1d1d1f]">
+        <h1 className={`${captionsVisible ? 'mt-3 text-[17px]' : 'mt-2 text-[15px]'} font-semibold tracking-[-0.02em] text-[#1d1d1f] transition-all`}>
           {officerName}
         </h1>
         <p className="text-[12px] text-[#86868b]">
           {officerConfig.label} · AI Realtime
         </p>
+        <button
+          type="button"
+          onClick={() => setCaptionsVisible(visible => !visible)}
+          className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-black/[0.08] bg-white/85 px-3.5 py-2 text-[11px] font-semibold text-[#5f6368] shadow-sm transition hover:border-black/[0.14] hover:bg-white hover:text-[#1d1d1f]"
+          aria-pressed={!captionsVisible}
+        >
+          {captionsVisible ? <HiOutlineEyeSlash className="h-4 w-4" /> : <HiOutlineEye className="h-4 w-4" />}
+          {captionsVisible ? '关闭对话字幕' : '开启对话字幕'}
+        </button>
       </section>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <div className="mx-auto flex max-w-lg flex-col gap-2.5">
+      <main className={`min-h-0 flex-1 px-4 py-3 ${captionsVisible ? 'overflow-y-auto' : 'overflow-hidden'}`}>
+        <AnimatePresence mode="wait" initial={false}>
+          {captionsVisible ? (
+          <motion.div
+            key="captions"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className="mx-auto flex max-w-lg flex-col gap-2.5"
+          >
           {messages.length === 0 && phase !== 'connecting' && (
             <div className="mx-auto mt-6 max-w-sm rounded-[24px] border border-black/[0.06] bg-white/80 px-6 py-6 text-center shadow-[0_18px_60px_rgba(0,0,0,0.05)] backdrop-blur-xl">
               <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[#eaf4ff] text-[#0071e3]">
@@ -523,7 +548,20 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
           )}
 
           <div ref={chatEndRef} />
-        </div>
+          </motion.div>
+          ) : (
+            <motion.div
+              key="voice-orb"
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.28, ease: [0.25, 0.1, 0, 1] }}
+              className="flex h-full min-h-[270px] items-center justify-center"
+            >
+              <RealtimeVoiceOrb phase={phase} micLevel={micLevel} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
       <AnimatePresence>

@@ -16,6 +16,7 @@ import dotenv from 'dotenv'
 
 import { createWSProxy } from './wsProxy.mjs'
 import { createInviteAuth } from './inviteAuth.mjs'
+import { createDeepSeekFeedbackApi } from './deepseekFeedback.mjs'
 
 // ── config ───────────────────────────────────────────────
 
@@ -34,6 +35,10 @@ const WS_MAX_CONNECTIONS = Number(process.env.WS_MAX_CONNECTIONS) || 30
 
 const INVITE_CODES = process.env.INVITE_CODES || ''
 const INVITE_SESSION_SECRET = process.env.INVITE_SESSION_SECRET || ''
+
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || ''
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
+const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
 
 // ── MIME map ─────────────────────────────────────────────
 
@@ -153,6 +158,11 @@ async function main() {
     sessionSecret: INVITE_SESSION_SECRET,
     secureCookies: process.env.NODE_ENV === 'production',
   })
+  const feedbackApi = createDeepSeekFeedbackApi({
+    apiKey: DEEPSEEK_API_KEY,
+    model: DEEPSEEK_MODEL,
+    baseUrl: DEEPSEEK_BASE_URL,
+  })
 
   const server = createServer(async (req, res) => {
     try {
@@ -170,6 +180,8 @@ async function main() {
       if (pathname === '/api/realtime-health' && (req.method === 'GET' || req.method === 'HEAD')) {
         return handleHealth(req, res)
       }
+
+      if (await feedbackApi.handleRequest(req, res, pathname)) return
 
       // ── Static files + SPA fallback ──
       const served = await serveStatic(req, res)
@@ -225,6 +237,7 @@ async function main() {
     console.log(`[server] Static files: ${DIST_DIR}`)
     console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
     console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
+    console.log(`[server] Feedback    : ${feedbackApi.configured ? `DeepSeek ${feedbackApi.model}` : 'NOT CONFIGURED'}`)
     console.log(`[server] Invite gate : ${inviteAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
   })
 }

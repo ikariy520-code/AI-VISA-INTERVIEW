@@ -12,8 +12,11 @@ import {
 } from 'react-icons/hi2'
 import type { ChatMessage, UserContext, InterviewRecord } from '../types'
 import type { InterviewSession } from '../../feedback/types'
+import type { FeedbackReport } from '../../feedback/reportViewModel'
+import type { OfficerType } from '../../voice/types'
 import { analyzeInterview } from '../../shared/store/analysisEngine'
 import { generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
+import { requestDeepSeekFeedback } from '../../feedback/deepseekFeedbackClient'
 
 // ========================================
 // Step 5: 面签完成
@@ -24,6 +27,7 @@ interface Props {
   messages: ChatMessage[]
   context: UserContext
   duration: string
+  officerType: OfficerType
 }
 
 const visaTypeLabel: Record<string, string> = {
@@ -36,19 +40,29 @@ const visaTypeLabel: Record<string, string> = {
 
 interface FeedbackResult {
   session: InterviewSession
+  report: FeedbackReport | null
   usedLocalFallback: boolean
 }
 
 async function generateFeedbackResult(record: InterviewRecord): Promise<FeedbackResult> {
-  return { session: analyzeInterview(record), usedLocalFallback: false }
+  const session = analyzeInterview(record)
+  try {
+    const report = await requestDeepSeekFeedback(record)
+    return { session, report, usedLocalFallback: false }
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'UNKNOWN'
+    console.warn('[InterviewComplete] DeepSeek feedback fallback:', code)
+    return { session, report: null, usedLocalFallback: true }
+  }
 }
 
-export default function InterviewComplete({ messages, context, duration }: Props) {
+export default function InterviewComplete({ messages, context, duration, officerType }: Props) {
   const navigate = useNavigate()
   const feedbackPromiseRef = useRef<Promise<FeedbackResult> | null>(null)
   const [feedbackState, setFeedbackState] = useState<'generating' | 'ready' | 'error'>('generating')
   const [feedbackError, setFeedbackError] = useState('')
   const [feedbackSession, setFeedbackSession] = useState<InterviewSession | null>(null)
+  const [feedbackReport, setFeedbackReport] = useState<FeedbackReport | null>(null)
 
   const officerQuestions = messages.filter(m => m.role === 'officer')
   const userAnswers = messages.filter(m => m.role === 'user')
@@ -71,6 +85,7 @@ export default function InterviewComplete({ messages, context, duration }: Props
         time,
         duration,
         visaType: context.visaType,
+        officerType,
         userContext: context,
         messages,
       }
@@ -80,14 +95,11 @@ export default function InterviewComplete({ messages, context, duration }: Props
 
     let cancelled = false
     void feedbackPromiseRef.current.then(
-      ({ session, usedLocalFallback }) => {
+      ({ session, report, usedLocalFallback }) => {
         if (!cancelled) {
           setFeedbackSession(session)
-          setFeedbackError(usedLocalFallback
-            ? session.analysisSource === 'hybrid'
-              ? '部分回答使用豆包 AI 分析，其余回答已使用本地规则补全。'
-              : 'AI 服务未连接，已使用本地规则生成反馈。'
-            : '')
+          setFeedbackReport(report)
+          setFeedbackError(usedLocalFallback ? 'DeepSeek 暂时不可用，已使用本地规则生成基础反馈。' : '')
           setFeedbackState('ready')
         }
       },
@@ -101,24 +113,24 @@ export default function InterviewComplete({ messages, context, duration }: Props
     )
 
     return () => { cancelled = true }
-  }, [context, duration, messages])
+  }, [context, duration, messages, officerType])
 
   // Feedback is the natural next step: once ready, open the detailed report automatically.
   useEffect(() => {
     if (feedbackState !== 'ready' || !feedbackSession) return
     const timer = window.setTimeout(() => {
-      navigate('/feedback', { state: { session: feedbackSession } })
+      navigate('/feedback', { state: { session: feedbackSession, report: feedbackReport } })
     }, 650)
     return () => window.clearTimeout(timer)
-  }, [feedbackSession, feedbackState, navigate])
+  }, [feedbackReport, feedbackSession, feedbackState, navigate])
 
   // 跳转反馈页
   const handleViewFeedback = useCallback(() => {
     if (!feedbackSession) return
     navigate('/feedback', {
-      state: { session: feedbackSession },
+      state: { session: feedbackSession, report: feedbackReport },
     })
-  }, [navigate, feedbackSession])
+  }, [navigate, feedbackReport, feedbackSession])
 
   const handleRetry = useCallback(() => {
     navigate('/practice', { replace: true })

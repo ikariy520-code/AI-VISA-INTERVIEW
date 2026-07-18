@@ -47,6 +47,7 @@ export default function VoiceInterviewRoute() {
         messages={completedInterview.messages}
         context={state.userContext}
         duration={completedInterview.duration}
+        officerType={officerType}
       />
     )
   }

@@ -10,14 +10,19 @@ import {
 import type { InterviewSession } from './types'
 import { normalizeInterviewSession } from './normalizeSession'
 import FeedbackReportView from './components/FeedbackReportView'
-import { buildFeedbackReport, sampleFeedbackReport } from './reportViewModel'
+import { buildFeedbackReport, normalizeFeedbackReport, sampleFeedbackReport } from './reportViewModel'
 
 export default function FeedbackPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const rawSession = (location.state as { session?: InterviewSession } | null)?.session ?? null
+  const routeState = location.state as { session?: InterviewSession; report?: unknown } | null
+  const rawSession = routeState?.session ?? null
   const session = useMemo(() => normalizeInterviewSession(rawSession), [rawSession])
-  const report = useMemo(() => session ? buildFeedbackReport(session) : sampleFeedbackReport, [session])
+  const remoteReport = useMemo(() => normalizeFeedbackReport(routeState?.report), [routeState?.report])
+  const report = useMemo(
+    () => remoteReport ?? (session ? buildFeedbackReport(session) : sampleFeedbackReport),
+    [remoteReport, session],
+  )
 
   return (
     <div className="app-page">

@@ -5,6 +5,7 @@
 
 const IDENTIFIER_PATTERNS = [
   [/\b[A-Z]{3}\d{10}\b/gi, '[REDACTED_PASSPORT]'],
+  [/\b[A-Z]\d{8,9}\b/gi, '[REDACTED_PASSPORT]'],
   [/\bN\d{9}\b/gi, '[REDACTED_SEVIS_ID]'],
   [/\bAA\d{8}\b/gi, '[REDACTED_DS160_ID]'],
   [/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, '[REDACTED_EMAIL]'],
