@@ -9,7 +9,7 @@ import {
 dotenv.config({ path: '.env.local', quiet: true })
 
 const apiKey = process.env.DEEPSEEK_API_KEY?.trim()
-const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-flash'
+const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-pro'
 const endpoint = new URL(process.env.DEEPSEEK_BASE_URL?.trim() || 'https://api.deepseek.com')
 
 if (!apiKey) throw new Error('DeepSeek API key is not configured')
@@ -46,33 +46,45 @@ const input = sanitizeReportRequest({
 
 if (!input) throw new Error('Smoke fixture is invalid')
 
-const response = await fetch(endpoint, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${apiKey}`,
-  },
-  body: JSON.stringify({
-    model,
-    messages: buildF1ReportMessages(input),
-    response_format: { type: 'json_object' },
-    thinking: { type: 'enabled' },
-    reasoning_effort: 'high',
-    max_tokens: 8_000,
-    stream: false,
-  }),
-  signal: AbortSignal.timeout(120_000),
-})
+let parsed
+let report
+let lastError
+let attempts = 0
+for (attempts = 1; attempts <= 2; attempts += 1) {
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: buildF1ReportMessages(input),
+        response_format: { type: 'json_object' },
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'high',
+        max_tokens: 32_000,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    })
 
-const payload = await response.json().catch(() => null)
-if (!response.ok) throw new Error(`DeepSeek final-report request failed with status ${response.status}`)
-const content = getModelMessageContent(payload)
-if (!content) throw new Error('DeepSeek returned no final-report content')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) throw new Error(`DeepSeek final-report request failed with status ${response.status}`)
+    const content = getModelMessageContent(payload)
+    if (!content) throw new Error('DeepSeek returned no final-report content')
+    parsed = JSON.parse(content)
+    report = validateF1StructuredReport(parsed, input)
+    if (report) break
+    lastError = new Error('DeepSeek report did not pass the evidence contract')
+  } catch (error) {
+    lastError = error
+  }
+}
 
-const parsed = JSON.parse(content)
-const report = validateF1StructuredReport(parsed, input)
 if (!report) {
-  console.error(JSON.stringify({
+  if (parsed) console.error(JSON.stringify({
     schemaVersion: parsed?.schemaVersion,
     reportType: parsed?.reportType,
     criteriaVersion: parsed?.criteriaVersion,
@@ -82,6 +94,7 @@ if (!report) {
     summary: parsed?.summary,
     dimensions: parsed?.dimensions?.map(item => ({
       id: item?.id,
+      score: item?.score,
       status: item?.status,
       summary: item?.summary,
       evidence: item?.evidence,
@@ -96,7 +109,7 @@ if (!report) {
     questionReviews: parsed?.questionReviews,
     actionPlan: parsed?.actionPlan,
   }, null, 2))
-  throw new Error('DeepSeek report did not pass the evidence contract')
+  throw lastError || new Error('DeepSeek report did not pass the evidence contract')
 }
 
-console.log(`deepseek-final-report-smoke=passed model=${model} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)
+console.log(`deepseek-final-report-smoke=passed model=${model} attempts=${attempts} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)

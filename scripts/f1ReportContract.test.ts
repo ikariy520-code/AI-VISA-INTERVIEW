@@ -109,6 +109,30 @@ assert.ok(validateF1StructuredReport(validReport, input), 'client contract rejec
 assert.ok(validateServerReport(validReport, input), 'server contract rejected valid evidence-bound report')
 assert.equal(validReport.questionReviews[2].score, 95, 'concise yes/no answer should be allowed to score highly')
 
+const structuredQuestionEvidence: any = structuredClone(validReport)
+structuredQuestionEvidence.questionReviews[0].answerEvidence = {
+  source: 'answer',
+  reference: 'f1_01',
+  quote: 'Example University.',
+}
+assert.ok(validateF1StructuredReport(structuredQuestionEvidence, input), 'client contract rejected grounded structured answer evidence')
+assert.ok(validateServerReport(structuredQuestionEvidence, input), 'server contract rejected grounded structured answer evidence')
+
+const fabricatedQuestionEvidence = structuredClone(structuredQuestionEvidence)
+fabricatedQuestionEvidence.questionReviews[0].answerEvidence.quote = 'A school never supplied by the user.'
+assert.equal(validateF1StructuredReport(fabricatedQuestionEvidence, input), null)
+assert.equal(validateServerReport(fabricatedQuestionEvidence, input), null)
+
+const stringDimensionAction: any = structuredClone(validReport)
+stringDimensionAction.dimensions[0].actions = '核对自己的真实资料并保持前后一致。'
+assert.deepEqual(validateF1StructuredReport(stringDimensionAction, input)?.dimensions[0].actions, ['核对自己的真实资料并保持前后一致。'])
+assert.deepEqual(validateServerReport(stringDimensionAction, input)?.dimensions[0].actions, ['核对自己的真实资料并保持前后一致。'])
+
+const missingDimensionRule = structuredClone(validReport)
+missingDimensionRule.dimensions[0].officialRuleIds = []
+assert.deepEqual(validateF1StructuredReport(missingDimensionRule, input)?.dimensions[0].officialRuleIds, ['DOS_ACADEMIC_PREPARATION'])
+assert.deepEqual(validateServerReport(missingDimensionRule, input)?.dimensions[0].officialRuleIds, ['DOS_ACADEMIC_PREPARATION'])
+
 const fabricatedEvidence = structuredClone(validReport)
 fabricatedEvidence.dimensions[0].evidence[0].quote = 'A school never supplied by the user.'
 assert.equal(validateF1StructuredReport(fabricatedEvidence, input), null)
@@ -135,5 +159,8 @@ const messages = buildF1ReportMessages(input)
 assert.match(messages[0].content, /Never reward length/)
 assert.match(messages[0].content, /A direct yes\/no can fully answer/)
 assert.match(messages[0].content, /never approval\/refusal probability/)
+assert.match(messages[0].content, /answerEvidence must be the exact original answer text/)
+assert.match(messages[0].content, /actions must be a JSON array/)
+assert.match(messages[0].content, /must contain its own numeric score/)
 
 console.log('f1-report-contract=passed')

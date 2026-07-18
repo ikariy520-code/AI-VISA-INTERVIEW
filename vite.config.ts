@@ -8,7 +8,7 @@ export default defineConfig(({ command, mode }) => {
   const doubaoAppId = env.DOUBAO_APP_ID || ''
   const doubaoAccessKey = env.DOUBAO_ACCESS_KEY || ''
   const deepseekApiKey = env.DEEPSEEK_API_KEY || ''
-  const deepseekModel = env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
+  const deepseekModel = env.DEEPSEEK_MODEL || 'deepseek-v4-pro'
   const isLocalDev = command === 'serve'
 
   return {

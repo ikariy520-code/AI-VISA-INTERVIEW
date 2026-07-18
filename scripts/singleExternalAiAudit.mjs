@@ -56,6 +56,28 @@ const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
 assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')
 assert.ok(reportHandler.includes("provider: 'deepseek'"), 'DeepSeek report source marker is missing')
 assert.ok(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), 'DeepSeek report rate limiting is missing')
+assert.ok(reportHandler.includes('MAX_OUTPUT_TOKENS_PER_ATTEMPT'), 'DeepSeek V4 Pro report output cap is missing')
+assert.ok(reportHandler.includes('MAX_IP_COMPLETION_TOKENS_PER_WINDOW'), 'per-IP DeepSeek token budget is missing')
+assert.ok(reportHandler.includes('MAX_GLOBAL_COMPLETION_TOKENS_PER_WINDOW'), 'global DeepSeek token budget is missing')
+assert.ok(reportHandler.includes('REPORT_ALREADY_IN_PROGRESS'), 'duplicate in-flight report protection is missing')
+assert.ok(reportHandler.includes('CLIENT_DISCONNECTED'), 'client disconnect cancellation is missing')
+assert.ok(reportHandler.includes('cached: true'), 'completed report reuse is missing')
+
+const deepSeekModelFiles = [
+  '.env.example',
+  '.env.production.example',
+  'README.md',
+  'vite.config.ts',
+  'scripts/deepseekConnectivitySmoke.mjs',
+  'scripts/finalReportSmoke.mjs',
+  'server/index.mjs',
+  'server/reportApi.mjs',
+]
+for (const file of deepSeekModelFiles) {
+  const content = readFileSync(join(root, file), 'utf8')
+  assert.equal(content.includes('deepseek-v4-flash'), false, `DeepSeek V4 Flash is forbidden in ${file}`)
+  assert.ok(content.includes('deepseek-v4-pro'), `DeepSeek V4 Pro is missing from ${file}`)
+}
 
 const reportContract = readFileSync(join(root, 'server/shared/f1ReportContract.mjs'), 'utf8')
 assert.ok(reportContract.includes('F1_OFFICIAL_CRITERIA'), 'official F-1 criteria are missing from the report contract')

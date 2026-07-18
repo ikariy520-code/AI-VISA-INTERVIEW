@@ -38,7 +38,7 @@ const INVITE_CODES = process.env.INVITE_CODES || ''
 const INVITE_SESSION_SECRET = process.env.INVITE_SESSION_SECRET || ''
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || ''
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro'
 const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || ''
 
 // ── MIME map ─────────────────────────────────────────────

@@ -42,7 +42,7 @@ DOUBAO_REALTIME_URL=wss://openspeech.bytedance.com/api/v3/realtime/dialogue
 
 DEEPSEEK_API_KEY=DeepSeek API Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_MODEL=deepseek-v4-pro
 
 VITE_DEV_PORT=5173
 ```
