@@ -19,6 +19,13 @@ import type {
   ContentAnalysis, ContentDimension,
   AnswerFeedback,
 } from '../../feedback/types'
+import { F1_QUESTION_CATALOG } from '../../practice/data/f1QuestionCatalog'
+import { buildSafeInterviewContext } from '../../practice/services/realtimeInterviewPrompt'
+import {
+  sanitizeReportRequest,
+  validateF1StructuredReport,
+  type InterviewReportAnswer,
+} from '../../../shared/doubaoReport'
 
 function classifyDialogueAct(answer: string) {
   const normalized = answer.trim().toLowerCase().replace(/[.!?]+$/g, '').trim()
@@ -402,75 +409,95 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
   }
 }
 
-// ========================================
-// Legacy compatibility entry point; currently uses the local rule engine.
-// ========================================
+// ---- One evidence-bound Ark report call after the complete F-1 interview ----
 
+const AI_REPORT_ENDPOINT = '/api/ai-report'
 
-interface AIAnswerResult {
-  index?: number
-  content?: {
-    logic?: { score: number; comment: string }
-    specificity?: { score: number; comment: string }
-    persuasion?: { score: number; comment: string }
-    ties?: { score: number; comment: string }
-  }
-  voice?: {
-    confidence?: number
-    emotion?: string
-    description?: string
-  }
-  verdict?: string
-  summary?: string
-  suggestions?: string[]
+function normalizeQuestionText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 }
 
-interface AIReportResult {
-  overallScore?: number
-  answers?: AIAnswerResult[]
+function identifyF1Question(questionText: string) {
+  const normalized = normalizeQuestionText(questionText)
+  return F1_QUESTION_CATALOG.find(question => normalized.includes(normalizeQuestionText(question.text)))
 }
 
-const normalizeScore = (value: unknown, fallback = 3) => typeof value === 'number' && Number.isFinite(value)
-  ? Math.max(1, Math.min(5, Math.round(value)))
-  : fallback
+export function buildF1ReportRequest(record: InterviewRecord) {
+  if (record.visaType !== 'F1') return null
+  const answers: InterviewReportAnswer[] = extractQAPairs(record.messages).map((pair, offset) => {
+    const question = identifyF1Question(pair.question)
+    if (!question) throw new Error('F1_REPORT_UNKNOWN_QUESTION')
+    return {
+      index: offset + 1,
+      questionId: question.id,
+      question: question.text,
+      answer: pair.answer,
+      timestamp: pair.timestamp,
+    }
+  })
+  return sanitizeReportRequest({
+    visaType: 'F1',
+    safeContext: buildSafeInterviewContext(record.userContext),
+    answers,
+  })
+}
 
-function mapAIAnswer(parsed: AIAnswerResult, fallback: QAPair['feedback']): QAPair['feedback'] {
-  const voiceConfidence = typeof parsed.voice?.confidence === 'number' && Number.isFinite(parsed.voice.confidence)
-    ? Math.max(1, Math.min(100, Math.round(parsed.voice.confidence)))
-    : 50
-  const allowedVerdicts = new Set(['favorable', 'neutral', 'unfavorable'])
-  const allowedEmotions = new Set(['calm', 'nervous', 'confident', 'hesitant', 'tense', 'natural'])
-  const dimensions = [
-    ['逻辑', parsed.content?.logic],
-    ['具体性', parsed.content?.specificity],
-    ['说服力', parsed.content?.persuasion],
-    ['约束力', parsed.content?.ties],
-  ] as const
-
-  return {
-    verdict: allowedVerdicts.has(parsed.verdict ?? '') ? parsed.verdict as AnswerFeedback['verdict'] : fallback.verdict,
-    voice: {
-      ...fallback.voice,
-      emotion: {
-        primary: allowedEmotions.has(parsed.voice?.emotion ?? '') ? parsed.voice?.emotion as VoiceEmotion['primary'] : 'natural',
-        stability: Math.min(5, Math.round(2 + voiceConfidence * 0.03)),
-        description: parsed.voice?.description?.trim() || fallback.voice.emotion.description,
+export function createUnavailableInterviewSession(record: InterviewRecord): InterviewSession {
+  const visaLabel: Record<string, string> = {
+    B2: 'B2 旅游签证', B1: 'B1 商务签证', F1: 'F1 学术签证',
+    H1B: 'H1B 工作签证', L1: 'L1 跨国经理',
+  }
+  const transcript: QAPair[] = extractQAPairs(record.messages).map(pair => ({
+    ...pair,
+    feedback: {
+      verdict: 'neutral',
+      voice: {
+        metrics: { wordsPerMinute: 0, longestPause: 0, fillerCount: 0, fillers: [], volumeStability: 1, paceStability: 1 },
+        emotion: { primary: 'natural', stability: 1, description: '分析服务暂不可用。' },
+        audioUrl: null,
+        duration: 0,
       },
+      content: { dimensions: [], summary: '分析服务暂不可用。', suggestions: [] },
     },
-    content: {
-      dimensions: dimensions.map(([label, item], index) => ({
-        label,
-        score: normalizeScore(item?.score, fallback.content.dimensions[index]?.score ?? 3),
-        comment: item?.comment?.trim() || fallback.content.dimensions[index]?.comment || '',
-      })),
-      summary: parsed.summary?.trim() || fallback.content.summary,
-      suggestions: Array.isArray(parsed.suggestions)
-        ? parsed.suggestions.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 2)
-        : fallback.content.suggestions,
-    },
+  }))
+  return {
+    id: record.id,
+    date: record.date,
+    time: record.time,
+    duration: record.duration,
+    title: `${visaLabel[record.visaType] ?? record.visaType} · ${record.userContext.purpose || '面签练习'}`,
+    overallScore: null,
+    transcript,
+    analysisSource: 'unavailable',
+    aiScoredAnswers: 0,
+    totalScoredAnswers: 0,
   }
 }
 
 export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<InterviewSession> {
-  return analyzeInterview(record)
+  if (record.visaType !== 'F1') return analyzeInterview(record)
+  const input = buildF1ReportRequest(record)
+  if (!input) throw new Error('F1_REPORT_NO_VALID_ANSWERS')
+
+  const response = await fetch(AI_REPORT_ENDPOINT, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(100_000),
+  })
+  if (!response.ok) throw new Error(`F1_REPORT_FAILED_${response.status}`)
+  const payload = await response.json() as { report?: unknown }
+  const structuredReport = validateF1StructuredReport(payload.report, input)
+  if (!structuredReport) throw new Error('F1_REPORT_INVALID')
+
+  const transcriptSession = createUnavailableInterviewSession(record)
+  return {
+    ...transcriptSession,
+    overallScore: structuredReport.overallScore / 20,
+    analysisSource: 'doubao',
+    aiScoredAnswers: input.answers.length,
+    totalScoredAnswers: input.answers.length,
+    structuredReport,
+  }
 }

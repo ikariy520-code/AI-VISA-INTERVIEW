@@ -19,10 +19,6 @@ function collect(path) {
 for (const target of scanTargets) collect(target)
 
 const forbidden = [
-  ['/api/ai-report', 'legacy AI report route'],
-  ['ARK_API_KEY', 'Ark text API credential'],
-  ['ARK_TEXT_MODEL', 'Ark text model'],
-  ['/chat/completions', 'standalone text generation API'],
   ['api.deepseek.com', 'DeepSeek API'],
   ['api.openai.com', 'OpenAI API'],
   ['volc.bigasr', 'standalone ASR resource'],
@@ -40,12 +36,30 @@ for (const file of files) {
   }
 }
 
-assert.equal(existsSync(join(root, 'server/reportApi.mjs')), false)
-assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false)
+assert.equal(existsSync(join(root, 'server/reportApi.mjs')), true, 'production final-report route is missing')
+assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), true, 'local final-report bridge is missing')
 
 const realtimeFiles = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))
   .filter(item => item.content.includes('openspeech.bytedance.com/api/v3/realtime/dialogue'))
 assert.ok(realtimeFiles.length >= 2, 'Realtime end-to-end voice endpoint is missing')
 
-console.log('single-external-ai-audit=passed')
+const arkFiles = files
+  .map(file => ({ file, content: readFileSync(file, 'utf8') }))
+  .filter(item => item.content.includes('ark.cn-beijing.volces.com/api/v3/chat/completions'))
+assert.deepEqual(
+  arkFiles.map(item => relative(root, item.file)).sort(),
+  ['local\\doubaoTextBridge.ts', 'server\\reportApi.mjs'],
+  'Ark text API must only be called by local and production final-report handlers',
+)
+
+const reportCallers = files
+  .map(file => ({ file, content: readFileSync(file, 'utf8') }))
+  .filter(item => item.content.includes('fetch(AI_REPORT_ENDPOINT'))
+assert.deepEqual(reportCallers.map(item => relative(root, item.file)), ['src\\modules\\shared\\store\\analysisEngine.ts'])
+
+const analysisEngine = readFileSync(join(root, 'src/modules/shared/store/analysisEngine.ts'), 'utf8')
+assert.ok(analysisEngine.includes('overallScore: null'), 'unavailable report must not contain a synthetic score')
+assert.equal(analysisEngine.includes('...analyzeInterview(record)'), false, 'unavailable F1 report must not run the local scoring engine')
+
+console.log('doubao-two-channel-architecture-audit=passed')

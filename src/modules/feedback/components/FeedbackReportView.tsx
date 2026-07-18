@@ -15,7 +15,8 @@ import {
 } from 'react-icons/hi2'
 import type { FeedbackReport, QuestionReview, ReportDimension } from '../reportViewModel'
 
-const scoreTone = (score: number) => {
+const scoreTone = (score: number | null) => {
+  if (score === null) return { text: 'text-[#6e6e73]', bar: 'bg-[#a1a1a6]', panel: 'bg-[#f5f5f7]' }
   if (score >= 80) return { text: 'text-[#147a58]', bar: 'bg-[#158f65]', panel: 'bg-[#eaf8f2]' }
   if (score >= 65) return { text: 'text-[#8a5818]', bar: 'bg-[#d58a20]', panel: 'bg-[#fff6e6]' }
   return { text: 'text-[#b53a34]', bar: 'bg-[#d84a43]', panel: 'bg-[#fff0ef]' }
@@ -45,6 +46,15 @@ function DimensionCard({ dimension }: { dimension: ReportDimension }) {
       </div>
       <p className="mt-4 text-[13px] font-medium leading-6 text-[#424245]">{dimension.summary}</p>
       <p className="mt-2 text-[12px] leading-5 text-[#86868b]">{dimension.evidence}</p>
+      {dimension.officialSources && dimension.officialSources.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {dimension.officialSources.map(source => (
+            <a key={source.url + source.title} href={source.url} target="_blank" rel="noreferrer" className="rounded-full bg-[#f0f6ff] px-2.5 py-1 text-[10px] font-semibold text-[#2769a8] hover:underline">
+              查看官方依据
+            </a>
+          ))}
+        </div>
+      )}
     </article>
   )
 }
@@ -70,7 +80,7 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
         </span>
         <span className="flex flex-shrink-0 items-center gap-2">
           <span className={`hidden rounded-full px-2.5 py-1 text-[11px] font-semibold sm:inline-flex ${tone.panel} ${tone.text}`}>
-            {review.verdict} · {review.score}
+            {review.verdict}{review.score === null ? '' : ` · ${review.score}`}
           </span>
           <HiOutlineChevronDown className={`h-4 w-4 text-[#86868b] transition-transform ${open ? 'rotate-180' : ''}`} />
         </span>
@@ -89,7 +99,11 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
                 <p className="mt-2 text-[13px] leading-6 text-[#424245]">{review.answer}</p>
               </div>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {review.score === null ? (
+                <div className="mt-4 rounded-[18px] border border-amber-200/60 bg-[#fffbf2] p-4 text-[12px] leading-5 text-[#755f3b]">
+                  分析服务暂不可用，本题只保留原始问答，不生成推测性结论。
+                </div>
+              ) : <><div className="mt-5 grid gap-4 md:grid-cols-2">
                 <div className="rounded-[18px] border border-emerald-200/60 bg-[#f5fbf8] p-4">
                   <p className="flex items-center gap-2 text-[12px] font-semibold text-[#147a58]"><HiOutlineCheckCircle className="h-4 w-4" />做得好的地方</p>
                   <ul className="mt-3 space-y-2">
@@ -109,6 +123,7 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
                 <p className="mt-2 text-[13px] leading-6 text-[#315575]">{review.betterAnswer}</p>
                 <p className="mt-2 text-[10px] leading-4 text-[#7892aa]">请替换为你的真实信息，不要背诵或编造样例中的事实。</p>
               </div>
+              </>}
             </div>
       </motion.div>
     </article>
@@ -124,6 +139,24 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-blue-200/70 bg-[#eef6ff] px-4 py-3 text-[#315f8d]">
           <HiOutlineSparkles className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <p className="text-[12px] leading-5"><span className="font-semibold">这是反馈页面样例。</span> 其中分数和内容均为演示数据，用来确认信息层级与操作方式，不代表你的真实评估。</p>
+        </div>
+      )}
+      {report.source === 'doubao' && (
+        <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-emerald-200/70 bg-[#eefaf5] px-4 py-3 text-[#216b52]">
+          <HiOutlineShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <p className="text-[12px] leading-5"><span className="font-semibold">本报告由豆包方舟完成综合分析。</span> 结论依据脱敏背景、实际回答和报告中标注的官方规则；它用于练习准备，不预测签证结果。</p>
+        </div>
+      )}
+      {report.source === 'local' && (
+        <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-blue-200/70 bg-[#f3f8ff] px-4 py-3 text-[#315f8d]">
+          <HiOutlineShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <p className="text-[12px] leading-5"><span className="font-semibold">这是本地基础检查。</span> 当前只用于尚未接入综合报告的签证类型，不应视为豆包分析或官方结论。</p>
+        </div>
+      )}
+      {report.source === 'unavailable' && (
+        <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-amber-200/70 bg-[#fff8ea] px-4 py-3 text-[#855817]">
+          <HiOutlineExclamationTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <p className="text-[12px] leading-5"><span className="font-semibold">豆包综合分析暂不可用。</span> 为避免误导，本页只展示本次问答，不显示本地推测性评分。</p>
         </div>
       )}
 
@@ -148,13 +181,13 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
             <div>
               <p className={`text-[11px] font-semibold uppercase tracking-[0.13em] ${tone.text}`}>本次准备度</p>
               <div className="mt-2 flex items-end gap-2">
-                <span className={`text-[58px] font-semibold leading-none tracking-[-0.07em] tabular-nums ${tone.text}`}>{report.overallScore}</span>
-                <span className={`mb-1 text-[13px] font-semibold ${tone.text}`}>/ 100</span>
+                <span className={`text-[58px] font-semibold leading-none tracking-[-0.07em] tabular-nums ${tone.text}`}>{report.overallScore ?? '—'}</span>
+                {report.overallScore !== null && <span className={`mb-1 text-[13px] font-semibold ${tone.text}`}>/ 100</span>}
               </div>
             </div>
             <div className="mt-7">
               <p className={`text-[15px] font-semibold ${tone.text}`}>{report.readiness}</p>
-              <p className={`mt-1 text-[11px] leading-5 opacity-75 ${tone.text}`}>分数用于安排练习优先级，不代表签证结果。</p>
+              <p className={`mt-1 text-[11px] leading-5 opacity-75 ${tone.text}`}>{report.overallScore === null ? '未生成任何推测性分数。' : '分数用于安排练习优先级，不代表签证结果。'}</p>
             </div>
           </div>
         </div>
@@ -162,16 +195,16 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
 
       <nav className="print:hidden sticky top-[76px] z-20 flex gap-1 overflow-x-auto rounded-full border border-black/[0.08] bg-white/90 p-1.5 shadow-sm backdrop-blur-xl">
         {[
-          ['#report-overview', '表现总览'],
-          ['#report-dimensions', '六项能力'],
+          ...(report.strengths.length > 0 ? [['#report-overview', '表现总览']] : []),
+          ...(report.dimensions.length > 0 ? [['#report-dimensions', '六项能力']] : []),
           ['#report-questions', '逐题复盘'],
-          ['#report-plan', '练习计划'],
+          ...(report.actionPlan.length > 0 ? [['#report-plan', '练习计划']] : []),
         ].map(([href, label]) => (
           <a key={href} href={href} className="min-w-max flex-1 rounded-full px-4 py-2 text-center text-[12px] font-semibold text-[#6e6e73] transition-colors hover:bg-[#f5f5f7] hover:text-[#1d1d1f]">{label}</a>
         ))}
       </nav>
 
-      <section id="report-overview" className="scroll-mt-32 grid gap-5 md:grid-cols-2">
+      {report.strengths.length > 0 && report.priorities.length > 0 && <section id="report-overview" className="scroll-mt-32 grid gap-5 md:grid-cols-2">
         <div className="app-card p-5 sm:p-6">
           <h2 className="flex items-center gap-2 text-[16px] font-semibold text-[#1d1d1f]"><HiOutlineShieldCheck className="h-5 w-5 text-[#158f65]" />这次做得好的地方</h2>
           <div className="mt-5 space-y-5">
@@ -195,9 +228,9 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
             ))}
           </div>
         </div>
-      </section>
+      </section>}
 
-      <section id="report-dimensions" className="scroll-mt-32 pt-6">
+      {report.dimensions.length > 0 && <section id="report-dimensions" className="scroll-mt-32 pt-6">
         <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">{report.evaluationLabel}</p><h2 className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">六项核心能力</h2></div>
           <p className="max-w-md text-[11px] leading-5 text-[#86868b]">{report.dimensionIntro}</p>
@@ -205,7 +238,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {report.dimensions.map(dimension => <DimensionCard key={dimension.id} dimension={dimension} />)}
         </div>
-      </section>
+      </section>}
 
       <section id="report-questions" className="scroll-mt-32 pt-6">
         <div className="mb-5">
@@ -218,7 +251,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         </div>
       </section>
 
-      <section id="report-plan" className="scroll-mt-32 pt-6">
+      {report.actionPlan.length > 0 && <section id="report-plan" className="scroll-mt-32 pt-6">
         <div className="app-card overflow-hidden">
           <div className="border-b border-black/[0.06] bg-[#fbfbfd] px-5 py-5 sm:px-7">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">Next practice</p>
@@ -234,7 +267,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
             ))}
           </div>
         </div>
-      </section>
+      </section>}
 
       <div className="flex items-start gap-3 rounded-[18px] border border-black/[0.07] bg-white px-4 py-4 text-[#6e6e73]">
         <HiOutlineArrowTrendingUp className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#0071e3]" />
