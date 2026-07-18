@@ -1,6 +1,7 @@
 import type { InterviewSession, QAPair } from './types'
+import { F1_OFFICIAL_CRITERIA } from '../practice/data/f1OfficialCriteria'
 
-export type ReportSource = 'sample' | 'deepseek' | 'doubao' | 'hybrid' | 'local'
+export type ReportSource = 'sample' | 'deepseek' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
 
 export interface ReportDimension {
   id: string
@@ -9,6 +10,7 @@ export interface ReportDimension {
   status: '稳固' | '需补充' | '优先改进'
   summary: string
   evidence: string
+  officialSources?: Array<{ title: string; url: string }>
 }
 
 export interface ReportInsight {
@@ -20,8 +22,8 @@ export interface QuestionReview {
   id: string
   question: string
   answer: string
-  score: number
-  verdict: '回答有效' | '基本回答' | '需要重答'
+  score: number | null
+  verdict: '回答有效' | '基本回答' | '需要重答' | '待分析'
   summary: string
   didWell: string[]
   improve: string[]
@@ -46,7 +48,7 @@ export interface FeedbackReport {
   profile: string
   evaluationLabel: string
   dimensionIntro: string
-  overallScore: number
+  overallScore: number | null
   readiness: string
   headline: string
   summary: string
@@ -111,7 +113,7 @@ export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
     }
   }).filter((item): item is ReportInsight => item !== null).slice(0, 3)
 
-  const questionReviews = rawReviews.map((item, index) => {
+  const questionReviews = rawReviews.map<QuestionReview | null>((item, index) => {
     if (!isRecord(item)) return null
     const score = normalizedScore(item.score, 55)
     const verdict = ['回答有效', '基本回答', '需要重答'].includes(String(item.verdict))
@@ -142,7 +144,7 @@ export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
   }).filter((item): item is PracticeStep => item !== null).slice(0, 3)
   if (actionPlan.length !== 3) return null
 
-  const source = ['deepseek', 'doubao', 'hybrid', 'local', 'sample'].includes(String(value.source))
+  const source = ['deepseek', 'doubao', 'hybrid', 'local', 'sample', 'unavailable'].includes(String(value.source))
     ? value.source as ReportSource
     : 'deepseek'
 
@@ -181,6 +183,98 @@ const dimensionStatus = (score: number): ReportDimension['status'] => {
   if (score >= 80) return '稳固'
   if (score >= 65) return '需补充'
   return '优先改进'
+}
+
+const officialRuleMap = new Map(F1_OFFICIAL_CRITERIA.map(rule => [rule.id, rule]))
+
+function buildStructuredFeedbackReport(session: InterviewSession): FeedbackReport | null {
+  const report = session.structuredReport
+  if (!report) return null
+  return {
+    id: session.id,
+    source: 'deepseek',
+    title: session.title,
+    subtitle: '模拟面签证据报告',
+    date: session.date,
+    time: session.time,
+    duration: session.duration,
+    questionCount: session.transcript.length,
+    profile: `DeepSeek 约束分析 · 官方依据 ${report.criteriaVersion}`,
+    evaluationLabel: 'F-1 evidence review',
+    dimensionIntro: '根据脱敏背景、实际回答和当前版本的美国国务院公开依据检查准备情况。',
+    overallScore: report.overallScore,
+    readiness: report.readiness,
+    headline: report.headline,
+    summary: report.summary,
+    dimensions: report.dimensions.map(dimension => ({
+      id: dimension.id,
+      label: dimension.label,
+      score: dimension.score,
+      status: dimension.status === 'stable' ? '稳固' : dimension.status === 'needs_evidence' ? '需补充' : '优先改进',
+      summary: dimension.summary,
+      evidence: [
+        ...dimension.evidence.map(item => `依据：${item.quote}`),
+        ...dimension.officialRuleIds.map(id => officialRuleMap.get(id)?.title).filter(Boolean).map(title => `官方依据：${title}`),
+        `判断：${dimension.reasoning}`,
+      ].join(' '),
+      officialSources: dimension.officialRuleIds
+        .map(id => officialRuleMap.get(id))
+        .filter((rule): rule is NonNullable<typeof rule> => Boolean(rule))
+        .map(rule => ({ title: rule.title, url: rule.url })),
+    })),
+    strengths: report.strengths.map(item => ({ title: item.title, detail: item.detail })),
+    priorities: report.priorities.map(item => ({ title: item.title, detail: item.detail })),
+    questionReviews: report.questionReviews.map(review => {
+      const qa = session.transcript[review.index - 1]
+      return {
+        id: qa?.id ?? `q${review.index}`,
+        question: qa?.question ?? review.questionId,
+        answer: qa?.answer ?? review.answerEvidence,
+        score: review.score,
+        verdict: review.verdict === 'complete' ? '回答有效' : review.verdict === 'partial' ? '基本回答' : '需要重答',
+        summary: review.summary,
+        didWell: review.strengths.length > 0 ? review.strengths : ['本题已经留下可供复盘的真实回答。'],
+        improve: review.improvements.length > 0 ? review.improvements : ['根据报告指出的证据缺口继续准备真实信息。'],
+        betterAnswer: review.preparationDirection,
+      } satisfies QuestionReview
+    }),
+    actionPlan: report.actionPlan,
+  }
+}
+
+function buildUnavailableFeedbackReport(session: InterviewSession): FeedbackReport {
+  return {
+    id: session.id,
+    source: 'unavailable',
+    title: session.title,
+    subtitle: '本次面签问答记录',
+    date: session.date,
+    time: session.time,
+    duration: session.duration,
+    questionCount: session.transcript.length,
+    profile: 'DeepSeek 综合分析暂不可用',
+    evaluationLabel: 'Transcript only',
+    dimensionIntro: '为避免产生没有依据的判断，本页不显示本地推测性评分。',
+    overallScore: null,
+    readiness: '等待重新分析',
+    headline: '本次问答已经保留，但综合分析暂时没有完成。',
+    summary: '你仍可查看本次问题和回答；请稍后重新练习，或在服务恢复后重新生成报告。',
+    dimensions: [],
+    strengths: [],
+    priorities: [],
+    questionReviews: session.transcript.map(qa => ({
+      id: qa.id,
+      question: qa.question,
+      answer: qa.answer,
+      score: null,
+      verdict: '待分析',
+      summary: 'DeepSeek 综合分析暂不可用，本题暂不生成评价。',
+      didWell: [],
+      improve: [],
+      betterAnswer: '请保留自己的真实回答；当前没有生成参考方向。',
+    })),
+    actionPlan: [],
+  }
 }
 
 function answerScore(qa: QAPair) {
@@ -237,7 +331,10 @@ function buildLiveQuestionReview(qa: QAPair): QuestionReview {
 }
 
 export function buildFeedbackReport(session: InterviewSession): FeedbackReport {
-  const overallScore = clampScore(session.overallScore * 20)
+  if (session.analysisSource === 'unavailable') return buildUnavailableFeedbackReport(session)
+  const structured = buildStructuredFeedbackReport(session)
+  if (structured) return structured
+  const overallScore = clampScore((session.overallScore ?? 3) * 20)
   const isF1 = /\bF[\s-]?1\b/i.test(session.title)
   const dimensions = isF1
     ? [
@@ -289,7 +386,7 @@ export function buildFeedbackReport(session: InterviewSession): FeedbackReport {
     questionReviews: session.transcript.map(buildLiveQuestionReview),
     actionPlan: [
       { label: '第 1 步', title: `先补齐「${bottom[0]?.label ?? '薄弱项'}」证据`, detail: '把真实的名称、时间、金额、课程或职业路径写成要点，避免临场编造。' },
-      { label: '第 2 步', title: '重答低分问题', detail: '每题控制在 20–30 秒，先回答结论，再给 1–2 个具体事实。' },
+      { label: '第 2 步', title: '重答低分问题', detail: '先直接回答当前问题；只有问题本身需要时，再补充最相关的真实事实。' },
       { label: '第 3 步', title: '做一次一致性复核', detail: '对照 DS-160、I-20 和资金材料，确保学校、专业、费用与毕业计划前后一致。' },
     ],
   }
@@ -310,7 +407,7 @@ export const sampleFeedbackReport: FeedbackReport = {
   overallScore: 72,
   readiness: '接近就绪',
   headline: '学习动机基本清楚，但资金来源和毕业后的回国路径还不够具体。',
-  summary: '你能直接回答多数问题，也能说明专业方向。当前最影响可信度的不是英语，而是关键事实缺少数字、时间和具体计划。',
+  summary: '你能直接回答多数问题，也能说明专业方向。当前练习重点是核对完整资金链，并让毕业后的职业路径与学习计划相互支持。',
   dimensions: [
     { id: 'eligibility', label: '身份资格', score: 86, status: '稳固', summary: '能够说清学校、项目和开学时间。', evidence: '学校与项目名称前后一致，I-20 信息表达清楚。' },
     { id: 'authenticity', label: '学习真实性', score: 78, status: '需补充', summary: '学习目的合理，但“为什么现在读”还比较笼统。', evidence: '提到了数据分析方向，但没有说明当前能力缺口。' },
@@ -321,10 +418,10 @@ export const sampleFeedbackReport: FeedbackReport = {
   ],
   strengths: [
     { title: '核心申请信息准确', detail: '学校、专业和开学时间能够快速回答，没有出现前后矛盾。' },
-    { title: '表达自然直接', detail: '多数回答在 20 秒内完成，较少使用无关铺垫。' },
+    { title: '表达自然直接', detail: '多数回答先回应当前问题，没有使用无关铺垫。' },
   ],
   priorities: [
-    { title: '资金来源缺少可核验细节', detail: '需要同时说明谁资助、稳定收入来源、可用金额以及是否覆盖 I-20 费用。' },
+    { title: '资金覆盖尚未完整核验', detail: '资助人问题已经回答；下一轮应单独练习费用、收入和可用资金等对应问题。' },
     { title: '回国计划仍像通用答案', detail: '补充目标城市、行业、岗位，以及该项目如何帮助你回国后的职业路径。' },
   ],
   questionReviews: [
@@ -335,20 +432,20 @@ export const sampleFeedbackReport: FeedbackReport = {
       score: 67,
       verdict: '基本回答',
       summary: '回答了选择，但“good program”过于通用，不能体现你做过具体比较。',
-      didWell: ['直接回应了问题，没有绕开学校选择。', '回答长度适中。'],
+      didWell: ['直接回应了问题，没有绕开学校选择。'],
       improve: ['说出 1–2 门与你目标相关的课程或项目特色。', '解释这些资源如何补足你现阶段的能力缺口。'],
       betterAnswer: 'I chose this university because its applied data science program combines statistical modeling with industry projects. The capstone course is especially relevant to my goal of working in risk analytics after I return to China.',
     },
     {
       id: 'sample-q2',
       question: 'Who will pay for your education?',
-      answer: 'My parents will support me. They have enough savings.',
-      score: 52,
-      verdict: '需要重答',
-      summary: '给出了资助人，但缺少收入来源、金额和费用覆盖关系。',
-      didWell: ['资助人身份清楚。'],
-      improve: ['说明父母的职业与稳定收入来源。', '用真实金额解释存款如何覆盖 I-20 所列第一年费用。', '不要使用“enough”代替数字。'],
-      betterAnswer: 'My parents will sponsor me. Their combined annual income is [真实金额], and we have prepared [真实金额] in education savings, which covers the first-year cost listed on my I-20. I will provide the supporting bank and income documents.',
+      answer: 'My parents will support my education.',
+      score: 98,
+      verdict: '回答有效',
+      summary: '直接、完整地回答了当前问题，资助人身份清楚。',
+      didWell: ['资助人身份明确，并且没有混入其他问题的答案。'],
+      improve: [],
+      betterAnswer: '本题保持当前回答即可。父母职业与收入、总费用和资金证明应在对应问题被问到时，依据真实材料回答。',
     },
     {
       id: 'sample-q3',
@@ -363,7 +460,7 @@ export const sampleFeedbackReport: FeedbackReport = {
     },
   ],
   actionPlan: [
-    { label: '今天', title: '补齐资金数字', detail: '把 I-20 年费用、家庭年收入和可用存款写在一张卡片上，练到能在 20 秒内说清。' },
+    { label: '今天', title: '补齐资金数字', detail: '把 I-20 年费用、家庭年收入和可用存款写在一张卡片上，确保数字真实且相互匹配。' },
     { label: '下一轮', title: '重练 3 个低分问题', detail: '学校选择、资金来源、毕业计划各录音 3 次；每次只保留最具体的两个事实。' },
     { label: '面签前', title: '核对材料一致性', detail: '逐项对照 DS-160、I-20 与资金证明，确保名称、日期、金额和计划没有冲突。' },
   ],

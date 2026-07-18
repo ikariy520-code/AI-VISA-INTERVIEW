@@ -8,7 +8,8 @@ import TranscriptBubble from './TranscriptBubble'
 // 会话元信息 + 完整对话记录 + 逐条反馈
 // ========================================
 
-function overallLabel(score: number) {
+function overallLabel(score: number | null) {
+  if (score === null) return { text: '等待分析', color: 'text-[#6e6e73] bg-[#f5f5f7]', ring: 'ring-black/10' }
   if (score >= 4) return { text: '表现稳定', color: 'text-[#147a58] bg-[#eaf8f2]', ring: 'ring-emerald-200/70' }
   if (score >= 3) return { text: '继续巩固', color: 'text-[#8a5818] bg-[#fff6e6]', ring: 'ring-amber-200/70' }
   return { text: '优先加强', color: 'text-[#b53a34] bg-[#fff0ef]', ring: 'ring-red-200/70' }
@@ -42,7 +43,7 @@ export default function SessionDetail({ session }: { session: InterviewSession }
           {/* 综合评分 */}
           <div className={`flex min-w-[132px] items-center justify-between gap-4 rounded-[20px] px-4 py-3 ring-1 ${label.color} ${label.ring}`}>
             <div><p className="text-[10px] font-semibold uppercase tracking-[0.1em] opacity-75">综合表现</p><p className="mt-1 text-[12px] font-semibold">{label.text}</p></div>
-            <p className="text-[28px] font-semibold tracking-[-0.05em]">{session.overallScore.toFixed(1)}</p>
+            <p className="text-[28px] font-semibold tracking-[-0.05em]">{session.overallScore?.toFixed(1) ?? '—'}</p>
           </div>
         </div>
       </div>

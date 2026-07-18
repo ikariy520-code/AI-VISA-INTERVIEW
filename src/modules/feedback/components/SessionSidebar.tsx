@@ -17,7 +17,8 @@ interface SessionSidebarProps {
   searchQuery?: string
 }
 
-function scoreBar(score: number) {
+function scoreBar(score: number | null) {
+  if (score === null) return <span className="text-[11px] font-semibold text-slate-400">待分析</span>
   const pct = (score / 5) * 100
   const color = score >= 4 ? 'bg-emerald-500' : score >= 3 ? 'bg-amber-500' : 'bg-red-400'
   return (

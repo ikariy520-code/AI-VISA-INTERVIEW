@@ -1,7 +1,7 @@
 import type { UserContext } from '../types'
 import type { OfficerType } from '../../voice/types'
 import { officerTypes } from '../../voice/data/officerTypes'
-import { redactPotentialIdentifiers } from '../../../shared/doubaoReport'
+import { redactPotentialIdentifiers } from '../../../shared/f1ReportContract'
 import { getF1Question } from '../data/f1QuestionCatalog'
 
 const trimText = (value: string | undefined, maxLength: number) =>

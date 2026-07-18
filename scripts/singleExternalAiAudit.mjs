@@ -19,9 +19,10 @@ function collect(path) {
 for (const target of scanTargets) collect(target)
 
 const globallyForbidden = [
-  ['/api/ai-report', 'legacy AI report route'],
-  ['ARK_API_KEY', 'Ark text API credential'],
-  ['ARK_TEXT_MODEL', 'Ark text model'],
+  ['ARK_API_KEY', 'legacy Ark text credential'],
+  ['ARK_TEXT_MODEL', 'legacy Ark text model'],
+  ['ark.cn-beijing.volces.com/api/v3/chat/completions', 'legacy Ark text endpoint'],
+  ['/api/feedback-report', 'legacy feedback route'],
   ['api.openai.com', 'OpenAI API'],
   ['volc.bigasr', 'standalone ASR resource'],
   ['seed-tts-2.0', 'standalone TTS resource'],
@@ -35,31 +36,48 @@ for (const file of files) {
   assert.equal(/sk-[a-zA-Z0-9_-]{16,}/.test(content), false, `API key-like secret found in ${relative(root, file)}`)
 }
 
-// DeepSeek may only be called by the production server. The browser receives a
-// same-origin endpoint and can never see the provider URL or credential.
-const clientFiles = files.filter(file => {
-  const name = relative(root, file).replaceAll('\\', '/')
-  return name.startsWith('src/') || name.startsWith('local/') || name === 'vite.config.ts'
-})
-for (const file of clientFiles) {
-  const content = readFileSync(file, 'utf8')
-  assert.equal(content.includes('api.deepseek.com'), false, `DeepSeek provider URL leaked into ${relative(root, file)}`)
-  assert.equal(content.includes('/chat/completions'), false, `Provider endpoint leaked into ${relative(root, file)}`)
-}
+// DeepSeek credentials and provider URLs stay in the server-only report handler.
+// The browser and Vite bridge call the same-origin /api/ai-report route.
+const providerFiles = files
+  .map(file => ({ file, content: readFileSync(file, 'utf8') }))
+  .filter(item => item.content.includes('api.deepseek.com') || item.content.includes('/chat/completions'))
+assert.deepEqual(
+  providerFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
+  ['server/reportApi.mjs'],
+  'DeepSeek provider access must remain in the shared server-side report handler',
+)
 
-const feedbackServer = join(root, 'server/deepseekFeedback.mjs')
-assert.equal(existsSync(feedbackServer), true, 'DeepSeek feedback server module is missing')
-const feedbackServerContent = readFileSync(feedbackServer, 'utf8')
-assert.equal(feedbackServerContent.includes('/chat/completions'), true, 'DeepSeek feedback endpoint is missing')
-assert.equal(feedbackServerContent.includes('response_format'), true, 'Structured JSON mode is missing')
-assert.equal(feedbackServerContent.includes("source: 'deepseek'"), true, 'DeepSeek report source marker is missing')
+assert.equal(existsSync(join(root, 'server/reportApi.mjs')), true, 'production DeepSeek report route is missing')
+assert.equal(existsSync(join(root, 'local/deepseekReportBridge.ts')), true, 'local DeepSeek report bridge is missing')
+assert.equal(existsSync(join(root, 'server/deepseekFeedback.mjs')), false, 'legacy DeepSeek report implementation must be removed')
+assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false, 'legacy Ark report bridge must be removed')
 
-assert.equal(existsSync(join(root, 'server/reportApi.mjs')), false)
-assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false)
+const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
+assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')
+assert.ok(reportHandler.includes("provider: 'deepseek'"), 'DeepSeek report source marker is missing')
+assert.ok(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), 'DeepSeek report rate limiting is missing')
+
+const reportContract = readFileSync(join(root, 'server/shared/f1ReportContract.mjs'), 'utf8')
+assert.ok(reportContract.includes('F1_OFFICIAL_CRITERIA'), 'official F-1 criteria are missing from the report contract')
+assert.ok(reportContract.includes('Never invent facts'), 'evidence-only report rule is missing')
+assert.ok(reportContract.includes('approval/refusal probability'), 'visa prediction guardrail is missing')
+
+const reportCallers = files
+  .map(file => ({ file, content: readFileSync(file, 'utf8') }))
+  .filter(item => item.content.includes('fetch(AI_REPORT_ENDPOINT'))
+assert.deepEqual(
+  reportCallers.map(item => relative(root, item.file).replaceAll('\\', '/')),
+  ['src/modules/shared/store/analysisEngine.ts'],
+  'the browser must have exactly one final-report caller',
+)
+
+const analysisEngine = readFileSync(join(root, 'src/modules/shared/store/analysisEngine.ts'), 'utf8')
+assert.ok(analysisEngine.includes('overallScore: null'), 'unavailable report must not contain a synthetic score')
+assert.equal(analysisEngine.includes('...analyzeInterview(record)'), false, 'unavailable F1 report must not run the local scoring engine')
 
 const realtimeFiles = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))
   .filter(item => item.content.includes('openspeech.bytedance.com/api/v3/realtime/dialogue'))
-assert.ok(realtimeFiles.length >= 2, 'Realtime end-to-end voice endpoint is missing')
+assert.ok(realtimeFiles.length >= 2, 'Doubao realtime end-to-end voice endpoint is missing')
 
-console.log('ai-boundary-audit=passed')
+console.log('deepseek-report-and-doubao-voice-architecture-audit=passed')

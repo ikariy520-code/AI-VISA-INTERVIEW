@@ -5,12 +5,13 @@ import type {
   QAPair,
   VoiceEmotion,
 } from './types'
+import type { F1StructuredReport } from '../../shared/f1ReportContract'
 
 type UnknownRecord = Record<string, unknown>
 
 const VERDICTS = new Set<AnswerFeedback['verdict']>(['favorable', 'neutral', 'unfavorable'])
 const EMOTIONS = new Set<VoiceEmotion['primary']>(['calm', 'nervous', 'confident', 'hesitant', 'tense', 'natural'])
-const SOURCES = new Set<NonNullable<InterviewSession['analysisSource']>>(['doubao', 'hybrid', 'local'])
+const SOURCES = new Set<NonNullable<InterviewSession['analysisSource']>>(['deepseek', 'doubao', 'hybrid', 'local', 'unavailable'])
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -121,10 +122,16 @@ export function normalizeInterviewSession(value: unknown): InterviewSession | nu
     time: safeText(value.time, '', 40),
     duration: safeText(value.duration, '00:00', 40),
     title: safeText(value.title, '美国签证面签练习', 300),
-    overallScore: safeNumber(value.overallScore, 3, 1, 5),
+    overallScore: value.overallScore === null ? null : safeNumber(value.overallScore, 3, 1, 5),
     transcript,
     analysisSource,
     aiScoredAnswers: Math.round(safeNumber(value.aiScoredAnswers, 0, 0, transcript.length)),
     totalScoredAnswers: Math.round(safeNumber(value.totalScoredAnswers, transcript.length, 0, transcript.length)),
+    structuredReport: isRecord(value.structuredReport)
+      && value.structuredReport.schemaVersion === 2
+      && Array.isArray(value.structuredReport.dimensions)
+      && Array.isArray(value.structuredReport.questionReviews)
+      ? value.structuredReport as unknown as F1StructuredReport
+      : undefined,
   }
 }

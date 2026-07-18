@@ -7,6 +7,8 @@
 //   B. 内容分析 — 从文字转写中评估（逻辑/具体性/说服力）
 // ========================================
 
+import type { F1StructuredReport } from '../../shared/f1ReportContract'
+
 // ---- A. 语音分析（录音 → AI 提取） ----
 
 export interface VoiceMetrics {
@@ -85,9 +87,10 @@ export interface InterviewSession {
   time: string
   duration: string
   title: string
-  overallScore: number     // 综合 1-5
+  overallScore: number | null // 综合 1-5；分析不可用时必须为 null
   transcript: QAPair[]
-  analysisSource?: 'doubao' | 'hybrid' | 'local'
+  analysisSource?: 'deepseek' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
   aiScoredAnswers?: number
   totalScoredAnswers?: number
+  structuredReport?: F1StructuredReport
 }

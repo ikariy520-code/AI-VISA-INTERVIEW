@@ -4,7 +4,8 @@
 // Responsibilities:
 //   1. Serve Vite-built static files (dist/) with SPA fallback
 //   2. WebSocket proxy  /api/realtime-voice → Doubao
-//   3. Health check     /api/realtime-health
+//   3. Final report     /api/ai-report → DeepSeek constrained evaluator
+//   4. Health checks    /api/realtime-health, /api/report-health
 // ========================================
 
 import { createServer } from 'node:http'
@@ -16,7 +17,7 @@ import dotenv from 'dotenv'
 
 import { createWSProxy } from './wsProxy.mjs'
 import { createInviteAuth } from './inviteAuth.mjs'
-import { createDeepSeekFeedbackApi } from './deepseekFeedback.mjs'
+import { createReportHandler } from './reportApi.mjs'
 
 // ── config ───────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ const INVITE_SESSION_SECRET = process.env.INVITE_SESSION_SECRET || ''
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || ''
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
-const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
+const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || ''
 
 // ── MIME map ─────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ async function main() {
     sessionSecret: INVITE_SESSION_SECRET,
     secureCookies: process.env.NODE_ENV === 'production',
   })
-  const feedbackApi = createDeepSeekFeedbackApi({
+  const reportHandler = createReportHandler({
     apiKey: DEEPSEEK_API_KEY,
     model: DEEPSEEK_MODEL,
     baseUrl: DEEPSEEK_BASE_URL,
@@ -181,7 +182,7 @@ async function main() {
         return handleHealth(req, res)
       }
 
-      if (await feedbackApi.handleRequest(req, res, pathname)) return
+      if (await reportHandler(req, res)) return
 
       // ── Static files + SPA fallback ──
       const served = await serveStatic(req, res)
@@ -237,7 +238,7 @@ async function main() {
     console.log(`[server] Static files: ${DIST_DIR}`)
     console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
     console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
-    console.log(`[server] Feedback    : ${feedbackApi.configured ? `DeepSeek ${feedbackApi.model}` : 'NOT CONFIGURED'}`)
+    console.log(`[server] AI report   : ${reportHandler.configured ? `DeepSeek ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
     console.log(`[server] Invite gate : ${inviteAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
   })
 }
