@@ -141,15 +141,28 @@ function normalizeQuestionAnswerEvidence(value, sourceAnswer) {
   return nestedQuote && includesExactEvidence(sourceAnswer.answer, nestedQuote) ? nestedQuote : null
 }
 
-export function validateF1StructuredReport(value, input) {
-  if (!isRecord(value) || value.schemaVersion !== 2 || value.reportType !== 'practice_readiness') return null
-  if (value.criteriaVersion !== input.criteriaVersion || hasForbiddenClaim(value)) return null
+export function validateF1StructuredReport(value, input, options = {}) {
+  let validationIssue = ''
+  const fail = issue => {
+    if (!validationIssue) {
+      validationIssue = issue
+      if (typeof options.onIssue === 'function') options.onIssue(issue)
+    }
+    return null
+  }
+
+  if (!isRecord(value)) return fail('REPORT_NOT_OBJECT')
+  if (value.schemaVersion !== 2 || value.reportType !== 'practice_readiness') return fail('REPORT_IDENTITY')
+  if (value.criteriaVersion !== input.criteriaVersion) return fail('CRITERIA_VERSION')
+  if (hasForbiddenClaim(value)) return fail('FORBIDDEN_CLAIM')
   const overallScore = cleanScore(value.overallScore)
   const readiness = ['准备较充分', '仍需补充', '建议重点准备'].includes(value.readiness) ? value.readiness : null
-  if (overallScore === null || !readiness || !Array.isArray(value.dimensions) || value.dimensions.length !== F1_REPORT_DIMENSION_IDS.length) return null
+  if (overallScore === null) return fail('OVERALL_SCORE')
+  if (!readiness) return fail('READINESS')
+  if (!Array.isArray(value.dimensions) || value.dimensions.length !== F1_REPORT_DIMENSION_IDS.length) return fail('DIMENSION_COUNT')
 
   const dimensions = value.dimensions.map(item => {
-    if (!isRecord(item) || !F1_REPORT_DIMENSION_IDS.includes(item.id)) return null
+    if (!isRecord(item) || !F1_REPORT_DIMENSION_IDS.includes(item.id)) return fail('DIMENSION_ID')
     const id = item.id
     const score = cleanScore(item.score)
     const status = ['stable', 'needs_evidence', 'priority'].includes(item.status) ? item.status : null
@@ -162,7 +175,14 @@ export function validateF1StructuredReport(value, input) {
     const actions = cleanActionArray(item.actions)
     const summary = cleanText(item.summary, 1_000)
     const reasoning = cleanText(item.reasoning, 1_500)
-    if (score === null || !status || evidence.length === 0 || evidence.length !== rawEvidence.length || officialRuleIds.length === 0 || (rawOfficialRuleIds.length > 0 && officialRuleIds.length !== rawOfficialRuleIds.length) || actions.length === 0 || !summary || !reasoning) return null
+    if (score === null) return fail(`DIMENSION_SCORE:${id}`)
+    if (!status) return fail(`DIMENSION_STATUS:${id}`)
+    if (rawEvidence.length === 0) return fail(`DIMENSION_EVIDENCE_MISSING:${id}`)
+    if (evidence.length !== rawEvidence.length) return fail(`DIMENSION_EVIDENCE_UNGROUNDED:${id}`)
+    if (officialRuleIds.length === 0 || (rawOfficialRuleIds.length > 0 && officialRuleIds.length !== rawOfficialRuleIds.length)) return fail(`DIMENSION_RULE_ID:${id}`)
+    if (actions.length === 0) return fail(`DIMENSION_ACTIONS:${id}`)
+    if (!summary) return fail(`DIMENSION_SUMMARY:${id}`)
+    if (!reasoning) return fail(`DIMENSION_REASONING:${id}`)
     return {
       id,
       label: DIMENSION_LABELS[id],
@@ -175,11 +195,12 @@ export function validateF1StructuredReport(value, input) {
       actions,
     }
   })
-  if (dimensions.some(item => item === null) || new Set(dimensions.map(item => item.id)).size !== F1_REPORT_DIMENSION_IDS.length) return null
+  if (dimensions.some(item => item === null)) return null
+  if (new Set(dimensions.map(item => item.id)).size !== F1_REPORT_DIMENSION_IDS.length) return fail('DIMENSION_SET')
 
-  if (!Array.isArray(value.questionReviews) || value.questionReviews.length !== input.answers.length) return null
+  if (!Array.isArray(value.questionReviews) || value.questionReviews.length !== input.answers.length) return fail('QUESTION_REVIEW_COUNT')
   const questionReviews = value.questionReviews.map(item => {
-    if (!isRecord(item)) return null
+    if (!isRecord(item)) return fail('QUESTION_REVIEW_SHAPE')
     const index = Number(item.index)
     const sourceAnswer = input.answers[index - 1]
     const score = cleanScore(item.score)
@@ -187,7 +208,12 @@ export function validateF1StructuredReport(value, input) {
     const answerEvidence = sourceAnswer ? normalizeQuestionAnswerEvidence(item.answerEvidence, sourceAnswer) : null
     const summary = cleanText(item.summary, 800)
     const preparationDirection = cleanText(item.preparationDirection, 1_000)
-    if (!sourceAnswer || item.questionId !== sourceAnswer.questionId || score === null || !verdict || !summary || !preparationDirection || !answerEvidence) return null
+    if (!sourceAnswer || item.questionId !== sourceAnswer.questionId) return fail(`QUESTION_REVIEW_ORDER:${index || 'unknown'}`)
+    if (score === null) return fail(`QUESTION_REVIEW_SCORE:${sourceAnswer.questionId}`)
+    if (!verdict) return fail(`QUESTION_REVIEW_VERDICT:${sourceAnswer.questionId}`)
+    if (!summary) return fail(`QUESTION_REVIEW_SUMMARY:${sourceAnswer.questionId}`)
+    if (!preparationDirection) return fail(`QUESTION_REVIEW_DIRECTION:${sourceAnswer.questionId}`)
+    if (!answerEvidence) return fail(`QUESTION_REVIEW_EVIDENCE:${sourceAnswer.questionId}`)
     return {
       index,
       questionId: sourceAnswer.questionId,
@@ -214,15 +240,17 @@ export function validateF1StructuredReport(value, input) {
   }
   const strengths = Array.isArray(value.strengths) ? value.strengths.map(normalizeInsight).filter(Boolean).slice(0, 4) : []
   const priorities = Array.isArray(value.priorities) ? value.priorities.map(normalizeInsight).filter(Boolean).slice(0, 4) : []
-  if (strengths.length === 0 || priorities.length === 0) return null
+  if (strengths.length === 0) return fail('STRENGTHS')
+  if (priorities.length === 0) return fail('PRIORITIES')
   const actionPlan = Array.isArray(value.actionPlan) ? value.actionPlan.map((item, index) => isRecord(item) ? {
     label: cleanText(item.label, 30) || `STEP ${index + 1}`, title: cleanText(item.title, 150), detail: cleanText(item.detail, 800),
   } : null).filter(item => item?.label && item.title && item.detail).slice(0, 3) : []
-  if (actionPlan.length !== 3) return null
+  if (actionPlan.length !== 3) return fail('ACTION_PLAN')
 
   const headline = cleanText(value.headline, 300)
   const summary = cleanText(value.summary, 1_500)
-  if (!headline || !summary) return null
+  if (!headline) return fail('HEADLINE')
+  if (!summary) return fail('SUMMARY')
 
   return {
     schemaVersion: 2,
@@ -241,24 +269,34 @@ export function validateF1StructuredReport(value, input) {
   }
 }
 
-export function buildF1ReportMessages(input) {
-  return [
+export function buildF1ReportMessages(input, retryIssue = '') {
+  const messages = [
     {
       role: 'system',
       content: `You are an evidence-bound reviewer of an F-1 visa practice interview. Return one valid JSON object only.
 
-Assess practice readiness, never visa approval/refusal probability. A concise conversational answer can earn a high score when it directly and clearly resolves the question. Never reward length, advanced vocabulary, formal wording, accent, or grammar, and never punish an answer merely for being short. Identify missing material facts, contradictions, or failure to answer instead.
+Purpose: assess practice readiness, not visa eligibility and never approval/refusal probability. A concise, conversational answer can earn a high score when it directly and clearly resolves the question. Never reward length, advanced vocabulary, formal wording, accent, or grammar. Never punish an answer merely for being short. Identify missing material facts, contradictions, or failure to answer instead.
 
-Use only safeContext and answers. Never invent facts. Every dimension needs an exact quote from profile or answer plus an allowed officialRuleId. For profile evidence use reference="profile"; for answer evidence use its exact questionId such as "f1_01". Strength and priority evidenceRefs use the same values. Missing evidence is an evidence gap, not proof of a negative fact. Do not demand property, employment, or a rigid long-term plan from a young student. A direct yes/no can fully answer a yes/no question. preparationDirection must be a preparation framework, not a fabricated answer. Score each review only against the exact question asked. Never lower Q4 because Q5 was not answered, Q12 because Q14 was not answered, or because another unasked catalog question could add detail. Unasked information is not an answer defect. Examples: Q1 answered with the matching school name is complete; Q4 answered "Data Science." is complete and the reason belongs to Q5; Q12 answered "My parents." is complete and parents' jobs belong to Q14; Q13 answered with a matching annual amount is complete. These direct answers should normally score 90-100 when consistent.
+Evidence rules:
+1. Use only safeContext and answers supplied by the user. Never invent facts. Never invent a school, course, amount, job, family fact, plan, document fact, or contradiction.
+2. Every dimension requires at least one exact evidence quote copied from safeContext or an answer and at least one officialRuleId from the provided official criteria. For profile evidence use reference="profile"; for answer evidence use its exact questionId such as "f1_01". Strength and priority evidenceRefs use the same values.
+3. If evidence is missing, label it as an evidence gap. Absence is not proof of a negative fact.
+4. For young students, do not demand property, employment, or a rigid long-term career plan. Assess present intent to depart after study.
+5. A direct yes/no can fully answer a yes/no question. Do not demand extra detail unless the answer creates a material inconsistency or the question itself is compound.
+6. preparationDirection gives a fact-gathering and reasoning framework; it must not fabricate a polished answer for the applicant to memorize.
+7. Score each review only against the exact question asked. Never lower Q4 because Q5 was not answered, Q12 because Q14 was not answered, or because another unasked catalog question could add detail. Unasked information is not an answer defect.
+Examples: Q1 answered with the matching school name is complete; Q4 answered "Data Science." is complete and the reason belongs to Q5; Q12 answered "My parents." is complete and parents' jobs belong to Q14; Q13 answered with a matching annual amount is complete. These direct answers should normally score 90-100 when consistent.
 
-Required dimensions exactly once: ${JSON.stringify(DIMENSION_LABELS)}
+Required dimensions, exactly once each: ${JSON.stringify(DIMENSION_LABELS)}
 Allowed official criteria: ${JSON.stringify(F1_OFFICIAL_CRITERIA)}
 
-Return schemaVersion=2, reportType="practice_readiness", criteriaVersion="${F1_OFFICIAL_CRITERIA_VERSION}", overallScore 0..100, readiness="准备较充分"|"仍需补充"|"建议重点准备", headline, summary, dimensions, strengths, priorities, questionReviews, actionPlan (exactly 3), disclaimer.
-Dimension: {id,label,score,status:"stable"|"needs_evidence"|"priority",summary,evidence:[{source:"profile"|"answer",reference,quote}],officialRuleIds,reasoning,actions}.
-Question review: {index,questionId,score,verdict:"complete"|"partial"|"needs_preparation",summary,answerEvidence,strengths,improvements,preparationDirection}.
-Strength/priority: {title,detail,evidenceRefs,officialRuleIds}.
-Action-plan item: {label:"STEP 1"|"STEP 2"|"STEP 3",title,detail}. strengths and improvements in question reviews must be JSON arrays, even when empty.
+Required JSON fields:
+schemaVersion=2; reportType="practice_readiness"; criteriaVersion="${F1_OFFICIAL_CRITERIA_VERSION}"; overallScore=0..100; readiness="准备较充分"|"仍需补充"|"建议重点准备"; headline; summary; dimensions; strengths; priorities; questionReviews; actionPlan (exactly 3); disclaimer.
+
+Each dimension: {id,label,score,status:"stable"|"needs_evidence"|"priority",summary,evidence:[{source:"profile"|"answer",reference,quote}],officialRuleIds,reasoning,actions}.
+Each question review: {index,questionId,score,verdict:"complete"|"partial"|"needs_preparation",summary,answerEvidence,strengths,improvements,preparationDirection}.
+Each strength/priority: {title,detail,evidenceRefs,officialRuleIds}.
+Each action-plan item: {label:"STEP 1"|"STEP 2"|"STEP 3",title,detail}. strengths and improvements in question reviews must be JSON arrays, even when empty.
 For profile evidence, quote one exact value or one or more exact "field: value" pairs separated by commas. Never paraphrase a profile quote.
 For every question review, answerEvidence must be the exact original answer text as a JSON string, never an evidence object.
 For every dimension, actions must be a JSON array containing one or two strings, never a single string.
@@ -266,10 +304,24 @@ Every dimension must contain its own numeric score from 0 to 100. Never omit a d
 
 Be concise: dimension summary <= 60 Chinese characters, reasoning <= 100, one or two actions; exactly 1-3 strengths and 1-3 priorities; question summary <= 50, at most one strength and one improvement, preparationDirection <= 80; each action-plan detail <= 80. Use one exact quote per dimension unless a second quote is necessary to prove a contradiction.
 
-Evaluate in concise Chinese: application/profile consistency; genuine study purpose; background -> academic need -> school/major -> study plan -> post-study use; cost -> sponsor -> funds -> cost coverage; present departure intent; and cross-answer credibility.`,
+Before returning, silently self-check all of these requirements:
+- dimensions contains exactly these six unique ids: ${JSON.stringify(F1_REPORT_DIMENSION_IDS)}.
+- questionReviews contains exactly ${input.answers.length} items in input order, with indexes 1..${input.answers.length} and questionIds ${JSON.stringify(input.answers.map(answer => answer.questionId))}.
+- every evidence quote and answerEvidence is copied character-for-character from the supplied input; every reference and officialRuleId is allowed.
+- strengths and priorities each contain 1-3 valid items, actionPlan contains exactly 3 valid items, and no required text or score is missing.
+- the JSON contains no commentary outside the single object and makes no visa-outcome prediction.
+
+Evaluate the whole chain: profile and I-20-like summary consistency; genuine study purpose; prior background -> academic need -> school/major -> study plan -> post-study use; stated cost -> sponsor -> income/funds -> ability to cover costs; present departure intent; and cross-answer credibility. Explain conclusions in concise Chinese.`,
     },
     { role: 'user', content: JSON.stringify(input) },
   ]
+  if (retryIssue) {
+    messages.push({
+      role: 'user',
+      content: `The previous JSON was rejected by the strict machine validator with code "${retryIssue}". Regenerate the entire report from the original input. Return only one complete JSON object. Recheck exact evidence quotes, all six unique dimensions, every question review in input order, allowed officialRuleIds, 1-3 strengths and priorities, and exactly three action-plan items. Do not explain the error.`,
+    })
+  }
+  return messages
 }
 
 export function getModelMessageContent(payload) {

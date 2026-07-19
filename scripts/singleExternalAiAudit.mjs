@@ -55,13 +55,16 @@ assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false, 'legacy
 const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
 assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')
 assert.ok(reportHandler.includes("provider: 'deepseek'"), 'DeepSeek report source marker is missing')
-assert.ok(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), 'DeepSeek report rate limiting is missing')
 assert.ok(reportHandler.includes('MAX_OUTPUT_TOKENS_PER_ATTEMPT'), 'DeepSeek V4 Pro report output cap is missing')
-assert.ok(reportHandler.includes('MAX_IP_COMPLETION_TOKENS_PER_WINDOW'), 'per-IP DeepSeek token budget is missing')
-assert.ok(reportHandler.includes('MAX_GLOBAL_COMPLETION_TOKENS_PER_WINDOW'), 'global DeepSeek token budget is missing')
+assert.equal(reportHandler.includes('createTokenBudget'), false, 'DeepSeek report token budget must remain disabled')
+assert.equal(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), false, 'DeepSeek report rate limit must remain disabled')
+assert.equal(reportHandler.includes('MAX_ACTIVE_REQUESTS'), false, 'DeepSeek report concurrency limit must remain disabled')
+assert.equal(reportHandler.includes('AbortSignal.timeout'), false, 'DeepSeek report must not have a fixed application timeout')
 assert.ok(reportHandler.includes('REPORT_ALREADY_IN_PROGRESS'), 'duplicate in-flight report protection is missing')
 assert.ok(reportHandler.includes('CLIENT_DISCONNECTED'), 'client disconnect cancellation is missing')
 assert.ok(reportHandler.includes('cached: true'), 'completed report reuse is missing')
+assert.ok(reportHandler.includes('buildF1ReportMessages(input, retryIssue)'), 'validation-guided DeepSeek retry is missing')
+assert.ok(reportHandler.includes('validationIssue'), 'sanitized report validation diagnostics are missing')
 
 const deepSeekModelFiles = [
   '.env.example',
@@ -83,6 +86,7 @@ const reportContract = readFileSync(join(root, 'server/shared/f1ReportContract.m
 assert.ok(reportContract.includes('F1_OFFICIAL_CRITERIA'), 'official F-1 criteria are missing from the report contract')
 assert.ok(reportContract.includes('Never invent facts'), 'evidence-only report rule is missing')
 assert.ok(reportContract.includes('approval/refusal probability'), 'visa prediction guardrail is missing')
+assert.ok(reportContract.includes('strict machine validator'), 'validation repair instruction is missing')
 
 const reportCallers = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))
@@ -96,10 +100,7 @@ assert.deepEqual(
 const analysisEngine = readFileSync(join(root, 'src/modules/shared/store/analysisEngine.ts'), 'utf8')
 assert.ok(analysisEngine.includes('overallScore: null'), 'unavailable report must not contain a synthetic score')
 assert.equal(analysisEngine.includes('...analyzeInterview(record)'), false, 'unavailable F1 report must not run the local scoring engine')
-assert.ok(
-  analysisEngine.includes('AI_REPORT_REQUEST_TIMEOUT_MS = 270_000'),
-  'browser report timeout must cover two server-side DeepSeek attempts and remain below the Nginx limit',
-)
+assert.equal(analysisEngine.includes('AbortSignal.timeout'), false, 'browser report request must not have a fixed timeout')
 
 const realtimeFiles = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))

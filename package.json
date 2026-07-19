@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "npm run test:f1-controller && npm run test:f1-report && npm run test:report-guard && npm run test:architecture",
+    "test": "npm run test:f1-controller && npm run test:f1-report && npm run test:architecture",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -15,7 +15,6 @@
     "smoke:report": "node scripts/finalReportSmoke.mjs",
     "test:f1-controller": "node --experimental-strip-types scripts/f1InterviewController.test.ts",
     "test:f1-report": "node --experimental-strip-types scripts/f1ReportContract.test.ts",
-    "test:report-guard": "node scripts/reportTokenBudget.test.mjs",
     "test:architecture": "node scripts/singleExternalAiAudit.mjs"
   },
   "dependencies": {
