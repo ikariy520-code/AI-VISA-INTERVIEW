@@ -14,7 +14,10 @@ import {
   F1_OFFICIAL_CRITERIA as SERVER_CRITERIA,
   F1_OFFICIAL_CRITERIA_VERSION as SERVER_CRITERIA_VERSION,
 } from '../server/shared/f1OfficialCriteria.mjs'
-import { validateF1StructuredReport as validateServerReport } from '../server/shared/f1ReportContract.mjs'
+import {
+  buildF1ReportMessages as buildServerReportMessages,
+  validateF1StructuredReport as validateServerReport,
+} from '../server/shared/f1ReportContract.mjs'
 
 const input = sanitizeReportRequest({
   visaType: 'F1',
@@ -137,6 +140,11 @@ const fabricatedEvidence = structuredClone(validReport)
 fabricatedEvidence.dimensions[0].evidence[0].quote = 'A school never supplied by the user.'
 assert.equal(validateF1StructuredReport(fabricatedEvidence, input), null)
 assert.equal(validateServerReport(fabricatedEvidence, input), null)
+let serverValidationIssue = ''
+assert.equal(validateServerReport(fabricatedEvidence, input, {
+  onIssue: (issue: string) => { serverValidationIssue = issue },
+}), null)
+assert.equal(serverValidationIssue, 'DIMENSION_EVIDENCE_UNGROUNDED:application_consistency')
 
 const wrongAnswerReference = structuredClone(validReport)
 wrongAnswerReference.dimensions[0].evidence[0].reference = 'f1_12'
@@ -162,5 +170,14 @@ assert.match(messages[0].content, /never approval\/refusal probability/)
 assert.match(messages[0].content, /answerEvidence must be the exact original answer text/)
 assert.match(messages[0].content, /actions must be a JSON array/)
 assert.match(messages[0].content, /must contain its own numeric score/)
+assert.match(messages[0].content, /silently self-check/)
+assert.match(messages[0].content, /questionReviews contains exactly 4 items/)
+
+const serverMessages = buildServerReportMessages(input)
+assert.match(serverMessages[0].content, /silently self-check/)
+const retryMessages = buildServerReportMessages(input, 'DIMENSION_EVIDENCE_UNGROUNDED:application_consistency')
+assert.equal(retryMessages.length, 3)
+assert.match(retryMessages[2].content, /strict machine validator/)
+assert.match(retryMessages[2].content, /DIMENSION_EVIDENCE_UNGROUNDED:application_consistency/)
 
 console.log('f1-report-contract=passed')

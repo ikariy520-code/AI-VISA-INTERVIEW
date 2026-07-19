@@ -49,6 +49,7 @@ if (!input) throw new Error('Smoke fixture is invalid')
 let parsed
 let report
 let lastError
+let retryIssue = ''
 let attempts = 0
 for (attempts = 1; attempts <= 2; attempts += 1) {
   try {
@@ -60,14 +61,13 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
       },
       body: JSON.stringify({
         model,
-        messages: buildF1ReportMessages(input),
+        messages: buildF1ReportMessages(input, retryIssue),
         response_format: { type: 'json_object' },
         thinking: { type: 'enabled' },
         reasoning_effort: 'high',
         max_tokens: 32_000,
         stream: false,
       }),
-      signal: AbortSignal.timeout(120_000),
     })
 
     const payload = await response.json().catch(() => null)
@@ -75,11 +75,16 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
     const content = getModelMessageContent(payload)
     if (!content) throw new Error('DeepSeek returned no final-report content')
     parsed = JSON.parse(content)
-    report = validateF1StructuredReport(parsed, input)
+    let validationIssue = ''
+    report = validateF1StructuredReport(parsed, input, {
+      onIssue: issue => { validationIssue = issue },
+    })
     if (report) break
-    lastError = new Error('DeepSeek report did not pass the evidence contract')
+    retryIssue = validationIssue || 'UNKNOWN_VALIDATION_FAILURE'
+    lastError = new Error(`DeepSeek report did not pass the evidence contract: ${retryIssue}`)
   } catch (error) {
     lastError = error
+    if (error instanceof SyntaxError) retryIssue = 'INVALID_JSON'
   }
 }
 

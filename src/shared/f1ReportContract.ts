@@ -348,8 +348,8 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
   }
 }
 
-export function buildF1ReportMessages(input: InterviewReportRequest) {
-  return [
+export function buildF1ReportMessages(input: InterviewReportRequest, retryIssue = '') {
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [
     {
       role: 'system',
       content: `You are an evidence-bound reviewer of an F-1 visa practice interview. Return one valid JSON object only.
@@ -357,7 +357,7 @@ export function buildF1ReportMessages(input: InterviewReportRequest) {
 Purpose: assess practice readiness, not visa eligibility and never approval/refusal probability. A concise, conversational answer can earn a high score when it directly and clearly resolves the question. Never reward length, advanced vocabulary, formal wording, accent, or grammar. Never punish an answer merely for being short. Identify missing material facts, contradictions, or failure to answer instead.
 
 Evidence rules:
-1. Use only safeContext and answers supplied by the user. Never invent a school, course, amount, job, family fact, plan, document fact, or contradiction.
+1. Use only safeContext and answers supplied by the user. Never invent facts. Never invent a school, course, amount, job, family fact, plan, document fact, or contradiction.
 2. Every dimension requires at least one exact evidence quote copied from safeContext or an answer and at least one officialRuleId from the provided official criteria. For profile evidence use reference="profile"; for answer evidence use its exact questionId such as "f1_01". Strength and priority evidenceRefs use the same values.
 3. If evidence is missing, label it as an evidence gap. Absence is not proof of a negative fact.
 4. For young students, do not demand property, employment, or a rigid long-term career plan. Assess present intent to depart after study.
@@ -383,10 +383,24 @@ Every dimension must contain its own numeric score from 0 to 100. Never omit a d
 
 Be concise: dimension summary <= 60 Chinese characters, reasoning <= 100, one or two actions; exactly 1-3 strengths and 1-3 priorities; question summary <= 50, at most one strength and one improvement, preparationDirection <= 80; each action-plan detail <= 80. Use one exact quote per dimension unless a second quote is necessary to prove a contradiction.
 
+Before returning, silently self-check all of these requirements:
+- dimensions contains exactly these six unique ids: ${JSON.stringify(F1_REPORT_DIMENSION_IDS)}.
+- questionReviews contains exactly ${input.answers.length} items in input order, with indexes 1..${input.answers.length} and questionIds ${JSON.stringify(input.answers.map(answer => answer.questionId))}.
+- every evidence quote and answerEvidence is copied character-for-character from the supplied input; every reference and officialRuleId is allowed.
+- strengths and priorities each contain 1-3 valid items, actionPlan contains exactly 3 valid items, and no required text or score is missing.
+- the JSON contains no commentary outside the single object and makes no visa-outcome prediction.
+
 Evaluate the whole chain: profile and I-20-like summary consistency; genuine study purpose; prior background -> academic need -> school/major -> study plan -> post-study use; stated cost -> sponsor -> income/funds -> ability to cover costs; present departure intent; and cross-answer credibility. Explain conclusions in concise Chinese.`,
     },
     { role: 'user', content: JSON.stringify(input) },
   ]
+  if (retryIssue) {
+    messages.push({
+      role: 'user',
+      content: `The previous JSON was rejected by the strict machine validator with code "${retryIssue}". Regenerate the entire report from the original input. Return only one complete JSON object. Recheck exact evidence quotes, all six unique dimensions, every question review in input order, allowed officialRuleIds, 1-3 strengths and priorities, and exactly three action-plan items. Do not explain the error.`,
+    })
+  }
+  return messages
 }
 
 export function getModelMessageContent(payload: unknown): string | null {
