@@ -28,3 +28,6 @@ pnpm-debug.log*
 
 # server logs
 logs/
+
+.dev.vars*
+!.env.example
