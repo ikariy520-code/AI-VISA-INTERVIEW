@@ -96,6 +96,10 @@ assert.deepEqual(
 const analysisEngine = readFileSync(join(root, 'src/modules/shared/store/analysisEngine.ts'), 'utf8')
 assert.ok(analysisEngine.includes('overallScore: null'), 'unavailable report must not contain a synthetic score')
 assert.equal(analysisEngine.includes('...analyzeInterview(record)'), false, 'unavailable F1 report must not run the local scoring engine')
+assert.ok(
+  analysisEngine.includes('AI_REPORT_REQUEST_TIMEOUT_MS = 270_000'),
+  'browser report timeout must cover two server-side DeepSeek attempts and remain below the Nginx limit',
+)
 
 const realtimeFiles = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))

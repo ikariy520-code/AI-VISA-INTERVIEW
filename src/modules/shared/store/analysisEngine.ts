@@ -412,6 +412,9 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
 // ---- One evidence-bound DeepSeek report call after the complete F-1 interview ----
 
 const AI_REPORT_ENDPOINT = '/api/ai-report'
+// The server may make two 120-second DeepSeek attempts. Keep the browser alive
+// long enough for a retry, while remaining below Nginx's 300-second limit.
+const AI_REPORT_REQUEST_TIMEOUT_MS = 270_000
 
 function normalizeQuestionText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
@@ -484,7 +487,7 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    signal: AbortSignal.timeout(100_000),
+    signal: AbortSignal.timeout(AI_REPORT_REQUEST_TIMEOUT_MS),
   })
   if (!response.ok) throw new Error(`F1_REPORT_FAILED_${response.status}`)
   const payload = await response.json() as { report?: unknown }
