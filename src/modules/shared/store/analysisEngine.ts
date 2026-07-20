@@ -491,11 +491,12 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
   if (!structuredReport) throw new Error('F1_REPORT_INVALID')
 
   const transcriptSession = createUnavailableInterviewSession(record)
+  const evidenceOnly = structuredReport.analysisMode === 'evidence_only'
   return {
     ...transcriptSession,
-    overallScore: structuredReport.overallScore / 20,
-    analysisSource: 'deepseek',
-    aiScoredAnswers: input.answers.length,
+    overallScore: evidenceOnly ? null : structuredReport.overallScore / 20,
+    analysisSource: evidenceOnly ? 'evidence_only' : 'deepseek',
+    aiScoredAnswers: evidenceOnly ? 0 : input.answers.length,
     totalScoredAnswers: input.answers.length,
     structuredReport,
   }

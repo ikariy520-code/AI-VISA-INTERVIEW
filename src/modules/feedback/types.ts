@@ -89,7 +89,7 @@ export interface InterviewSession {
   title: string
   overallScore: number | null // 综合 1-5；分析不可用时必须为 null
   transcript: QAPair[]
-  analysisSource?: 'deepseek' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
+  analysisSource?: 'deepseek' | 'evidence_only' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
   aiScoredAnswers?: number
   totalScoredAnswers?: number
   structuredReport?: F1StructuredReport

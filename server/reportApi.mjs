@@ -1,6 +1,8 @@
 import {
+  buildDeterministicF1FallbackReport,
   buildF1ReportMessages,
   getModelMessageContent,
+  repairF1ReportEvidence,
   sanitizeReportRequest,
   validateF1StructuredReport,
 } from './shared/f1ReportContract.mjs'
@@ -11,7 +13,10 @@ const REPORT_PATH = '/api/ai-report'
 const HEALTH_PATH = '/api/report-health'
 const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 const MAX_BODY_BYTES = 96_000
-const MAX_REPORT_ATTEMPTS = 2
+// One initial draft plus at most two bounded repair passes. This guarantees the
+// validator cannot create an unbounded token loop while giving each repair pass
+// enough room to fix every reported issue at once.
+const MAX_REPORT_ATTEMPTS = 3
 const MAX_OUTPUT_TOKENS_PER_ATTEMPT = 32_000
 const REPORT_CACHE_TTL_MS = 10 * 60 * 1000
 const MAX_REPORT_CACHE_ENTRIES = 200
@@ -137,13 +142,20 @@ function postJsonWithoutDeadline(endpoint, { headers, body, signal }) {
   })
 }
 
-async function callDeepSeek({ apiKey, endpoint, model, input, signal }) {
+export async function generateF1Report({
+  apiKey,
+  endpoint,
+  model,
+  input,
+  signal,
+  requestJson = postJsonWithoutDeadline,
+}) {
   let lastError
-  let retryIssue = ''
+  let repairContext = ''
   for (let attempt = 0; attempt < MAX_REPORT_ATTEMPTS; attempt += 1) {
     try {
-      const messages = buildF1ReportMessages(input, retryIssue)
-      const upstream = await postJsonWithoutDeadline(endpoint, {
+      const messages = buildF1ReportMessages(input, repairContext)
+      const upstream = await requestJson(endpoint, {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
@@ -171,24 +183,48 @@ async function callDeepSeek({ apiKey, endpoint, model, input, signal }) {
         continue
       }
 
-      let validationIssue = ''
-      const report = validateF1StructuredReport(parseModelContent(payload), input, {
-        onIssue: issue => { validationIssue = issue },
+      const originalDraft = parseModelContent(payload)
+      let validationIssues = []
+      let report = validateF1StructuredReport(originalDraft, input, {
+        onIssue: issue => { validationIssues.push(issue) },
       })
+      let draft = originalDraft
+      if (!report) {
+        const repairEvents = []
+        const evidenceRepairedDraft = repairF1ReportEvidence(originalDraft, input, {
+          onRepair: event => { repairEvents.push(event) },
+        })
+        if (repairEvents.length > 0) {
+          const repairedValidationIssues = []
+          const evidenceRepairedReport = validateF1StructuredReport(evidenceRepairedDraft, input, {
+            onIssue: issue => { repairedValidationIssues.push(issue) },
+            allowMaterializedEvidence: true,
+          })
+          console.warn(`[report] Corrected report evidence references: ${repairEvents.join(',')}`)
+          if (evidenceRepairedReport) return evidenceRepairedReport
+          draft = evidenceRepairedDraft
+          validationIssues = repairedValidationIssues
+        }
+      }
       if (!report) {
         throw Object.assign(new Error('DEEPSEEK_REPORT_VALIDATION_FAILED'), {
           code: 'DEEPSEEK_REPORT_VALIDATION_FAILED',
-          validationIssue: validationIssue || 'UNKNOWN_VALIDATION_FAILURE',
+          validationIssues: validationIssues.length > 0 ? [...new Set(validationIssues)] : ['UNKNOWN_VALIDATION_FAILURE'],
+          reportDraft: draft,
         })
       }
       return report
     } catch (error) {
       lastError = error
+      if (error?.code === 'CLIENT_DISCONNECTED' || signal?.aborted) throw error
       if (error?.code === 'DEEPSEEK_REPORT_VALIDATION_FAILED') {
-        retryIssue = error.validationIssue || 'UNKNOWN_VALIDATION_FAILURE'
-        console.warn(`[report] DeepSeek report rejected by validator: ${retryIssue}`)
+        const issues = Array.isArray(error.validationIssues) && error.validationIssues.length > 0
+          ? error.validationIssues
+          : ['UNKNOWN_VALIDATION_FAILURE']
+        repairContext = { issues, draft: error.reportDraft }
+        console.warn(`[report] Report draft rejected by validator: ${issues.join(',')}`)
       } else if (error instanceof SyntaxError) {
-        retryIssue = 'INVALID_JSON'
+        repairContext = { issues: ['INVALID_JSON'], draft: null }
       }
       const upstreamStatus = Number(error?.upstreamStatus)
       const retryable = error?.name === 'TimeoutError'
@@ -200,10 +236,21 @@ async function callDeepSeek({ apiKey, endpoint, model, input, signal }) {
         || RETRYABLE_NETWORK_CODES.has(error?.code)
         || upstreamStatus === 429
         || upstreamStatus >= 500
-      if (!retryable) throw error
+      if (!retryable) break
     }
   }
-  throw lastError || new Error('DEEPSEEK_REPORT_SERVICE_UNAVAILABLE')
+  const fallbackEligible = lastError?.code === 'DEEPSEEK_REPORT_VALIDATION_FAILED'
+    || lastError?.code === 'EMPTY_MODEL_RESPONSE'
+    || lastError instanceof SyntaxError
+  if (!fallbackEligible) throw lastError || new Error('DEEPSEEK_REPORT_SERVICE_UNAVAILABLE')
+  const fallback = buildDeterministicF1FallbackReport(input)
+  const validatedFallback = validateF1StructuredReport(fallback, input, {
+    allowMaterializedEvidence: true,
+    analysisMode: 'evidence_only',
+  })
+  if (!validatedFallback) throw lastError || new Error('DEEPSEEK_REPORT_SERVICE_UNAVAILABLE')
+  console.warn(`[report] Using bounded evidence fallback after report generation failure: ${lastError?.code || lastError?.name || 'UNKNOWN'}`)
+  return validatedFallback
 }
 
 export function createReportHandler(options = {}) {
@@ -279,7 +326,14 @@ export function createReportHandler(options = {}) {
     const key = reportKey(ip, input)
     const cached = cachedReport(key)
     if (cached) {
-      writeJson(res, 200, { report: cached, provider: 'deepseek', model, schemaVersion: 2, cached: true })
+      writeJson(res, 200, {
+        report: cached,
+        provider: cached.analysisMode === 'evidence_only' ? 'evidence-only' : 'deepseek',
+        model,
+        schemaVersion: 2,
+        analysisMode: cached.analysisMode,
+        cached: true,
+      })
       return true
     }
     if (activeReportKeys.has(key)) {
@@ -296,9 +350,15 @@ export function createReportHandler(options = {}) {
     }
     res.once('close', abortOnDisconnect)
     try {
-      const report = await callDeepSeek({ apiKey, endpoint, model, input, signal: clientAbort.signal })
+      const report = await generateF1Report({ apiKey, endpoint, model, input, signal: clientAbort.signal })
       reportCache.set(key, { report, expiresAt: Date.now() + REPORT_CACHE_TTL_MS })
-      writeJson(res, 200, { report, provider: 'deepseek', model, schemaVersion: 2 })
+      writeJson(res, 200, {
+        report,
+        provider: report.analysisMode === 'evidence_only' ? 'evidence-only' : 'deepseek',
+        model,
+        schemaVersion: 2,
+        analysisMode: report.analysisMode,
+      })
     } catch (error) {
       if (error?.code === 'CLIENT_DISCONNECTED') return true
       const upstreamStatus = Number(error?.upstreamStatus)

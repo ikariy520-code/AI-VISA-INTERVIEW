@@ -54,7 +54,7 @@ assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false, 'legacy
 
 const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
 assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')
-assert.ok(reportHandler.includes("provider: 'deepseek'"), 'DeepSeek report source marker is missing')
+assert.ok(reportHandler.includes("? 'evidence-only' : 'deepseek'"), 'model and evidence-only report modes must remain distinguishable')
 assert.ok(reportHandler.includes('MAX_OUTPUT_TOKENS_PER_ATTEMPT'), 'DeepSeek V4 Pro report output cap is missing')
 assert.equal(reportHandler.includes('createTokenBudget'), false, 'DeepSeek report token budget must remain disabled')
 assert.equal(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), false, 'DeepSeek report rate limit must remain disabled')
@@ -63,8 +63,12 @@ assert.equal(reportHandler.includes('AbortSignal.timeout'), false, 'DeepSeek rep
 assert.ok(reportHandler.includes('REPORT_ALREADY_IN_PROGRESS'), 'duplicate in-flight report protection is missing')
 assert.ok(reportHandler.includes('CLIENT_DISCONNECTED'), 'client disconnect cancellation is missing')
 assert.ok(reportHandler.includes('cached: true'), 'completed report reuse is missing')
-assert.ok(reportHandler.includes('buildF1ReportMessages(input, retryIssue)'), 'validation-guided DeepSeek retry is missing')
-assert.ok(reportHandler.includes('validationIssue'), 'sanitized report validation diagnostics are missing')
+assert.ok(reportHandler.includes('buildF1ReportMessages(input, repairContext)'), 'validation-guided report repair is missing')
+assert.ok(reportHandler.includes('validationIssues'), 'sanitized report validation diagnostics are missing')
+assert.ok(reportHandler.includes('repairF1ReportEvidence'), 'grounded evidence repair is missing')
+assert.ok(reportHandler.includes('buildDeterministicF1FallbackReport'), 'bounded evidence-only fallback is missing')
+assert.ok(reportHandler.includes("analysisMode: 'evidence_only'"), 'evidence-only fallback marker is missing')
+assert.ok(reportHandler.includes('if (!fallbackEligible) throw'), 'provider/network failures must not be disguised as completed analysis')
 
 const deepSeekModelFiles = [
   '.env.example',
@@ -87,6 +91,20 @@ assert.ok(reportContract.includes('F1_OFFICIAL_CRITERIA'), 'official F-1 criteri
 assert.ok(reportContract.includes('Never invent facts'), 'evidence-only report rule is missing')
 assert.ok(reportContract.includes('approval/refusal probability'), 'visa prediction guardrail is missing')
 assert.ok(reportContract.includes('strict machine validator'), 'validation repair instruction is missing')
+assert.ok(reportContract.includes('evidenceCatalog'), 'exact evidence reference catalog is missing')
+assert.ok(reportContract.includes('still return that dimension'), 'missing-information report guidance is missing')
+
+const providerNeutralUiFiles = [
+  'src/modules/feedback/index.tsx',
+  'src/modules/feedback/reportViewModel.ts',
+  'src/modules/feedback/components/FeedbackReportView.tsx',
+  'src/modules/practice/components/InterviewComplete.tsx',
+  'src/modules/practice/components/UserContextForm.tsx',
+]
+for (const file of providerNeutralUiFiles) {
+  const content = readFileSync(join(root, file), 'utf8')
+  assert.equal(content.includes('DeepSeek'), false, `provider name exposed in user-facing analysis UI: ${file}`)
+}
 
 const reportCallers = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))
@@ -99,6 +117,7 @@ assert.deepEqual(
 
 const analysisEngine = readFileSync(join(root, 'src/modules/shared/store/analysisEngine.ts'), 'utf8')
 assert.ok(analysisEngine.includes('overallScore: null'), 'unavailable report must not contain a synthetic score')
+assert.ok(analysisEngine.includes("structuredReport.analysisMode === 'evidence_only'"), 'evidence-only reports must suppress synthetic scores')
 assert.equal(analysisEngine.includes('...analyzeInterview(record)'), false, 'unavailable F1 report must not run the local scoring engine')
 assert.equal(analysisEngine.includes('AbortSignal.timeout'), false, 'browser report request must not have a fixed timeout')
 

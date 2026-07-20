@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import {
   buildF1ReportMessages,
   getModelMessageContent,
+  repairF1ReportEvidence,
   sanitizeReportRequest,
   validateF1StructuredReport,
 } from '../server/shared/f1ReportContract.mjs'
@@ -49,9 +50,10 @@ if (!input) throw new Error('Smoke fixture is invalid')
 let parsed
 let report
 let lastError
-let retryIssue = ''
+let repairContext = ''
+let validationIssues = []
 let attempts = 0
-for (attempts = 1; attempts <= 2; attempts += 1) {
+for (attempts = 1; attempts <= 3; attempts += 1) {
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -61,7 +63,7 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
       },
       body: JSON.stringify({
         model,
-        messages: buildF1ReportMessages(input, retryIssue),
+        messages: buildF1ReportMessages(input, repairContext),
         response_format: { type: 'json_object' },
         thinking: { type: 'enabled' },
         reasoning_effort: 'high',
@@ -74,46 +76,38 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
     if (!response.ok) throw new Error(`DeepSeek final-report request failed with status ${response.status}`)
     const content = getModelMessageContent(payload)
     if (!content) throw new Error('DeepSeek returned no final-report content')
-    parsed = JSON.parse(content)
-    let validationIssue = ''
+    const originalDraft = JSON.parse(content)
+    parsed = originalDraft
+    validationIssues = []
     report = validateF1StructuredReport(parsed, input, {
-      onIssue: issue => { validationIssue = issue },
+      onIssue: issue => { validationIssues.push(issue) },
     })
     if (report) break
-    retryIssue = validationIssue || 'UNKNOWN_VALIDATION_FAILURE'
-    lastError = new Error(`DeepSeek report did not pass the evidence contract: ${retryIssue}`)
+    const repairEvents = []
+    const evidenceRepairedDraft = repairF1ReportEvidence(parsed, input, {
+      onRepair: event => { repairEvents.push(event) },
+    })
+    if (repairEvents.length > 0) {
+      const repairedIssues = []
+      report = validateF1StructuredReport(evidenceRepairedDraft, input, {
+        onIssue: issue => { repairedIssues.push(issue) },
+        allowMaterializedEvidence: true,
+      })
+      if (report) break
+      parsed = evidenceRepairedDraft
+      validationIssues = repairedIssues
+    }
+    validationIssues = validationIssues.length > 0 ? [...new Set(validationIssues)] : ['UNKNOWN_VALIDATION_FAILURE']
+    repairContext = { issues: validationIssues, draft: parsed }
+    lastError = new Error(`DeepSeek report did not pass the evidence contract: ${validationIssues.join(',')}`)
   } catch (error) {
     lastError = error
-    if (error instanceof SyntaxError) retryIssue = 'INVALID_JSON'
+    if (error instanceof SyntaxError) repairContext = { issues: ['INVALID_JSON'], draft: null }
   }
 }
 
 if (!report) {
-  if (parsed) console.error(JSON.stringify({
-    schemaVersion: parsed?.schemaVersion,
-    reportType: parsed?.reportType,
-    criteriaVersion: parsed?.criteriaVersion,
-    overallScore: parsed?.overallScore,
-    readiness: parsed?.readiness,
-    headline: parsed?.headline,
-    summary: parsed?.summary,
-    dimensions: parsed?.dimensions?.map(item => ({
-      id: item?.id,
-      score: item?.score,
-      status: item?.status,
-      summary: item?.summary,
-      evidence: item?.evidence,
-      officialRuleIds: item?.officialRuleIds,
-      reasoning: item?.reasoning,
-      actions: item?.actions,
-    })),
-    insights: {
-      strengths: parsed?.strengths,
-      priorities: parsed?.priorities,
-    },
-    questionReviews: parsed?.questionReviews,
-    actionPlan: parsed?.actionPlan,
-  }, null, 2))
+  console.error(`final-report-validation-issues=${validationIssues.join(',') || 'unknown'}`)
   throw lastError || new Error('DeepSeek report did not pass the evidence contract')
 }
 
