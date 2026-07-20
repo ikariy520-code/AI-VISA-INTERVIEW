@@ -11,8 +11,6 @@ dist
 !.dev.vars.example
 
 .vercel
-.netlify
-.wrangler
 
 .DS_Store
 .claude

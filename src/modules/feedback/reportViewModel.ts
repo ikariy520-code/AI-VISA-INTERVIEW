@@ -1,12 +1,12 @@
 import type { InterviewSession, QAPair } from './types'
 import { F1_OFFICIAL_CRITERIA } from '../practice/data/f1OfficialCriteria'
 
-export type ReportSource = 'sample' | 'deepseek' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
+export type ReportSource = 'sample' | 'deepseek' | 'evidence_only' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
 
 export interface ReportDimension {
   id: string
   label: string
-  score: number
+  score: number | null
   status: '稳固' | '需补充' | '优先改进'
   summary: string
   evidence: string
@@ -28,6 +28,7 @@ export interface QuestionReview {
   didWell: string[]
   improve: string[]
   betterAnswer: string
+  evidenceOnly?: boolean
 }
 
 export interface PracticeStep {
@@ -83,20 +84,22 @@ function normalizedStrings(value: unknown, maxItems: number) {
 
 export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
   if (!isRecord(value)) return null
+  const evidenceOnly = value.source === 'evidence_only'
   const rawDimensions = Array.isArray(value.dimensions) ? value.dimensions : []
   const rawReviews = Array.isArray(value.questionReviews) ? value.questionReviews : []
   if (rawDimensions.length !== 6 || rawReviews.length === 0) return null
 
   const dimensions = rawDimensions.map(item => {
     if (!isRecord(item)) return null
-    const score = normalizedScore(item.score)
+    const rawScore = normalizedScore(item.score)
+    const score = evidenceOnly ? null : rawScore
     return {
       id: normalizedText(item.id, '', 60),
       label: normalizedText(item.label, '', 60),
       score,
       status: (['稳固', '需补充', '优先改进'].includes(String(item.status))
         ? item.status
-        : score >= 80 ? '稳固' : score >= 65 ? '需补充' : '优先改进') as ReportDimension['status'],
+        : rawScore >= 80 ? '稳固' : rawScore >= 65 ? '需补充' : '优先改进') as ReportDimension['status'],
       summary: normalizedText(item.summary, '本次对话证据不足。', 1_000),
       evidence: normalizedText(item.evidence, '本次对话证据不足', 1_200),
     }
@@ -115,10 +118,11 @@ export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
 
   const questionReviews = rawReviews.map<QuestionReview | null>((item, index) => {
     if (!isRecord(item)) return null
-    const score = normalizedScore(item.score, 55)
+    const rawScore = normalizedScore(item.score, 55)
+    const score = evidenceOnly ? null : rawScore
     const verdict = ['回答有效', '基本回答', '需要重答'].includes(String(item.verdict))
       ? item.verdict as QuestionReview['verdict']
-      : score >= 80 ? '回答有效' : score >= 60 ? '基本回答' : '需要重答'
+      : evidenceOnly ? '待分析' : rawScore >= 80 ? '回答有效' : rawScore >= 60 ? '基本回答' : '需要重答'
     return {
       id: normalizedText(item.id, `q${index + 1}`, 100),
       question: normalizedText(item.question, '', 4_000),
@@ -129,6 +133,7 @@ export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
       didWell: normalizedStrings(item.didWell, 3),
       improve: normalizedStrings(item.improve, 4),
       betterAnswer: normalizedText(item.betterAnswer, '请使用你的真实信息重新组织回答。', 2_000),
+      evidenceOnly,
     }
   }).filter((item): item is QuestionReview => item !== null && Boolean(item.question && item.answer))
   if (questionReviews.length === 0) return null
@@ -144,7 +149,7 @@ export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
   }).filter((item): item is PracticeStep => item !== null).slice(0, 3)
   if (actionPlan.length !== 3) return null
 
-  const source = ['deepseek', 'doubao', 'hybrid', 'local', 'sample', 'unavailable'].includes(String(value.source))
+  const source = ['deepseek', 'evidence_only', 'doubao', 'hybrid', 'local', 'sample', 'unavailable'].includes(String(value.source))
     ? value.source as ReportSource
     : 'deepseek'
 
@@ -152,7 +157,7 @@ export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
     id: normalizedText(value.id, `report-${Date.now()}`, 120),
     source,
     title: normalizedText(value.title, '美国签证模拟面签', 200),
-    subtitle: normalizedText(value.subtitle, 'AI 模拟面签表现报告', 120),
+    subtitle: normalizedText(value.subtitle, '模拟面签表现报告', 120),
     date: normalizedText(value.date, '本次练习', 40),
     time: normalizedText(value.time, '', 40),
     duration: normalizedText(value.duration, '00:00', 20),
@@ -160,7 +165,7 @@ export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
     profile: normalizedText(value.profile, '基于本次面签对话', 100),
     evaluationLabel: normalizedText(value.evaluationLabel, 'Interview evaluation', 100),
     dimensionIntro: normalizedText(value.dimensionIntro, '依据本次回答进行综合评估。', 500),
-    overallScore: normalizedScore(value.overallScore),
+    overallScore: evidenceOnly ? null : normalizedScore(value.overallScore),
     readiness: normalizedText(value.readiness, '需要补强', 60),
     headline: normalizedText(value.headline, '本次反馈已经生成。', 500),
     summary: normalizedText(value.summary, '本报告不预测真实签证结果。', 1_500),
@@ -190,26 +195,29 @@ const officialRuleMap = new Map(F1_OFFICIAL_CRITERIA.map(rule => [rule.id, rule]
 function buildStructuredFeedbackReport(session: InterviewSession): FeedbackReport | null {
   const report = session.structuredReport
   if (!report) return null
+  const evidenceOnly = report.analysisMode === 'evidence_only'
   return {
     id: session.id,
-    source: 'deepseek',
+    source: evidenceOnly ? 'evidence_only' : 'deepseek',
     title: session.title,
     subtitle: '模拟面签证据报告',
     date: session.date,
     time: session.time,
     duration: session.duration,
     questionCount: session.transcript.length,
-    profile: `DeepSeek 约束分析 · 官方依据 ${report.criteriaVersion}`,
+    profile: `${evidenceOnly ? '基础证据复盘' : '证据约束分析'} · 官方依据 ${report.criteriaVersion}`,
     evaluationLabel: 'F-1 evidence review',
-    dimensionIntro: '根据脱敏背景、实际回答和当前版本的美国国务院公开依据检查准备情况。',
-    overallScore: report.overallScore,
-    readiness: report.readiness,
+    dimensionIntro: evidenceOnly
+      ? '根据脱敏背景和实际回答保留六项核对方向；信息不足处明确说明，不生成推测性分数。'
+      : '根据脱敏背景、实际回答和当前版本的美国国务院公开依据检查准备情况。',
+    overallScore: evidenceOnly ? null : report.overallScore,
+    readiness: evidenceOnly ? '基础证据复盘' : report.readiness,
     headline: report.headline,
     summary: report.summary,
     dimensions: report.dimensions.map(dimension => ({
       id: dimension.id,
       label: dimension.label,
-      score: dimension.score,
+      score: evidenceOnly ? null : dimension.score,
       status: dimension.status === 'stable' ? '稳固' : dimension.status === 'needs_evidence' ? '需补充' : '优先改进',
       summary: dimension.summary,
       evidence: [
@@ -230,12 +238,13 @@ function buildStructuredFeedbackReport(session: InterviewSession): FeedbackRepor
         id: qa?.id ?? `q${review.index}`,
         question: qa?.question ?? review.questionId,
         answer: qa?.answer ?? review.answerEvidence,
-        score: review.score,
-        verdict: review.verdict === 'complete' ? '回答有效' : review.verdict === 'partial' ? '基本回答' : '需要重答',
+        score: evidenceOnly ? null : review.score,
+        verdict: evidenceOnly ? '待分析' : review.verdict === 'complete' ? '回答有效' : review.verdict === 'partial' ? '基本回答' : '需要重答',
         summary: review.summary,
         didWell: review.strengths.length > 0 ? review.strengths : ['本题已经留下可供复盘的真实回答。'],
         improve: review.improvements.length > 0 ? review.improvements : ['根据报告指出的证据缺口继续准备真实信息。'],
         betterAnswer: review.preparationDirection,
+        evidenceOnly,
       } satisfies QuestionReview
     }),
     actionPlan: report.actionPlan,
@@ -252,7 +261,7 @@ function buildUnavailableFeedbackReport(session: InterviewSession): FeedbackRepo
     time: session.time,
     duration: session.duration,
     questionCount: session.transcript.length,
-    profile: 'DeepSeek 综合分析暂不可用',
+    profile: '综合分析暂不可用',
     evaluationLabel: 'Transcript only',
     dimensionIntro: '为避免产生没有依据的判断，本页不显示本地推测性评分。',
     overallScore: null,
@@ -268,7 +277,7 @@ function buildUnavailableFeedbackReport(session: InterviewSession): FeedbackRepo
       answer: qa.answer,
       score: null,
       verdict: '待分析',
-      summary: 'DeepSeek 综合分析暂不可用，本题暂不生成评价。',
+      summary: '综合分析暂不可用，本题暂不生成评价。',
       didWell: [],
       improve: [],
       betterAnswer: '请保留自己的真实回答；当前没有生成参考方向。',
@@ -354,7 +363,7 @@ export function buildFeedbackReport(session: InterviewSession): FeedbackReport {
         makeLiveDimension(session, 'delivery', '表达效率', ['逻辑', '说服'], overallScore, '检查回答是否直接、简洁并包含必要细节。', '真实面签中应先回答问题，再补充最有用的事实。'),
       ]
 
-  const sorted = [...dimensions].sort((a, b) => b.score - a.score)
+  const sorted = [...dimensions].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
   const top = sorted.slice(0, 2)
   const bottom = sorted.slice(-2).reverse()
 

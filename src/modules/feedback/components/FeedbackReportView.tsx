@@ -33,17 +33,19 @@ function DimensionCard({ dimension }: { dimension: ReportDimension }) {
           <p className={`mt-1 text-[11px] font-semibold ${tone.text}`}>{dimension.status}</p>
         </div>
         <span className={`rounded-full px-2.5 py-1 text-[13px] font-semibold tabular-nums ${tone.panel} ${tone.text}`}>
-          {dimension.score}
+          {dimension.score ?? '—'}
         </span>
       </div>
-      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#ececf0]">
+      {dimension.score === null ? (
+        <p className="mt-4 text-[11px] leading-5 text-[#86868b]">本项只保留证据与核对方向，不生成推测性分数。</p>
+      ) : <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#ececf0]">
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${dimension.score}%` }}
           transition={{ duration: 0.7, ease: [0.25, 0.1, 0, 1] }}
           className={`h-full rounded-full ${tone.bar}`}
         />
-      </div>
+      </div>}
       <p className="mt-4 text-[13px] font-medium leading-6 text-[#424245]">{dimension.summary}</p>
       <p className="mt-2 text-[12px] leading-5 text-[#86868b]">{dimension.evidence}</p>
       {dimension.officialSources && dimension.officialSources.length > 0 && (
@@ -99,7 +101,7 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
                 <p className="mt-2 text-[13px] leading-6 text-[#424245]">{review.answer}</p>
               </div>
 
-              {review.score === null ? (
+              {review.score === null && !review.evidenceOnly ? (
                 <div className="mt-4 rounded-[18px] border border-amber-200/60 bg-[#fffbf2] p-4 text-[12px] leading-5 text-[#755f3b]">
                   分析服务暂不可用，本题只保留原始问答，不生成推测性结论。
                 </div>
@@ -119,9 +121,9 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
               </div>
 
               <div className="mt-4 rounded-[18px] border border-blue-200/60 bg-[#f4f8ff] p-4">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#3574b8]">参考表达</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#3574b8]">{review.evidenceOnly ? '复盘方向' : '参考表达'}</p>
                 <p className="mt-2 text-[13px] leading-6 text-[#315575]">{review.betterAnswer}</p>
-                <p className="mt-2 text-[10px] leading-4 text-[#7892aa]">请替换为你的真实信息，不要背诵或编造样例中的事实。</p>
+                <p className="mt-2 text-[10px] leading-4 text-[#7892aa]">只使用自己的真实信息，不要背诵或编造未提供的事实。</p>
               </div>
               </>}
             </div>
@@ -144,19 +146,25 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
       {report.source === 'deepseek' && (
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-emerald-200/70 bg-[#eefaf5] px-4 py-3 text-[#216b52]">
           <HiOutlineShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p className="text-[12px] leading-5"><span className="font-semibold">本报告由 DeepSeek 按受控规则完成综合分析。</span> 结论依据脱敏背景、实际回答和报告中标注的官方规则；它用于练习准备，不预测签证结果。</p>
+          <p className="text-[12px] leading-5"><span className="font-semibold">本报告按受控证据规则完成综合分析。</span> 结论依据脱敏背景、实际回答和报告中标注的官方规则；它用于练习准备，不预测签证结果。</p>
+        </div>
+      )}
+      {report.source === 'evidence_only' && (
+        <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-blue-200/70 bg-[#f3f8ff] px-4 py-3 text-[#315f8d]">
+          <HiOutlineShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <p className="text-[12px] leading-5"><span className="font-semibold">本次提供基础证据复盘。</span> 六个维度和逐题原始回答均已保留；无法可靠判断的部分明确标注为信息不足，不生成推测性分数。</p>
         </div>
       )}
       {report.source === 'local' && (
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-blue-200/70 bg-[#f3f8ff] px-4 py-3 text-[#315f8d]">
           <HiOutlineShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p className="text-[12px] leading-5"><span className="font-semibold">这是本地基础检查。</span> 当前只用于尚未接入综合报告的签证类型，不应视为 DeepSeek 分析或官方结论。</p>
+          <p className="text-[12px] leading-5"><span className="font-semibold">这是本地基础检查。</span> 当前只用于尚未接入综合报告的签证类型，不应视为完整综合分析或官方结论。</p>
         </div>
       )}
       {report.source === 'unavailable' && (
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-amber-200/70 bg-[#fff8ea] px-4 py-3 text-[#855817]">
           <HiOutlineExclamationTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p className="text-[12px] leading-5"><span className="font-semibold">DeepSeek 综合分析暂不可用。</span> 为避免误导，本页只展示本次问答，不显示本地推测性评分。</p>
+          <p className="text-[12px] leading-5"><span className="font-semibold">综合分析暂不可用。</span> 为避免误导，本页只展示本次问答，不显示本地推测性评分。</p>
         </div>
       )}
 

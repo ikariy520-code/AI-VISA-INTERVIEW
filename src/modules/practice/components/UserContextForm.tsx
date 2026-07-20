@@ -389,7 +389,7 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="w-full">
           <div className="text-center">
             <div className="app-eyebrow mb-5"><HiOutlineShieldCheck className="h-4 w-4" /> Privacy Check</div>
-            <h1 className="text-[32px] font-semibold tracking-[-0.045em] text-[#1d1d1f]">确认发送给 AI 的信息</h1>
+            <h1 className="text-[32px] font-semibold tracking-[-0.045em] text-[#1d1d1f]">确认本次模拟使用的信息</h1>
             <p className="mx-auto mt-3 max-w-lg text-[13px] leading-6 text-[#6e6e73]">请确认以下内容不包含姓名、证件号码、联系方式或详细地址。</p>
           </div>
 
@@ -399,7 +399,7 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
               <div><p className="text-[13px] font-semibold text-[#146c50]">只发送本次面签需要的背景摘要</p>
               <p className="mt-1 text-[11px] leading-5 text-[#347861]">{isF1
                 ? '不包含 DS-160、I-20、护照号或 SEVIS ID，网站不会长期保存这份背景资料。'
-                : '不包含护照、银行流水、联系人身份信息、详细地址或行程订单，网站不会长期保存这份背景资料。'} 开始模拟后，你的语音只会发送给端到端语音模型用于实时识别和发音；当前问题控制与反馈分析在本地完成。</p></div>
+                : '不包含护照、银行流水、联系人身份信息、详细地址或行程订单，网站不会长期保存这份背景资料。'} 开始模拟后，你的语音仅用于实时识别和生成面签官语音；脱敏背景与面签转写仅用于本次模拟和反馈。</p></div>
             </div>
             <dl className="divide-y divide-black/[0.06] px-5 sm:px-6">
               {reviewItems.map(([label, value]) => (
@@ -438,8 +438,8 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
           <div>
             <p className="text-[13px] font-semibold text-emerald-900">{isF1 ? '无需上传 DS-160 或 I-20' : '无需上传护照、流水或行程订单'}</p>
             <p className="mt-1 text-[12px] leading-5 text-emerald-700">{isF1
-              ? '我们不需要姓名、护照号、SEVIS ID、联系方式或详细地址。提交前你可以查看发送给 AI 的全部信息。'
-              : '我们不需要真实姓名、联系人姓名、护照号、酒店地址、航班号或银行信息。提交前你可以查看发送给 AI 的全部信息。'}</p>
+              ? '我们不需要姓名、护照号、SEVIS ID、联系方式或详细地址。提交前你可以查看本次模拟将使用的全部信息。'
+              : '我们不需要真实姓名、联系人姓名、护照号、酒店地址、航班号或银行信息。提交前你可以查看本次模拟将使用的全部信息。'}</p>
           </div>
         </div>
       </motion.div>

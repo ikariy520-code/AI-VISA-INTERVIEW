@@ -75,6 +75,7 @@ export interface F1ReportPracticeStep {
 export interface F1StructuredReport {
   schemaVersion: 2
   reportType: 'practice_readiness'
+  analysisMode: 'model' | 'evidence_only'
   criteriaVersion: string
   overallScore: number
   readiness: '准备较充分' | '仍需补充' | '建议重点准备'
@@ -173,35 +174,51 @@ export function sanitizeReportRequest(value: unknown): InterviewReportRequest | 
   }
 }
 
-function includesExactEvidence(corpus: string, quote: string) {
-  const normalizedCorpus = corpus.toLowerCase().replace(/\s+/g, ' ')
-  const normalizedQuote = quote.toLowerCase().replace(/\s+/g, ' ')
-  return normalizedQuote.length >= 2 && normalizedCorpus.includes(normalizedQuote)
-}
-
-function includesGroundedProfileEvidence(corpus: string, quote: string) {
-  if (includesExactEvidence(corpus, quote)) return true
-  const facts = quote.split(/[,，]/).map(item => item.trim()).filter(Boolean)
-  return facts.length > 1 && facts.every(fact => includesExactEvidence(corpus, fact))
-}
-
-function buildProfileEvidenceCorpus(value: unknown, path = ''): string[] {
-  if (Array.isArray(value)) return value.flatMap((item, index) => buildProfileEvidenceCorpus(item, `${path}[${index}]`))
-  if (isRecord(value)) return Object.entries(value).flatMap(([key, item]) => buildProfileEvidenceCorpus(item, path ? `${path}.${key}` : key))
+function buildProfileEvidenceCatalog(value: unknown, path = ''): Array<{ id: string; source: 'profile'; reference: 'profile'; quote: string }> {
+  if (Array.isArray(value)) return value.flatMap((item, index) => buildProfileEvidenceCatalog(item, `${path}[${index}]`))
+  if (isRecord(value)) return Object.entries(value).flatMap(([key, item]) => buildProfileEvidenceCatalog(item, path ? `${path}.${key}` : key))
   if (!path || value === null || value === undefined) return []
-  const leaf = path.split('.').slice(-1)[0]
-  return [`${path}: ${String(value)}`, `${leaf}: ${String(value)}`, String(value)]
+  const quote = String(value).slice(0, 500)
+  return quote.trim().length >= 2 ? [{ id: `profile:${path}`, source: 'profile', reference: 'profile', quote }] : []
 }
 
-function isValidEvidenceReference(source: F1ReportEvidence['source'], reference: string, input: InterviewReportRequest) {
-  return source === 'profile'
-    ? reference === 'profile'
-    : input.answers.some(answer => answer.questionId === reference)
+export function buildF1EvidenceCatalog(input: InterviewReportRequest) {
+  return [
+    ...buildProfileEvidenceCatalog(input.safeContext),
+    ...input.answers.map(answer => ({
+      id: `answer:${answer.questionId}`,
+      source: 'answer' as const,
+      reference: answer.questionId,
+      quote: answer.answer,
+    })),
+  ]
 }
 
 function hasForbiddenClaim(value: unknown) {
-  const text = JSON.stringify(value)
-  return /(获签概率|过签率|一定(?:会)?通过|一定(?:会)?拒签|will be approved|will be refused|approval probability|回答过短|回答太短|字数太少|高级词汇|word count|too short)/i.test(text)
+  if (!isRecord(value)) return false
+  const generatedEvaluation = {
+    readiness: value.readiness,
+    headline: value.headline,
+    summary: value.summary,
+    dimensions: Array.isArray(value.dimensions) ? value.dimensions.map(item => isRecord(item) ? {
+      status: item.status,
+      summary: item.summary,
+      reasoning: item.reasoning,
+      actions: item.actions,
+    } : item) : value.dimensions,
+    strengths: value.strengths,
+    priorities: value.priorities,
+    questionReviews: Array.isArray(value.questionReviews) ? value.questionReviews.map(item => isRecord(item) ? {
+      verdict: item.verdict,
+      summary: item.summary,
+      strengths: item.strengths,
+      improvements: item.improvements,
+      preparationDirection: item.preparationDirection,
+    } : item) : value.questionReviews,
+    actionPlan: value.actionPlan,
+    disclaimer: value.disclaimer,
+  }
+  return /(获签概率|过签率|一定(?:会)?通过|一定(?:会)?拒签|will be approved|will be refused|approval probability|回答过短|回答太短|字数太少|高级词汇|word count|too short)/i.test(JSON.stringify(generatedEvaluation))
 }
 
 function cleanFeedbackArray(value: unknown) {
@@ -216,25 +233,28 @@ function cleanActionArray(value: unknown) {
 
 function normalizeEvidence(value: unknown, input: InterviewReportRequest): F1ReportEvidence | null {
   if (!isRecord(value)) return null
+  const catalog = buildF1EvidenceCatalog(input)
+  const evidenceId = typeof value.evidenceId === 'string' && value.evidenceId.length <= 200 ? value.evidenceId : ''
+  if (evidenceId) {
+    const catalogEntry = catalog.find(entry => entry.id === evidenceId)
+    return catalogEntry
+      ? { source: catalogEntry.source, reference: catalogEntry.reference, quote: catalogEntry.quote }
+      : null
+  }
   const source = value.source === 'profile' ? 'profile' : value.source === 'answer' ? 'answer' : null
-  const reference = cleanText(value.reference, 80)
-  const quote = cleanText(value.quote, 500)
-  if (!source || !reference || !quote || !isValidEvidenceReference(source, reference, input)) return null
-  const corpus = source === 'profile'
-    ? [JSON.stringify(input.safeContext), ...buildProfileEvidenceCorpus(input.safeContext)].join('\n')
-    : input.answers.find(answer => answer.questionId === reference)?.answer ?? ''
-  const grounded = source === 'profile'
-    ? includesGroundedProfileEvidence(corpus, quote)
-    : includesExactEvidence(corpus, quote)
-  return grounded ? { source, reference, quote } : null
+  const reference = typeof value.reference === 'string' && value.reference.length <= 80 ? value.reference : ''
+  const quote = typeof value.quote === 'string' && value.quote.length <= 4_000 ? value.quote : ''
+  if (!source || !reference || !quote) return null
+  const catalogEntry = catalog.find(entry => (
+    entry.source === source
+    && entry.reference === reference
+    && entry.quote === quote
+  ))
+  return catalogEntry ? { source, reference, quote } : null
 }
 
 function normalizeQuestionAnswerEvidence(value: unknown, sourceAnswer: InterviewReportAnswer): string | null {
-  const directQuote = cleanText(value, 500)
-  if (directQuote && includesExactEvidence(sourceAnswer.answer, directQuote)) return directQuote
-  if (!isRecord(value) || value.source !== 'answer' || value.reference !== sourceAnswer.questionId) return null
-  const nestedQuote = cleanText(value.quote, 500)
-  return nestedQuote && includesExactEvidence(sourceAnswer.answer, nestedQuote) ? nestedQuote : null
+  return typeof value === 'string' && value === sourceAnswer.answer ? sourceAnswer.answer : null
 }
 
 export function validateF1StructuredReport(value: unknown, input: InterviewReportRequest): F1StructuredReport | null {
@@ -252,7 +272,7 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
     const id = item.id as F1ReportDimensionId
     const score = cleanScore(item.score)
     const status = item.status === 'stable' || item.status === 'needs_evidence' || item.status === 'priority' ? item.status : null
-    const rawEvidence = Array.isArray(item.evidence) ? item.evidence.slice(0, 5) : []
+    const rawEvidence = Array.isArray(item.evidence) ? item.evidence : []
     const evidence = rawEvidence.map(entry => normalizeEvidence(entry, input)).filter((entry): entry is F1ReportEvidence => entry !== null)
     const rawOfficialRuleIds = cleanStringArray(item.officialRuleIds, 6, 80)
     const officialRuleIds = rawOfficialRuleIds.length === 0
@@ -261,7 +281,7 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
     const actions = cleanActionArray(item.actions)
     const summary = cleanText(item.summary, 1_000)
     const reasoning = cleanText(item.reasoning, 1_500)
-    if (score === null || !status || evidence.length === 0 || evidence.length !== rawEvidence.length || officialRuleIds.length === 0 || (rawOfficialRuleIds.length > 0 && officialRuleIds.length !== rawOfficialRuleIds.length) || actions.length === 0 || !summary || !reasoning) return null
+    if (score === null || !status || rawEvidence.length === 0 || rawEvidence.length > 5 || evidence.length !== rawEvidence.length || officialRuleIds.length === 0 || (rawOfficialRuleIds.length > 0 && officialRuleIds.length !== rawOfficialRuleIds.length) || actions.length === 0 || !summary || !reasoning) return null
     return {
       id,
       label: DIMENSION_LABELS[id],
@@ -277,16 +297,16 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
   if (dimensions.some(item => item === null) || new Set(dimensions.map(item => item?.id)).size !== F1_REPORT_DIMENSION_IDS.length) return null
 
   if (!Array.isArray(value.questionReviews) || value.questionReviews.length !== input.answers.length) return null
-  const questionReviews = value.questionReviews.map(item => {
+  const questionReviews = value.questionReviews.map((item, position) => {
     if (!isRecord(item)) return null
     const index = Number(item.index)
-    const sourceAnswer = input.answers[index - 1]
+    const sourceAnswer = input.answers[position]
     const score = cleanScore(item.score)
     const verdict = item.verdict === 'complete' || item.verdict === 'partial' || item.verdict === 'needs_preparation' ? item.verdict : null
     const answerEvidence = sourceAnswer ? normalizeQuestionAnswerEvidence(item.answerEvidence, sourceAnswer) : null
     const summary = cleanText(item.summary, 800)
     const preparationDirection = cleanText(item.preparationDirection, 1_000)
-    if (!sourceAnswer || item.questionId !== sourceAnswer.questionId || score === null || !verdict || !summary || !preparationDirection || !answerEvidence) return null
+    if (!sourceAnswer || index !== position + 1 || item.questionId !== sourceAnswer.questionId || score === null || !verdict || !summary || !preparationDirection || !answerEvidence) return null
     return {
       index,
       questionId: sourceAnswer.questionId,
@@ -314,18 +334,21 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
       ? { title, detail, evidenceRefs, officialRuleIds }
       : null
   }
-  const strengths = Array.isArray(value.strengths) ? value.strengths.map(normalizeInsight).filter((item): item is F1ReportInsight => item !== null).slice(0, 4) : []
-  const priorities = Array.isArray(value.priorities) ? value.priorities.map(normalizeInsight).filter((item): item is F1ReportInsight => item !== null).slice(0, 4) : []
-  if (strengths.length === 0 || priorities.length === 0) return null
+  const rawStrengths = Array.isArray(value.strengths) ? value.strengths : []
+  const rawPriorities = Array.isArray(value.priorities) ? value.priorities : []
+  const strengths = rawStrengths.map(normalizeInsight).filter((item): item is F1ReportInsight => item !== null)
+  const priorities = rawPriorities.map(normalizeInsight).filter((item): item is F1ReportInsight => item !== null)
+  if (rawStrengths.length < 1 || rawStrengths.length > 3 || strengths.length !== rawStrengths.length) return null
+  if (rawPriorities.length < 1 || rawPriorities.length > 3 || priorities.length !== rawPriorities.length) return null
 
-  const actionPlan = Array.isArray(value.actionPlan)
-    ? value.actionPlan.map((item, index) => isRecord(item) ? {
+  const rawActionPlan = Array.isArray(value.actionPlan) ? value.actionPlan : []
+  const actionPlan = rawActionPlan
+    .map((item, index) => isRecord(item) ? {
       label: cleanText(item.label, 30) || `STEP ${index + 1}`,
       title: cleanText(item.title, 150),
       detail: cleanText(item.detail, 800),
-    } : null).filter((item): item is F1ReportPracticeStep => Boolean(item?.label && item.title && item.detail)).slice(0, 3)
-    : []
-  if (actionPlan.length !== 3) return null
+    } : null).filter((item): item is F1ReportPracticeStep => Boolean(item?.label && item.title && item.detail))
+  if (rawActionPlan.length !== 3 || actionPlan.length !== 3) return null
 
   const headline = cleanText(value.headline, 300)
   const summary = cleanText(value.summary, 1_500)
@@ -334,6 +357,7 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
   return {
     schemaVersion: 2,
     reportType: 'practice_readiness',
+    analysisMode: value.analysisMode === 'evidence_only' ? 'evidence_only' : 'model',
     criteriaVersion: input.criteriaVersion,
     overallScore,
     readiness,
@@ -348,8 +372,12 @@ export function validateF1StructuredReport(value: unknown, input: InterviewRepor
   }
 }
 
-export function buildF1ReportMessages(input: InterviewReportRequest, retryIssue = '') {
-  const messages: Array<{ role: 'system' | 'user'; content: string }> = [
+export function buildF1ReportMessages(
+  input: InterviewReportRequest,
+  repairContext: string | { issues?: string[]; draft?: Record<string, unknown> | null } = '',
+) {
+  const evidenceCatalog = buildF1EvidenceCatalog(input)
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     {
       role: 'system',
       content: `You are an evidence-bound reviewer of an F-1 visa practice interview. Return one valid JSON object only.
@@ -358,8 +386,8 @@ Purpose: assess practice readiness, not visa eligibility and never approval/refu
 
 Evidence rules:
 1. Use only safeContext and answers supplied by the user. Never invent facts. Never invent a school, course, amount, job, family fact, plan, document fact, or contradiction.
-2. Every dimension requires at least one exact evidence quote copied from safeContext or an answer and at least one officialRuleId from the provided official criteria. For profile evidence use reference="profile"; for answer evidence use its exact questionId such as "f1_01". Strength and priority evidenceRefs use the same values.
-3. If evidence is missing, label it as an evidence gap. Absence is not proof of a negative fact.
+2. Every dimension requires at least one evidence item and at least one officialRuleId from the provided official criteria. Choose evidence only from evidenceCatalog and return it as {evidenceId:"exact catalog id"}. The server will materialize its source, reference, and exact quote; never write or paraphrase a quote yourself.
+3. If information needed for a dimension was not provided or was not discussed, still return that dimension. Cite the closest relevant evidenceCatalog item, set status="needs_evidence", and state the specific reason in summary and reasoning, such as “本次交流未提及资助人的职业和收入” or “现有信息不足以判断该项”. Missing information is an evidence gap, not proof of a negative fact.
 4. For young students, do not demand property, employment, or a rigid long-term career plan. Assess present intent to depart after study.
 5. A direct yes/no can fully answer a yes/no question. Do not demand extra detail unless the answer creates a material inconsistency or the question itself is compound.
 6. preparationDirection gives a fact-gathering and reasoning framework; it must not fabricate a polished answer for the applicant to memorize.
@@ -372,11 +400,11 @@ Allowed official criteria: ${JSON.stringify(F1_OFFICIAL_CRITERIA)}
 Required JSON fields:
 schemaVersion=2; reportType="practice_readiness"; criteriaVersion="${F1_OFFICIAL_CRITERIA_VERSION}"; overallScore=0..100; readiness="准备较充分"|"仍需补充"|"建议重点准备"; headline; summary; dimensions; strengths; priorities; questionReviews; actionPlan (exactly 3); disclaimer.
 
-Each dimension: {id,label,score,status:"stable"|"needs_evidence"|"priority",summary,evidence:[{source:"profile"|"answer",reference,quote}],officialRuleIds,reasoning,actions}.
+Each dimension: {id,label,score,status:"stable"|"needs_evidence"|"priority",summary,evidence:[{evidenceId}],officialRuleIds,reasoning,actions}.
 Each question review: {index,questionId,score,verdict:"complete"|"partial"|"needs_preparation",summary,answerEvidence,strengths,improvements,preparationDirection}.
 Each strength/priority: {title,detail,evidenceRefs,officialRuleIds}.
 Each action-plan item: {label:"STEP 1"|"STEP 2"|"STEP 3",title,detail}. strengths and improvements in question reviews must be JSON arrays, even when empty.
-For profile evidence, quote one exact value or one or more exact "field: value" pairs separated by commas. Never paraphrase a profile quote.
+For strength and priority evidenceRefs, use "profile" or an exact questionId such as "f1_01"; do not use an evidenceId there.
 For every question review, answerEvidence must be the exact original answer text as a JSON string, never an evidence object.
 For every dimension, actions must be a JSON array containing one or two strings, never a single string.
 Every dimension must contain its own numeric score from 0 to 100. Never omit a dimension score, even when its status is stable.
@@ -386,18 +414,28 @@ Be concise: dimension summary <= 60 Chinese characters, reasoning <= 100, one or
 Before returning, silently self-check all of these requirements:
 - dimensions contains exactly these six unique ids: ${JSON.stringify(F1_REPORT_DIMENSION_IDS)}.
 - questionReviews contains exactly ${input.answers.length} items in input order, with indexes 1..${input.answers.length} and questionIds ${JSON.stringify(input.answers.map(answer => answer.questionId))}.
-- every evidence quote and answerEvidence is copied character-for-character from the supplied input; every reference and officialRuleId is allowed.
+- every dimension evidenceId is copied character-for-character from evidenceCatalog; every answerEvidence is copied character-for-character from the supplied answer; every evidence reference and officialRuleId is allowed.
 - strengths and priorities each contain 1-3 valid items, actionPlan contains exactly 3 valid items, and no required text or score is missing.
+- all six dimensions and every answered question receive useful feedback. When facts are insufficient, say exactly what is missing and how to prepare it instead of omitting the section or inventing an answer.
 - the JSON contains no commentary outside the single object and makes no visa-outcome prediction.
+
+The machine may reject a draft when its structure or evidence reference is invalid. That means the report draft is invalid, never that the applicant's answer is invalid. Repair such errors without lowering scores or changing conclusions merely because the draft failed validation.
 
 Evaluate the whole chain: profile and I-20-like summary consistency; genuine study purpose; prior background -> academic need -> school/major -> study plan -> post-study use; stated cost -> sponsor -> income/funds -> ability to cover costs; present departure intent; and cross-answer credibility. Explain conclusions in concise Chinese.`,
     },
-    { role: 'user', content: JSON.stringify(input) },
+    { role: 'user', content: JSON.stringify({ ...input, evidenceCatalog }) },
   ]
-  if (retryIssue) {
+  const repair = typeof repairContext === 'string'
+    ? { issues: repairContext ? [repairContext] : [], draft: null }
+    : {
+        issues: Array.isArray(repairContext.issues) ? repairContext.issues.filter(Boolean) : [],
+        draft: repairContext.draft && isRecord(repairContext.draft) ? repairContext.draft : null,
+      }
+  if (repair.issues.length > 0) {
+    if (repair.draft) messages.push({ role: 'assistant', content: JSON.stringify(repair.draft) })
     messages.push({
       role: 'user',
-      content: `The previous JSON was rejected by the strict machine validator with code "${retryIssue}". Regenerate the entire report from the original input. Return only one complete JSON object. Recheck exact evidence quotes, all six unique dimensions, every question review in input order, allowed officialRuleIds, 1-3 strengths and priorities, and exactly three action-plan items. Do not explain the error.`,
+      content: `The preceding report draft was rejected by the strict machine validator. This is a defect in the report draft, not a defect in the applicant's answers. Fix every listed issue and return the entire corrected JSON object; do not merely explain the errors. Validation issues: ${JSON.stringify(repair.issues)}. Preserve every section and dimension not implicated by those issues; repair only the invalid or missing parts. Use only exact evidenceId values from evidenceCatalog, keep all six unique dimensions, keep every question review in input order, use only allowed officialRuleIds, include 1-3 strengths and priorities, and include exactly three action-plan items. If information is insufficient, keep the section and state the specific missing information and preparation advice. Do not change a score merely because the previous draft failed validation.`,
     })
   }
   return messages

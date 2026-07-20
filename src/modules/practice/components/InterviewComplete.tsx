@@ -52,7 +52,7 @@ async function generateFeedbackResult(record: InterviewRecord): Promise<Feedback
   try {
     return { session: await analyzeInterviewWithAI(record), usedLocalFallback: false }
   } catch (error) {
-    console.warn('[InterviewComplete] DeepSeek final report unavailable:', error)
+    console.warn('[InterviewComplete] Final report unavailable:', error)
     return { session: createUnavailableInterviewSession(record), usedLocalFallback: true }
   }
 }
@@ -67,7 +67,7 @@ export default function InterviewComplete({ messages, context, duration, officer
   const officerQuestions = messages.filter(m => m.role === 'officer')
   const userAnswers = messages.filter(m => m.role === 'user')
 
-  // 面签完成后发送脱敏背景与转写给 DeepSeek 生成一次受约束报告；本站不长期保存。
+  // 面签完成后使用脱敏背景与转写生成一次受约束报告；本站不长期保存。
   useEffect(() => {
     if (messages.length === 0) {
       setFeedbackError('暂无可分析的对话记录。')
@@ -100,9 +100,9 @@ export default function InterviewComplete({ messages, context, duration, officer
           setFeedbackSession(session)
           setFeedbackError(usedLocalFallback
             ? session.analysisSource === 'unavailable'
-              ? 'DeepSeek 综合分析暂不可用；报告页将只保留本次问答记录，不显示推测性评分。'
+              ? '综合分析暂不可用；报告页将只保留本次问答记录，不显示推测性评分。'
               : session.analysisSource === 'hybrid'
-              ? '部分回答使用 AI 分析，其余回答已使用本地规则补全。'
+              ? '部分回答已完成综合分析，其余回答已使用基础规则补全。'
               : '当前签证类型暂时显示本地基础检查，并会明确标注来源。'
             : '')
           setFeedbackState('ready')
