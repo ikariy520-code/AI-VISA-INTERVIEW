@@ -16,7 +16,9 @@ import type {
   DegreeLevel,
   FundingSource,
   HomeTie,
+  MonthlyIncomeRange,
   PostGraduationPlan,
+  PreviousUsStayRange,
   TravelBudget,
   TravelCompanion,
   TravelFunding,
@@ -149,6 +151,22 @@ const travelRegionLabels: Record<TravelRegion, string> = {
   other: '其他国家或地区',
 }
 
+const monthlyIncomeLabels: Record<MonthlyIncomeRange, string> = {
+  'under-5k-cny': '每月人民币 5,000 元以内',
+  '5k-10k-cny': '每月人民币 5,000–10,000 元',
+  '10k-20k-cny': '每月人民币 10,000–20,000 元',
+  '20k-50k-cny': '每月人民币 20,000–50,000 元',
+  '50k-plus-cny': '每月人民币 50,000 元以上',
+  'not-disclosed': '不愿提供',
+}
+
+const previousUsStayLabels: Record<PreviousUsStayRange, string> = {
+  'under-2-weeks': '两周以内',
+  '2-weeks-1-month': '两周至一个月',
+  '1-3-months': '一至三个月',
+  '3-months-plus': '三个月以上',
+}
+
 const contactRelationLabels: Record<string, string> = {
   parent: '父母',
   child: '子女',
@@ -234,6 +252,10 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
     hadOverstay: false,
     returnReason: '',
     previousVisaAnswer: undefined,
+    tripPlanSummary: '',
+    leaveArrangement: '',
+    monthlyIncomeRange: '',
+    previousUsStayRange: '',
   })
 
   const update = <K extends keyof FormState>(field: K, value: FormState[K]) => {
@@ -251,6 +273,8 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
     form.gapExplanation,
     form.usContactRelation,
     form.returnReason,
+    form.tripPlanSummary,
+    form.leaveArrangement,
     form.notes,
   ].filter(Boolean).join(' ')
   const privacyWarning = useMemo(() => detectSensitiveInformation(userEnteredText), [userEnteredText])
@@ -310,6 +334,10 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
       delete context.hadOverstay
       delete context.returnReason
       delete context.previousVisaAnswer
+      delete context.tripPlanSummary
+      delete context.leaveArrangement
+      delete context.monthlyIncomeRange
+      delete context.previousUsStayRange
     }
     onSubmit(context)
   }
@@ -355,6 +383,7 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
         ['预计出发', formatEnrollmentDate(form.travelMonth)],
         ['计划停留', form.duration],
         ['主要目的地', form.destination],
+        ['行程概况', form.tripPlanSummary ?? ''],
         ['当前状态', form.b2CurrentStatus ? b2StatusLabels[form.b2CurrentStatus] : ''],
         ['费用承担', form.travelFunding ? travelFundingLabels[form.travelFunding] : ''],
         ['国内约束力', form.homeTies?.map(tie => tieLabels[tie]).join('、') ?? ''],
@@ -373,9 +402,12 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
         )
       }
       if (form.workTenureRange) items.push(['当前状态持续时间', form.workTenureRange])
+      if (form.leaveArrangement) items.push(['工作或学习安排', form.leaveArrangement])
+      if (form.monthlyIncomeRange) items.push(['月收入范围', monthlyIncomeLabels[form.monthlyIncomeRange]])
       if (form.travelBudget) items.push(['旅行总预算', travelBudgetLabels[form.travelBudget]])
       if (form.travelHistoryRegions?.length) items.push(['近五年出境地区', form.travelHistoryRegions.map(region => travelRegionLabels[region]).join('、')])
       if (form.previousVisaDenied) items.push(['美国拒签经历', refusalLabels[form.refusalReason ?? ''] || '有'])
+      if (form.previousVisaAnswer === 'yes' && form.previousUsStayRange) items.push(['以往赴美最长停留', previousUsStayLabels[form.previousUsStayRange]])
       if (form.hadOverstay) items.push(['曾有较长停留或逾期', '是'])
       if (form.returnReason) items.push(['按时回国原因', form.returnReason])
       if (form.notes) items.push(['重点担心的问题', form.notes])
@@ -620,6 +652,11 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
               <p className="mt-1.5 text-[11px] text-slate-400">请勿填写酒店名称、详细地址、航班号或订单号。</p>
             </div>
 
+            <div>
+              <label htmlFor="b2-trip-plan" className="mb-1.5 block text-[13px] font-medium text-slate-700">行程概况 <span className="text-red-400">*</span></label>
+              <textarea id="b2-trip-plan" required rows={2} maxLength={180} value={form.tripPlanSummary ?? ''} onChange={event => update('tripPlanSummary', event.target.value)} placeholder="例如：在洛杉矶游览三天，再前往旧金山四天；只写大致安排，不填写订单和详细地址" className={`${fieldClass} resize-none`} />
+            </div>
+
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label htmlFor="b2-current-status" className="mb-1.5 block text-[13px] font-medium text-slate-700">当前状态 <span className="text-red-400">*</span></label>
@@ -719,6 +756,20 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
                   </div>
                 </div>
 
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="monthly-income" className="mb-1.5 block text-[12px] font-medium text-slate-600">本人月收入范围</label>
+                    <select id="monthly-income" value={form.monthlyIncomeRange ?? ''} onChange={event => update('monthlyIncomeRange', event.target.value as MonthlyIncomeRange | '')} className={fieldClass}>
+                      <option value="">暂不填写</option>
+                      {Object.entries(monthlyIncomeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="leave-arrangement" className="mb-1.5 block text-[12px] font-medium text-slate-600">旅行期间的工作或学习安排</label>
+                    <input id="leave-arrangement" maxLength={100} value={form.leaveArrangement ?? ''} onChange={event => update('leaveArrangement', event.target.value)} placeholder="例如：已安排十天年假；不填写单位名称" className={fieldClass} />
+                  </div>
+                </div>
+
                 <fieldset>
                   <legend className="mb-2 text-[12px] font-medium text-slate-600">近五年出境旅行地区（可多选）</legend>
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -749,6 +800,16 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
                     曾较长停留或逾期
                   </label>
                 </div>
+
+                {form.previousVisaAnswer === 'yes' && (
+                  <div>
+                    <label htmlFor="previous-us-stay" className="mb-1.5 block text-[12px] font-medium text-slate-600">以往赴美最长停留时间</label>
+                    <select id="previous-us-stay" value={form.previousUsStayRange ?? ''} onChange={event => update('previousUsStayRange', event.target.value as PreviousUsStayRange | '')} className={fieldClass}>
+                      <option value="">暂不填写</option>
+                      {Object.entries(previousUsStayLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 {form.previousVisaDenied && (
                   <div>

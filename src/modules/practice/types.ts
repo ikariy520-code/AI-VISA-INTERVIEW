@@ -28,6 +28,8 @@ export type TravelCompanion = 'alone' | 'spouse' | 'parents' | 'children' | 'fri
 export type TripStyle = 'independent' | 'group-tour' | 'with-family-friends'
 export type TravelBudget = 'under-3k' | '3k-6k' | '6k-10k' | '10k-plus' | 'not-sure'
 export type TravelRegion = 'asia' | 'europe' | 'oceania' | 'north-america' | 'other'
+export type MonthlyIncomeRange = 'under-5k-cny' | '5k-10k-cny' | '10k-20k-cny' | '20k-50k-cny' | '50k-plus-cny' | 'not-disclosed'
+export type PreviousUsStayRange = 'under-2-weeks' | '2-weeks-1-month' | '1-3-months' | '3-months-plus'
 
 export interface VisaTypeInfo {
   id: VisaType
@@ -80,6 +82,10 @@ export interface UserContext {
   hadOverstay?: boolean
   returnReason?: string
   previousVisaAnswer?: 'yes' | 'no'
+  tripPlanSummary?: string
+  leaveArrangement?: string
+  monthlyIncomeRange?: MonthlyIncomeRange | ''
+  previousUsStayRange?: PreviousUsStayRange | ''
 }
 
 // ---- 面签对话 ----

@@ -18,6 +18,7 @@ export interface DoubaoRealtimeClientOptions {
   instructions: string
   openingLine: string
   voice: string
+  speakingStyle?: string
   /** Speak only application-approved questions; discard model-authored dialogue. */
   controlledQuestions?: boolean
   validateControlledText?: (text: string) => boolean
@@ -449,8 +450,8 @@ export class DoubaoRealtimeClient {
       dialog: {
         bot_name: 'U.S. Visa Officer',
         system_role: this.options.instructions,
-        speaking_style:
-          'Speak in natural American English. Stay professional, concise, and realistic. Ask one question at a time and wait for the applicant to answer.',
+        speaking_style: this.options.speakingStyle
+          || 'Speak in natural American English. Stay professional, concise, and realistic. Ask one question at a time and wait for the applicant to answer.',
         extra: {
           strict_audit: true,
           input_mod: 'keep_alive',

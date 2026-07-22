@@ -1,5 +1,6 @@
 import type { InterviewSession, QAPair } from './types'
 import { F1_OFFICIAL_CRITERIA } from '../practice/data/f1OfficialCriteria'
+import { B2_OFFICIAL_CRITERIA } from '../practice/data/b2OfficialCriteria'
 
 export type ReportSource = 'sample' | 'deepseek' | 'evidence_only' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
 
@@ -190,12 +191,15 @@ const dimensionStatus = (score: number): ReportDimension['status'] => {
   return '优先改进'
 }
 
-const officialRuleMap = new Map(F1_OFFICIAL_CRITERIA.map(rule => [rule.id, rule]))
+const officialRuleMap = new Map<string, { title: string; url: string }>(
+  [...F1_OFFICIAL_CRITERIA, ...B2_OFFICIAL_CRITERIA].map(rule => [rule.id, rule]),
+)
 
 function buildStructuredFeedbackReport(session: InterviewSession): FeedbackReport | null {
   const report = session.structuredReport
   if (!report) return null
   const evidenceOnly = report.analysisMode === 'evidence_only'
+  const isB2 = report.reportType === 'b2_practice_readiness'
   return {
     id: session.id,
     source: evidenceOnly ? 'evidence_only' : 'deepseek',
@@ -206,7 +210,7 @@ function buildStructuredFeedbackReport(session: InterviewSession): FeedbackRepor
     duration: session.duration,
     questionCount: session.transcript.length,
     profile: `${evidenceOnly ? '基础证据复盘' : '证据约束分析'} · 官方依据 ${report.criteriaVersion}`,
-    evaluationLabel: 'F-1 evidence review',
+    evaluationLabel: isB2 ? 'B-2 evidence review' : 'F-1 evidence review',
     dimensionIntro: evidenceOnly
       ? '根据脱敏背景和实际回答保留六项核对方向；信息不足处明确说明，不生成推测性分数。'
       : '根据脱敏背景、实际回答和当前版本的美国国务院公开依据检查准备情况。',

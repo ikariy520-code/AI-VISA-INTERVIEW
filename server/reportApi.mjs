@@ -3,9 +3,15 @@ import {
   buildF1ReportMessages,
   getModelMessageContent,
   repairF1ReportEvidence,
-  sanitizeReportRequest,
+  sanitizeReportRequest as sanitizeF1ReportRequest,
   validateF1StructuredReport,
 } from './shared/f1ReportContract.mjs'
+import {
+  buildB2ReportMessages,
+  buildDeterministicB2FallbackReport,
+  sanitizeB2ReportRequest,
+  validateB2StructuredReport,
+} from './shared/b2ReportContract.mjs'
 import { createHash } from 'node:crypto'
 import { request as httpsRequest } from 'node:https'
 
@@ -20,6 +26,8 @@ const MAX_REPORT_ATTEMPTS = 3
 const MAX_OUTPUT_TOKENS_PER_ATTEMPT = 32_000
 const REPORT_CACHE_TTL_MS = 10 * 60 * 1000
 const MAX_REPORT_CACHE_ENTRIES = 200
+const MAX_B2_REPORT_ATTEMPTS = 2
+const MAX_B2_OUTPUT_TOKENS = 10_000
 const RETRYABLE_NETWORK_CODES = new Set([
   'EAI_AGAIN',
   'ECONNREFUSED',
@@ -253,6 +261,69 @@ export async function generateF1Report({
   return validatedFallback
 }
 
+export async function generateB2Report({
+  apiKey,
+  endpoint,
+  model,
+  input,
+  signal,
+  requestJson = postJsonWithoutDeadline,
+}) {
+  let lastError
+  let repairContext = ''
+  for (let attempt = 0; attempt < MAX_B2_REPORT_ATTEMPTS; attempt += 1) {
+    try {
+      const upstream = await requestJson(endpoint, {
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: buildB2ReportMessages(input, repairContext),
+          response_format: { type: 'json_object' },
+          thinking: { type: 'enabled' },
+          reasoning_effort: 'high',
+          max_tokens: MAX_B2_OUTPUT_TOKENS,
+          stream: false,
+        }),
+        signal,
+      })
+      if (!upstream.ok) {
+        const error = Object.assign(new Error('DEEPSEEK_REPORT_SERVICE_ERROR'), {
+          code: 'DEEPSEEK_REPORT_SERVICE_ERROR', upstreamStatus: upstream.status,
+        })
+        if (upstream.status < 500 && upstream.status !== 429) throw error
+        lastError = error
+        continue
+      }
+      const draft = parseModelContent(upstream.payload)
+      const issues = []
+      const report = validateB2StructuredReport(draft, input, { onIssue: issue => issues.push(issue) })
+      if (report) return report
+      throw Object.assign(new Error('DEEPSEEK_REPORT_VALIDATION_FAILED'), {
+        code: 'DEEPSEEK_REPORT_VALIDATION_FAILED', validationIssues: issues.length ? [...new Set(issues)] : ['UNKNOWN_VALIDATION_FAILURE'],
+      })
+    } catch (error) {
+      lastError = error
+      if (error?.code === 'CLIENT_DISCONNECTED' || signal?.aborted) throw error
+      if (error?.code === 'DEEPSEEK_REPORT_VALIDATION_FAILED') repairContext = error.validationIssues
+      else if (error instanceof SyntaxError) repairContext = ['INVALID_JSON']
+      const status = Number(error?.upstreamStatus)
+      const retryable = error instanceof SyntaxError
+        || error?.code === 'EMPTY_MODEL_RESPONSE'
+        || error?.code === 'DEEPSEEK_REPORT_VALIDATION_FAILED'
+        || RETRYABLE_NETWORK_CODES.has(error?.code)
+        || status === 429 || status >= 500
+      if (!retryable) break
+    }
+  }
+  if (!(lastError instanceof SyntaxError)
+    && lastError?.code !== 'EMPTY_MODEL_RESPONSE'
+    && lastError?.code !== 'DEEPSEEK_REPORT_VALIDATION_FAILED') throw lastError || new Error('DEEPSEEK_REPORT_SERVICE_UNAVAILABLE')
+  const fallback = buildDeterministicB2FallbackReport(input)
+  const validated = validateB2StructuredReport(fallback, input, { analysisMode: 'evidence_only' })
+  if (!validated) throw lastError || new Error('DEEPSEEK_REPORT_SERVICE_UNAVAILABLE')
+  return validated
+}
+
 export function createReportHandler(options = {}) {
   const apiKey = String(options.apiKey || '').trim()
   const model = String(options.model || 'deepseek-v4-pro').trim()
@@ -317,7 +388,7 @@ export function createReportHandler(options = {}) {
       return true
     }
 
-    const input = sanitizeReportRequest(rawBody)
+    const input = sanitizeF1ReportRequest(rawBody) || sanitizeB2ReportRequest(rawBody)
     if (!input) {
       writeJson(res, 400, { error: 'INVALID_REPORT_REQUEST' })
       return true
@@ -350,7 +421,9 @@ export function createReportHandler(options = {}) {
     }
     res.once('close', abortOnDisconnect)
     try {
-      const report = await generateF1Report({ apiKey, endpoint, model, input, signal: clientAbort.signal })
+      const report = input.visaType === 'B2'
+        ? await generateB2Report({ apiKey, endpoint, model, input, signal: clientAbort.signal })
+        : await generateF1Report({ apiKey, endpoint, model, input, signal: clientAbort.signal })
       reportCache.set(key, { report, expiresAt: Date.now() + REPORT_CACHE_TTL_MS })
       writeJson(res, 200, {
         report,

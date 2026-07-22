@@ -6,12 +6,13 @@ import type {
   VoiceEmotion,
 } from './types'
 import type { F1StructuredReport } from '../../shared/f1ReportContract'
+import type { B2StructuredReport } from '../../shared/b2ReportContract'
 
 type UnknownRecord = Record<string, unknown>
 
 const VERDICTS = new Set<AnswerFeedback['verdict']>(['favorable', 'neutral', 'unfavorable'])
 const EMOTIONS = new Set<VoiceEmotion['primary']>(['calm', 'nervous', 'confident', 'hesitant', 'tense', 'natural'])
-const SOURCES = new Set<NonNullable<InterviewSession['analysisSource']>>(['deepseek', 'doubao', 'hybrid', 'local', 'unavailable'])
+const SOURCES = new Set<NonNullable<InterviewSession['analysisSource']>>(['deepseek', 'evidence_only', 'doubao', 'hybrid', 'local', 'unavailable'])
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -131,7 +132,7 @@ export function normalizeInterviewSession(value: unknown): InterviewSession | nu
       && value.structuredReport.schemaVersion === 2
       && Array.isArray(value.structuredReport.dimensions)
       && Array.isArray(value.structuredReport.questionReviews)
-      ? value.structuredReport as unknown as F1StructuredReport
+      ? value.structuredReport as unknown as F1StructuredReport | B2StructuredReport
       : undefined,
   }
 }

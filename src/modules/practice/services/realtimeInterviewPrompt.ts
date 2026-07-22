@@ -3,6 +3,7 @@ import type { OfficerType } from '../../voice/types'
 import { officerTypes } from '../../voice/data/officerTypes'
 import { redactPotentialIdentifiers } from '../../../shared/f1ReportContract'
 import { getF1Question } from '../data/f1QuestionCatalog'
+import { B2_INTERVIEW_OPENING_LINE } from '../data/b2InterviewStandard'
 
 const trimText = (value: string | undefined, maxLength: number) =>
   value ? redactPotentialIdentifiers(value.trim()).slice(0, maxLength) || undefined : undefined
@@ -48,26 +49,39 @@ export function buildSafeInterviewContext(context: UserContext): Record<string, 
     usContactRelation: context.b2Purpose === 'family-visit' || context.b2Purpose === 'friend-visit'
       ? trimText(context.usContactRelation, 40)
       : undefined,
-    contactProvidesStay: context.contactProvidesStay || undefined,
-    contactPaysExpenses: context.contactPaysExpenses || undefined,
-    hasMetContact: context.hasMetContact || undefined,
+    contactProvidesStay: context.b2Purpose === 'family-visit' || context.b2Purpose === 'friend-visit'
+      ? Boolean(context.contactProvidesStay)
+      : undefined,
+    contactPaysExpenses: context.b2Purpose === 'family-visit' || context.b2Purpose === 'friend-visit'
+      ? Boolean(context.contactPaysExpenses)
+      : undefined,
+    hasMetContact: context.b2Purpose === 'family-visit' || context.b2Purpose === 'friend-visit'
+      ? Boolean(context.hasMetContact)
+      : undefined,
     homeTies: context.homeTies?.slice(0, 7),
     currentStatusDuration: trimText(context.workTenureRange, 40),
     travelBudgetRange: context.travelBudget || undefined,
+    tripPlanSummary: trimText(context.tripPlanSummary, 180),
+    leaveArrangement: trimText(context.leaveArrangement, 100),
+    monthlyIncomeRange: context.monthlyIncomeRange || undefined,
     travelHistoryRegions: context.travelHistoryRegions?.slice(0, 5),
     hasPreviousVisa: context.previousVisaAnswer ? context.previousVisa : undefined,
-    hasPreviousVisaDenial: context.previousVisaDenied || undefined,
+    hasPreviousVisaDenial: Boolean(context.previousVisaDenied),
     refusalReasonCategory: context.previousVisaDenied ? trimText(context.refusalReason, 80) : undefined,
-    hadLongStayOrOverstay: context.hadOverstay || undefined,
+    hadLongStayOrOverstay: context.previousVisaAnswer === 'yes' ? Boolean(context.hadOverstay) : undefined,
+    previousUsStayRange: context.previousVisaAnswer === 'yes' ? context.previousUsStayRange || undefined : undefined,
     returnReason: trimText(context.returnReason, 160),
     interviewConcern: trimText(context.notes, 240),
   }
 }
 
-export function resolveRealtimeVoice(gender: 'male' | 'female') {
-  return gender === 'female'
-    ? 'en_female_dacey_uranus_bigtts'
-    : 'en_male_tim_uranus_bigtts'
+export function resolveRealtimeVoice(gender: 'male' | 'female', visaType: UserContext['visaType']) {
+  if (visaType === 'B2') {
+    return gender === 'female'
+      ? 'zh_female_vv_jupiter_bigtts'
+      : 'zh_male_yunzhou_jupiter_bigtts'
+  }
+  return gender === 'female' ? 'en_female_dacey_uranus_bigtts' : 'en_male_tim_uranus_bigtts'
 }
 
 export function buildRealtimeInterviewPrompt(context: UserContext, officerType: OfficerType) {
@@ -84,9 +98,9 @@ Voice style only: ${persona}
 Non-identifying reference context: ${safeContext}`
   }
 
-  return `You are a U.S. consular officer conducting a realistic B-2 practice interview in American English. Ask one concise question at a time. Cover travel purpose, itinerary, funding, current work or study, travel history, relevant U.S. contacts, and reasons to return home. Do not coach or announce a real visa decision. Avoid identity numbers, exact addresses, contact details, bank details, or document uploads.
-Voice style: ${persona}
-Non-identifying reference context: ${safeContext}`
+  return `你是受控的美国领事官员中文语音。应用程序会选择并发送每一个问题。申请人回答后，你不得自行编写、改写、推荐或朗读新问题；不得评价、鼓励、指导、闲聊或宣布签证决定。你只需安静处理申请人的语音，供应用程序读取转写。当应用程序发送获准朗读的文字时，必须使用自然、简短、正式的普通话逐字朗读，不得增加任何内容。
+语音风格：${persona}
+仅供本次练习使用的脱敏背景：${safeContext}`
 }
 
 function buildControlledF1VoiceStyle(officerType: OfficerType) {
@@ -116,5 +130,5 @@ function buildOfficerPersona(officerType: OfficerType, fixedPersona = '') {
 export function buildRealtimeOpeningLine(context: UserContext) {
   return context.visaType === 'F1'
     ? `Good morning. Passport and I-20, please. ${getF1Question('f1_01').text}`
-    : 'Good morning. What is the purpose of your trip to the United States?'
+    : B2_INTERVIEW_OPENING_LINE
 }

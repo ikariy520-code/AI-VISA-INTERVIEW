@@ -20,12 +20,19 @@ import type {
   AnswerFeedback,
 } from '../../feedback/types'
 import { F1_QUESTION_CATALOG } from '../../practice/data/f1QuestionCatalog'
+import { identifyB2Question } from '../../practice/services/b2InterviewController'
 import { buildSafeInterviewContext } from '../../practice/services/realtimeInterviewPrompt'
 import {
   sanitizeReportRequest,
   validateF1StructuredReport,
   type InterviewReportAnswer,
+  type InterviewReportRequest,
 } from '../../../shared/f1ReportContract'
+import {
+  sanitizeB2ReportRequest,
+  validateB2StructuredReport,
+  type B2ReportRequest,
+} from '../../../shared/b2ReportContract'
 
 function classifyDialogueAct(answer: string) {
   const normalized = answer.trim().toLowerCase().replace(/[.!?]+$/g, '').trim()
@@ -34,6 +41,7 @@ function classifyDialogueAct(answer: string) {
   if (/^(sorry[, ]*)?(pardon(?: me)?|what|sorry what|say that again|come again)$/.test(normalized)
     || /\b(could|can|would|will) you (?:please )?(?:repeat|say (?:it|that) again)\b/.test(normalized)
     || /\bplease repeat(?: the question)?\b/.test(normalized)) return 'repeat_request'
+  if (/没听清|没听见|再说一遍|重复一遍|请重复|您说什么/.test(normalized)) return 'repeat_request'
   return 'valid_answer'
 }
 
@@ -442,6 +450,26 @@ export function buildF1ReportRequest(record: InterviewRecord) {
   })
 }
 
+export function buildB2ReportRequest(record: InterviewRecord): B2ReportRequest | null {
+  if (record.visaType !== 'B2') return null
+  const answers: InterviewReportAnswer[] = extractQAPairs(record.messages).map((pair, offset) => {
+    const question = identifyB2Question(pair.question)
+    if (!question) throw new Error('B2_REPORT_UNKNOWN_QUESTION')
+    return {
+      index: offset + 1,
+      questionId: question.id,
+      question: question.text,
+      answer: pair.answer,
+      timestamp: pair.timestamp,
+    }
+  })
+  return sanitizeB2ReportRequest({
+    visaType: 'B2',
+    safeContext: buildSafeInterviewContext(record.userContext),
+    answers,
+  })
+}
+
 export function createUnavailableInterviewSession(record: InterviewRecord): InterviewSession {
   const visaLabel: Record<string, string> = {
     B2: 'B2 旅游签证', B1: 'B1 商务签证', F1: 'F1 学术签证',
@@ -475,9 +503,9 @@ export function createUnavailableInterviewSession(record: InterviewRecord): Inte
 }
 
 export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<InterviewSession> {
-  if (record.visaType !== 'F1') return analyzeInterview(record)
-  const input = buildF1ReportRequest(record)
-  if (!input) throw new Error('F1_REPORT_NO_VALID_ANSWERS')
+  if (record.visaType !== 'F1' && record.visaType !== 'B2') return analyzeInterview(record)
+  const input = record.visaType === 'F1' ? buildF1ReportRequest(record) : buildB2ReportRequest(record)
+  if (!input) throw new Error(`${record.visaType}_REPORT_NO_VALID_ANSWERS`)
 
   const response = await fetch(AI_REPORT_ENDPOINT, {
     method: 'POST',
@@ -485,10 +513,12 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   })
-  if (!response.ok) throw new Error(`F1_REPORT_FAILED_${response.status}`)
+  if (!response.ok) throw new Error(`${record.visaType}_REPORT_FAILED_${response.status}`)
   const payload = await response.json() as { report?: unknown }
-  const structuredReport = validateF1StructuredReport(payload.report, input)
-  if (!structuredReport) throw new Error('F1_REPORT_INVALID')
+  const structuredReport = record.visaType === 'F1'
+    ? validateF1StructuredReport(payload.report, input as InterviewReportRequest)
+    : validateB2StructuredReport(payload.report, input as B2ReportRequest)
+  if (!structuredReport) throw new Error(`${record.visaType}_REPORT_INVALID`)
 
   const transcriptSession = createUnavailableInterviewSession(record)
   const evidenceOnly = structuredReport.analysisMode === 'evidence_only'

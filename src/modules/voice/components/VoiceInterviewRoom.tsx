@@ -32,6 +32,17 @@ import {
   type F1InterviewState,
 } from '../../practice/services/f1InterviewController'
 import {
+  B2_INTERVIEW_CLOSING_LINE,
+  B2_INTERVIEW_HARD_LIMIT_SECONDS,
+  isB2InterviewClosingLine,
+} from '../../practice/data/b2InterviewStandard'
+import {
+  advanceB2Interview,
+  createB2InterviewState,
+  isApprovedB2OfficerText,
+  type B2InterviewState,
+} from '../../practice/services/b2InterviewController'
+import {
   DoubaoRealtimeClient,
   realtimeEventText,
   type DoubaoRealtimeEvent,
@@ -96,6 +107,9 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
   const messagesRef = useRef<RealtimeChatMessage[]>([])
   const f1StateRef = useRef<F1InterviewState | null>(
     context.visaType === 'F1' ? createF1InterviewState(context) : null,
+  )
+  const b2StateRef = useRef<B2InterviewState | null>(
+    context.visaType === 'B2' ? createB2InterviewState(context) : null,
   )
 
   const returnToListening = useCallback(() => {
@@ -214,14 +228,35 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
             setErrorMessage(error instanceof Error ? error.message : 'The next controlled question could not be played.')
             setPhase('error')
           })
+        } else if (context.visaType === 'B2' && text && b2StateRef.current) {
+          const result = advanceB2Interview(b2StateRef.current, text, context)
+          b2StateRef.current = result.state
+          if (!isApprovedB2OfficerText(result.action.text)) {
+            setErrorMessage('受控面签阻止了未批准的问题。')
+            setPhase('error')
+            break
+          }
+          if (result.action.type === 'CLOSE') {
+            autoEndAfterAudioRef.current = true
+            mutedRef.current = true
+            setIsMuted(true)
+            clientRef.current?.setMuted(true)
+          }
+          void clientRef.current?.speakControlled(result.action.text).catch(error => {
+            setErrorMessage(error instanceof Error ? error.message : '无法播放下一道受控问题。')
+            setPhase('error')
+          })
         }
         break
       }
 
       case 'controlled.speech.started': {
-        if (context.visaType !== 'F1') break
+        if (context.visaType !== 'F1' && context.visaType !== 'B2') break
         const text = realtimeEventText(event)
-        if (!text || !isApprovedF1OfficerText(text)) {
+        const approved = context.visaType === 'F1'
+          ? Boolean(text && isApprovedF1OfficerText(text))
+          : Boolean(text && isApprovedB2OfficerText(text))
+        if (!approved) {
           setErrorMessage('The controlled interview blocked an unapproved officer question.')
           setPhase('error')
           break
@@ -233,7 +268,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       }
 
       case 'controlled.speech.done':
-        if (context.visaType === 'F1') {
+        if (context.visaType === 'F1' || context.visaType === 'B2') {
           if (autoEndAfterAudioRef.current) void endInterview()
           else returnToListening()
         }
@@ -258,6 +293,11 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       case 'response.output_text.done': {
         const completedText = finishOfficerMessage(realtimeEventText(event))
         if (context.visaType === 'F1' && isF1InterviewClosingLine(completedText)) {
+          autoEndAfterAudioRef.current = true
+          mutedRef.current = true
+          setIsMuted(true)
+          clientRef.current?.setMuted(true)
+        } else if (context.visaType === 'B2' && isB2InterviewClosingLine(completedText)) {
           autoEndAfterAudioRef.current = true
           mutedRef.current = true
           setIsMuted(true)
@@ -320,14 +360,22 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
     currentUserTextRef.current = ''
     currentOfficerTextRef.current = ''
     f1StateRef.current = context.visaType === 'F1' ? createF1InterviewState(context) : null
+    b2StateRef.current = context.visaType === 'B2' ? createB2InterviewState(context) : null
     setPhase('connecting')
 
     const client = new DoubaoRealtimeClient({
       instructions: buildRealtimeInterviewPrompt(context, officerType),
       openingLine: buildRealtimeOpeningLine(context),
-      voice: resolveRealtimeVoice(officerConfig.voiceProfile.gender),
-      controlledQuestions: context.visaType === 'F1',
-      validateControlledText: context.visaType === 'F1' ? isApprovedF1OfficerText : undefined,
+      voice: resolveRealtimeVoice(officerConfig.voiceProfile.gender, context.visaType),
+      speakingStyle: context.visaType === 'B2'
+        ? '使用自然、清晰、简短的普通话，语气专业中性，逐字朗读应用程序发送的问题，不要添加内容。'
+        : 'Speak in natural American English. Stay professional, concise, and realistic. Read the application-approved question exactly.',
+      controlledQuestions: context.visaType === 'F1' || context.visaType === 'B2',
+      validateControlledText: context.visaType === 'F1'
+        ? isApprovedF1OfficerText
+        : context.visaType === 'B2'
+          ? isApprovedB2OfficerText
+          : undefined,
       onEvent: handleRealtimeEvent,
       onInputLevel: setMicLevel,
       onConnectionState: (state) => {
@@ -392,8 +440,8 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       elapsedRef.current += 1
       setElapsed(elapsedRef.current)
       if (
-        context.visaType === 'F1'
-        && elapsedRef.current >= F1_INTERVIEW_HARD_LIMIT_SECONDS
+        (context.visaType === 'F1' || context.visaType === 'B2')
+        && elapsedRef.current >= (context.visaType === 'F1' ? F1_INTERVIEW_HARD_LIMIT_SECONDS : B2_INTERVIEW_HARD_LIMIT_SECONDS)
         && !endingRef.current
         && !autoEndAfterAudioRef.current
       ) {
@@ -401,7 +449,8 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
         mutedRef.current = true
         setIsMuted(true)
         clientRef.current?.setMuted(true)
-        void clientRef.current?.speakControlled(F1_INTERVIEW_CLOSING_LINE).catch(() => endInterview())
+        const closingLine = context.visaType === 'F1' ? F1_INTERVIEW_CLOSING_LINE : B2_INTERVIEW_CLOSING_LINE
+        void clientRef.current?.speakControlled(closingLine).catch(() => endInterview())
       }
     }, 1000)
     return () => window.clearInterval(timer)
@@ -498,7 +547,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
               <p className="mt-2 text-[12px] leading-5 text-[#6e6e73]">
                 {context.visaType === 'F1'
                   ? '端到端语音模型负责实时识别和自然发音；下一题由本地受控题库根据你的背景与回答选择。请听完问题后再回答。'
-                  : '开始后保持自然对话即可。AI 面签官会实时听取、理解并用语音追问；面签官说话时也可以直接开口打断。'}
+                  : '端到端语音模型负责实时识别和中文发音；下一题由本地受控题库根据你的背景与回答选择，避免跑题或自由聊天。'}
               </p>
             </div>
           )}

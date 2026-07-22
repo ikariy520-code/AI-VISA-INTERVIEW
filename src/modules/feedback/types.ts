@@ -8,6 +8,7 @@
 // ========================================
 
 import type { F1StructuredReport } from '../../shared/f1ReportContract'
+import type { B2StructuredReport } from '../../shared/b2ReportContract'
 
 // ---- A. 语音分析（录音 → AI 提取） ----
 
@@ -92,5 +93,5 @@ export interface InterviewSession {
   analysisSource?: 'deepseek' | 'evidence_only' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
   aiScoredAnswers?: number
   totalScoredAnswers?: number
-  structuredReport?: F1StructuredReport
+  structuredReport?: F1StructuredReport | B2StructuredReport
 }

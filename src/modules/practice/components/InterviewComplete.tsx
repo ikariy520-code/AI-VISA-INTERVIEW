@@ -46,7 +46,7 @@ interface FeedbackResult {
 }
 
 async function generateFeedbackResult(record: InterviewRecord): Promise<FeedbackResult> {
-  if (record.visaType !== 'F1') {
+  if (record.visaType !== 'F1' && record.visaType !== 'B2') {
     return { session: analyzeInterview(record), usedLocalFallback: true }
   }
   try {

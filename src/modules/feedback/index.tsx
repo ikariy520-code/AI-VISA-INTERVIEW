@@ -20,6 +20,7 @@ export default function FeedbackPage() {
   const session = useMemo(() => normalizeInterviewSession(rawSession), [rawSession])
   const [showSample, setShowSample] = useState(false)
   const report = useMemo(() => session ? buildFeedbackReport(session) : showSample ? sampleFeedbackReport : null, [session, showSample])
+  const isB2 = Boolean(session && /\bB[\s-]?2\b/i.test(session.title))
 
   if (!report) {
     return (
@@ -65,7 +66,7 @@ export default function FeedbackPage() {
             <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[13px] bg-white text-[#158f65] shadow-sm"><HiOutlineLockClosed className="h-[17px] w-[17px]" /></span>
             <div>
               <p className="text-[13px] font-semibold text-[#146c50]">只在当前页面保留</p>
-              <p className="mt-1 text-[12px] leading-5 text-[#347861]">本站不长期保存报告；脱敏背景和面签转写仅用于按 F-1 官方依据与证据规则完成本次分析。刷新或关闭页面后无法找回，请离开前保存。</p>
+              <p className="mt-1 text-[12px] leading-5 text-[#347861]">本站不长期保存报告；脱敏背景和面签转写仅用于按 {isB2 ? 'B-2' : 'F-1'} 官方依据与证据规则完成本次分析。刷新或关闭页面后无法找回，请离开前保存。</p>
             </div>
           </div>
           <button onClick={() => window.print()} className="app-button-secondary mt-3 w-full bg-white sm:mt-0 sm:w-auto">

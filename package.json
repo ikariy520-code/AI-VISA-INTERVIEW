@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "npm run test:f1-controller && npm run test:f1-report && npm run test:architecture",
+    "test": "npm run test:f1-controller && npm run test:b2-controller && npm run test:f1-report && npm run test:b2-report && npm run test:architecture",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -14,7 +14,9 @@
     "smoke:deepseek": "node scripts/deepseekConnectivitySmoke.mjs",
     "smoke:report": "node scripts/finalReportSmoke.mjs",
     "test:f1-controller": "node --experimental-strip-types scripts/f1InterviewController.test.ts",
+    "test:b2-controller": "node --experimental-strip-types scripts/b2InterviewController.test.ts",
     "test:f1-report": "node --experimental-strip-types scripts/f1ReportContract.test.ts",
+    "test:b2-report": "node --experimental-strip-types scripts/b2ReportContract.test.ts",
     "test:architecture": "node scripts/singleExternalAiAudit.mjs"
   },
   "dependencies": {
