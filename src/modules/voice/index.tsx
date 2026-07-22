@@ -12,7 +12,7 @@ import {
   HiOutlineXMark,
 } from 'react-icons/hi2'
 import type { OfficerType } from './types'
-import { officerTypes } from './data/officerTypes'
+import { officerTypes, resolveOfficerType } from './data/officerTypes'
 import OfficerIcon from './OfficerIcon'
 
 const presetTypes = officerTypes.filter(o => o.id !== 'custom')
@@ -72,14 +72,15 @@ export default function VoicePage() {
 
   const handleConfirm = useCallback(() => {
     if (!selectedId) return
-    sessionStorage.setItem('visa_officer_type', selectedId)
-    navigate('/practice', { state: { officerType: selectedId } })
+    const resolvedId = resolveOfficerType(selectedId)
+    sessionStorage.setItem('visa_officer_type', resolvedId)
+    navigate('/practice', { state: { officerType: resolvedId } })
   }, [navigate, selectedId])
 
   return (
     <div className="app-page pb-32">
       <header className="app-topbar">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-8">
           <button type="button" onClick={() => navigate('/')} className="app-icon-button" aria-label="返回首页">
             <HiOutlineArrowLeft className="h-[18px] w-[18px]" />
           </button>
@@ -91,7 +92,7 @@ export default function VoicePage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-5 pb-8 pt-12 sm:px-8 sm:pt-16">
+      <main className="mx-auto max-w-5xl px-4 pb-8 pt-9 sm:px-8 sm:pt-16">
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
@@ -99,11 +100,11 @@ export default function VoicePage() {
           className="max-w-2xl"
         >
           <span className="app-eyebrow">Interview style</span>
-          <h1 className="app-title mt-5">选择今天要练习的节奏。</h1>
+          <h1 className="app-title mt-4 sm:mt-5">选择今天要练习的节奏。</h1>
           <p className="app-subtitle">不同风格会改变语速、追问强度和表达压力。第一次练习，建议从标准型开始。</p>
         </motion.div>
 
-        <div className="mt-9 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="mt-8 grid grid-cols-1 gap-3 sm:gap-4 md:mt-9 md:grid-cols-2">
           {presetTypes.map((officer, index) => {
             const isSelected = selectedId === officer.id
             const isPreview = previewId === officer.id
@@ -114,7 +115,7 @@ export default function VoicePage() {
                 variants={cardMotion}
                 initial="hidden"
                 animate="visible"
-                className={`relative overflow-hidden rounded-[24px] border bg-white transition-all duration-300 ${
+                className={`relative overflow-hidden rounded-[24px] border bg-white transition-all duration-300 active:scale-[0.985] ${
                   isSelected
                     ? 'border-[#0071e3] shadow-[0_0_0_4px_rgba(0,113,227,0.09),0_24px_64px_rgba(0,0,0,0.08)]'
                     : 'border-black/[0.08] shadow-[0_14px_50px_rgba(0,0,0,0.045)] hover:-translate-y-0.5 hover:border-black/[0.14] hover:shadow-[0_20px_60px_rgba(0,0,0,0.075)]'
@@ -123,7 +124,7 @@ export default function VoicePage() {
                 <button
                   type="button"
                   onClick={() => setSelectedId(current => current === officer.id ? null : officer.id)}
-                  className="w-full p-6 text-left sm:p-7"
+                  className="w-full p-5 text-left sm:p-7"
                 >
                   <div className="flex items-start gap-4">
                     <OfficerIcon type={officer.id} className="h-12 w-12 flex-shrink-0 rounded-2xl" />
@@ -168,7 +169,7 @@ export default function VoicePage() {
           initial="hidden"
           animate="visible"
           onClick={() => navigate('/voice/custom')}
-          className="app-card-interactive group mt-4 flex w-full items-center gap-4 p-6 text-left sm:p-7"
+          className="app-card-interactive group mt-1 flex w-full items-center gap-4 p-5 text-left active:scale-[0.985] sm:mt-4 sm:p-7"
         >
           <OfficerIcon type="custom" className="h-12 w-12 flex-shrink-0 rounded-2xl" />
           <div className="min-w-0 flex-1">
@@ -223,15 +224,15 @@ export default function VoicePage() {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 90, opacity: 0 }}
             transition={{ duration: 0.38, ease: [0.28, 0.11, 0.32, 1] }}
-            className="fixed inset-x-0 bottom-0 z-50 border-t border-black/[0.07] bg-white/82 px-5 py-4 backdrop-blur-2xl sm:px-8"
+            className="mobile-safe-bottom fixed inset-x-0 bottom-0 z-50 border-t border-black/[0.07] bg-white/88 px-4 pt-3 shadow-[0_-12px_36px_rgba(0,0,0,0.06)] backdrop-blur-2xl sm:px-8 sm:py-4"
           >
-            <div className="mx-auto flex max-w-5xl items-center gap-4">
+            <div className="mx-auto flex max-w-5xl items-center gap-3 sm:gap-4">
               <OfficerIcon type={selectedConfig.id} className="h-10 w-10 flex-shrink-0 rounded-[14px]" />
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#86868b]">本次角色</p>
                 <p className="truncate text-[14px] font-semibold text-[#1d1d1f]">{selectedConfig.label}</p>
               </div>
-              <button type="button" onClick={handleConfirm} className="app-button-primary">
+              <button type="button" onClick={handleConfirm} className="app-button-primary flex-shrink-0 active:scale-[0.97]">
                 选择签证类型
                 <HiOutlineArrowRight className="h-4 w-4" />
               </button>

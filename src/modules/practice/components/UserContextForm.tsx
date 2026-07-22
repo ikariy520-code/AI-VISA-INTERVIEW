@@ -426,9 +426,9 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col items-center">
-      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-8 text-center">
-        <div className="app-eyebrow mb-5">Background setup</div>
-        <h1 className="text-[32px] font-semibold tracking-[-0.045em] text-[#1d1d1f]">建立面签背景</h1>
+      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6 text-center sm:mb-8">
+        <div className="app-eyebrow mb-4 sm:mb-5">Background setup</div>
+        <h1 className="text-[30px] font-semibold tracking-[-0.045em] text-[#1d1d1f] sm:text-[32px]">建立面签背景</h1>
         <p className="mt-3 text-[13px] font-normal text-[#6e6e73]">只填写会影响面签问题的信息 · <span className="font-semibold text-[#424245]">{visaTypeLabel[visaType]}</span></p>
       </motion.div>
 
@@ -444,7 +444,7 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
         </div>
       </motion.div>
 
-      <motion.form initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} onSubmit={handlePrepareReview} className="app-card w-full space-y-5 p-5 sm:p-7">
+      <motion.form initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} onSubmit={handlePrepareReview} className="app-card w-full space-y-5 p-4 sm:p-7">
         {isF1 ? (
           <>
             <div>
@@ -780,7 +780,7 @@ export default function UserContextForm({ visaType, onSubmit, onBack }: Props) {
           </div>
         )}
 
-        <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
+        <div className="-mx-1 flex flex-col-reverse gap-3 border-t border-black/[0.06] px-1 pt-5 sm:mx-0 sm:flex-row sm:border-0 sm:px-0 sm:pt-2">
           <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={onBack} className="app-button-secondary"><HiOutlineArrowLeft className="h-4 w-4" /> 返回</motion.button>
           <motion.button type="submit" whileTap={{ scale: privacyWarning || missingHomeTie ? 1 : 0.985 }} disabled={Boolean(privacyWarning || missingHomeTie)} className="app-button-primary flex-1">
             查看并确认信息 <HiOutlineArrowRight className="h-4 w-4" />

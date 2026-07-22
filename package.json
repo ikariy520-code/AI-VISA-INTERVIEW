@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "npm run test:f1-controller && npm run test:f1-report && npm run test:architecture",
+    "test": "npm run test:invite && npm run test:officers && npm run test:f1-controller && npm run test:realtime-turn && npm run test:report-depth && npm run test:f1-report && npm run test:architecture",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -13,7 +13,14 @@
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
     "smoke:deepseek": "node scripts/deepseekConnectivitySmoke.mjs",
     "smoke:report": "node scripts/finalReportSmoke.mjs",
+    "invite:generate": "node scripts/inviteAdmin.mjs generate",
+    "invite:status": "node scripts/inviteAdmin.mjs status",
+    "invite:reset": "node scripts/inviteAdmin.mjs reset",
+    "test:invite": "node scripts/inviteAuth.test.mjs",
+    "test:officers": "node --experimental-strip-types scripts/officerTypes.test.ts",
     "test:f1-controller": "node --experimental-strip-types scripts/f1InterviewController.test.ts",
+    "test:realtime-turn": "node --experimental-strip-types scripts/realtimeTurnGuard.test.ts",
+    "test:report-depth": "node --experimental-strip-types scripts/reportDepth.test.ts",
     "test:f1-report": "node --experimental-strip-types scripts/f1ReportContract.test.ts",
     "test:architecture": "node scripts/singleExternalAiAudit.mjs"
   },

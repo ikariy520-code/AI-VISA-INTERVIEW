@@ -29,12 +29,12 @@ export interface F1QuestionDefinition {
 export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
   {
     id: 'f1_01', number: 1, stage: 'BASIC_INFO', topic: 'school', selection: 'core', answerShape: 'open',
-    text: 'Which school will you study at?',
+    text: 'Which school are you going to?',
     evaluationFocus: ['directness', 'consistency_with_background'],
   },
   {
     id: 'f1_02', number: 2, stage: 'SCHOOL_AND_MAJOR', topic: 'school', selection: 'adaptive', answerShape: 'open',
-    text: 'How did you learn about this school?',
+    text: 'How did you hear about this school?',
     evaluationFocus: ['specificity', 'independent_research'],
   },
   {
@@ -44,7 +44,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
   },
   {
     id: 'f1_04', number: 4, stage: 'BASIC_INFO', topic: 'major', selection: 'core', answerShape: 'open',
-    text: 'What is your major?',
+    text: "What's your major?",
     evaluationFocus: ['directness', 'consistency_with_background'],
   },
   {
@@ -59,7 +59,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
   },
   {
     id: 'f1_07', number: 7, stage: 'ACADEMIC_PLAN', topic: 'program', selection: 'adaptive', answerShape: 'open',
-    text: 'How long will you study in the United States?',
+    text: 'How long is your program?',
     evaluationFocus: ['program_knowledge', 'consistency_with_background'],
   },
   {
@@ -79,22 +79,22 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
   },
   {
     id: 'f1_11', number: 11, stage: 'FUTURE_PLAN', topic: 'future_plan', selection: 'core', answerShape: 'compound',
-    text: 'What is your future plan? What will you do after graduation?',
+    text: 'What are your plans after graduation?',
     evaluationFocus: ['career_plan', 'home_country_ties', 'internal_consistency'],
   },
   {
     id: 'f1_12', number: 12, stage: 'FUNDING_CHECK', topic: 'funding', selection: 'core', answerShape: 'open',
-    text: 'Who will support your studies?',
+    text: "Who's paying for your studies?",
     evaluationFocus: ['funding_source', 'financial_consistency'],
   },
   {
     id: 'f1_13', number: 13, stage: 'FUNDING_CHECK', topic: 'funding', selection: 'adaptive', answerShape: 'open',
-    text: 'How much money will you spend on your studies?',
+    text: 'About how much will your studies cost each year?',
     evaluationFocus: ['cost_awareness', 'financial_consistency'],
   },
   {
     id: 'f1_14', number: 14, stage: 'FUNDING_CHECK', topic: 'family_funding', selection: 'adaptive', answerShape: 'compound',
-    text: 'What do your parents do, and approximately how much do they earn?',
+    text: 'What do your parents do, and about how much do they earn?',
     evaluationFocus: ['funding_plausibility', 'internal_consistency'],
     sensitive: true,
     privacyGuidance: 'Collect only occupations and an approximate income range; never request employer names, account numbers, or bank balances.',

@@ -1,7 +1,7 @@
-import type { OfficerTypeConfig } from '../types'
+import type { OfficerType, OfficerTypeConfig, ResolvedOfficerType } from '../types'
 
 // ========================================
-// 四种面签官配置
+// 面签官配置
 //
 // demoText / demoTextEn — 试音时展示的文案
 //   （后续接真实 TTS 时，这些文案会被朗读出来）
@@ -9,7 +9,23 @@ import type { OfficerTypeConfig } from '../types'
 // ========================================
 
 export const officerTypes: OfficerTypeConfig[] = [
-  // ---- 1. 压力型面签官 ----
+  // ---- 1. 随机面签官 ----
+  {
+    id: 'random',
+    label: '随机面签官',
+    subtitle: '未知风格 · 模拟真实抽签',
+    description:
+      '确认后从压力型、标准型、友好型中随机抽取一位。提前不知道窗口风格，更接近真实面签的不确定感。',
+    icon: '🎲',
+    gradient: 'from-slate-500 to-zinc-700',
+    ringColor: 'ring-slate-400',
+    demoText: '',
+    demoTextEn: '',
+    systemPromptAddition: '',
+    voiceProfile: { gender: 'male', pitch: 1.0, rate: 1.0, style: 'neutral' },
+  },
+
+  // ---- 2. 压力型面签官 ----
   {
     id: 'pressure',
     label: '压力型面签官',
@@ -21,11 +37,11 @@ export const officerTypes: OfficerTypeConfig[] = [
     ringColor: 'ring-red-400',
     demoText: '',
     demoTextEn: '',
-    systemPromptAddition: `High-pressure: brisk, direct, skeptical, and demanding about precision/consistency. Use allowed follow-ups firmly when triggered. Pressure comes from pace and scrutiny, never interruption, insults, or invented questions. Use 1-2 short sentences.`,
+    systemPromptAddition: `High-pressure: brisk, direct, skeptical, and demanding about precision/consistency. Use short, natural spoken wording and common contractions. Use allowed follow-ups firmly when triggered. Pressure comes from pace and scrutiny, never interruption, insults, or invented questions. Use 1-2 short sentences.`,
     voiceProfile: { gender: 'male', pitch: 0.85, rate: 1.5, style: 'stern' },
   },
 
-  // ---- 2. 标准型面签官 ----
+  // ---- 3. 标准型面签官 ----
   {
     id: 'standard',
     label: '标准型面签官',
@@ -37,11 +53,11 @@ export const officerTypes: OfficerTypeConfig[] = [
     ringColor: 'ring-blue-400',
     demoText: '',
     demoTextEn: '',
-    systemPromptAddition: `Standard: measured pace, short direct wording, calm and neutral. Evaluate school/program, purpose, funding, study and return plans objectively. Use allowed follow-ups for vague, inconsistent, or short answers.`,
+    systemPromptAddition: `Standard: measured pace, short direct wording, calm and neutral. Sound like a real officer speaking at a visa window, not someone reading a formal document. Use ordinary spoken American English and natural contractions. Evaluate school/program, purpose, funding, study and return plans objectively. Use allowed follow-ups for vague, inconsistent, or short answers.`,
     voiceProfile: { gender: 'male', pitch: 1.0, rate: 1.0, style: 'neutral' },
   },
 
-  // ---- 3. 友好型面签官 ----
+  // ---- 4. 友好型面签官 ----
   {
     id: 'friendly',
     label: '友好型面签官',
@@ -53,34 +69,8 @@ export const officerTypes: OfficerTypeConfig[] = [
     ringColor: 'ring-emerald-400',
     demoText: '',
     demoTextEn: '',
-    systemPromptAddition: `Friendly: slightly slower, clear, patient, warm, and reassuring without coaching. Keep the same evidence/consistency standard, deliver scrutiny gently, and use allowed follow-ups only when needed.`,
+    systemPromptAddition: `Friendly: slightly slower, clear, patient, warm, and reassuring without coaching. Use natural everyday wording and contractions while staying professional. Keep the same evidence/consistency standard, deliver scrutiny gently, and use allowed follow-ups only when needed.`,
     voiceProfile: { gender: 'female', pitch: 1.1, rate: 0.85, style: 'warm' },
-  },
-
-  // ---- 4. 特朗普专员 ----
-  {
-    id: 'trump',
-    label: '特朗普专员',
-    subtitle: '总统亲临 · 地狱难度',
-    description:
-      '美国总统特朗普亲自面签你来美国。极具个人特色的语气、口音和说话方式：短句重复、夸张形容词、话题跳跃。独一无二的"特朗普式"面签体验。',
-    icon: '🇺🇸',
-    gradient: 'from-amber-500 to-orange-600',
-    ringColor: 'ring-amber-400',
-    demoText:
-      'OK, let me tell you — we have the best visa system, believe me, the best. Nobody does visas better than us. So why do you want to come to America? It better be a good reason. A tremendous reason. We love tremendous reasons!',
-    demoTextEn:
-      "OK, let me tell you — we have the best visa system, believe me, the best. Nobody does visas better than us. So why do you want to come to America? It better be a good reason. A tremendous reason. We love tremendous reasons!",
-    systemPromptAddition: `You are Donald Trump, the President of the United States, personally conducting this visa interview. Your speaking style:
-- Short, emphatic sentences with frequent repetition
-- Signature phrases: "believe me", "tremendous", "the best", "nobody does it better", "terrific", "we'll see"
-- Casual, unpredictable digressions — you might suddenly talk about something unrelated
-- Hyperbolic praise and criticism: "That's a fantastic answer. Really fantastic.", or "I don't like that. Not one bit."
-- Sometimes cordial, sometimes confrontational — the applicant never knows what's coming
-- Occasional self-praise about America or yourself mid-sentence
-- Never use complex vocabulary — simple, punchy words only
-- Keep responses to 1-3 sentences, in Trump's unmistakable voice`,
-    voiceProfile: { gender: 'male', pitch: 0.8, rate: 0.95, style: 'charismatic' },
   },
 
   // ---- 5. 自定义 ----
@@ -98,3 +88,15 @@ export const officerTypes: OfficerTypeConfig[] = [
     voiceProfile: { gender: 'male', pitch: 1.0, rate: 1.0, style: 'neutral' },
   },
 ]
+
+export const RANDOM_OFFICER_POOL: readonly ResolvedOfficerType[] = ['pressure', 'standard', 'friendly']
+
+export function isOfficerType(value: unknown): value is OfficerType {
+  return typeof value === 'string' && officerTypes.some(officer => officer.id === value)
+}
+
+export function resolveOfficerType(type: OfficerType, randomValue = Math.random()): ResolvedOfficerType {
+  if (type !== 'random') return type
+  const normalized = Number.isFinite(randomValue) ? Math.min(Math.max(randomValue, 0), 0.999999999) : 0
+  return RANDOM_OFFICER_POOL[Math.floor(normalized * RANDOM_OFFICER_POOL.length)]
+}

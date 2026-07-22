@@ -26,7 +26,7 @@ const features = [
 
 export default function FeatureGrid() {
   return (
-    <section className="mx-auto grid w-full max-w-5xl grid-cols-1 gap-4 px-5 pb-20 pt-16 sm:px-8 md:grid-cols-2 md:pt-20">
+    <section className="mobile-snap-rail mobile-card-rail mx-auto w-full max-w-5xl gap-4 px-4 pb-16 pt-12 sm:grid sm:grid-flow-row sm:grid-cols-1 sm:overflow-visible sm:px-8 md:grid-cols-2 md:pb-20 md:pt-20">
       {features.map((feature, index) => (
         <FeatureCard key={feature.id} {...feature} index={index} />
       ))}

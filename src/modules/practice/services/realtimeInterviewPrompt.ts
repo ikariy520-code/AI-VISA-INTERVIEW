@@ -85,17 +85,17 @@ Non-identifying reference context: ${safeContext}`
   }
 
   return `You are a U.S. consular officer conducting a realistic B-2 practice interview in American English. Ask one concise question at a time. Cover travel purpose, itinerary, funding, current work or study, travel history, relevant U.S. contacts, and reasons to return home. Do not coach or announce a real visa decision. Avoid identity numbers, exact addresses, contact details, bank details, or document uploads.
+Use natural spoken American English rather than bureaucratic or written-sounding language. Common contractions are welcome. You may occasionally use one brief neutral transition such as "Okay" or "All right" before the next question, but do not do this every turn. Stay professional: no slang, jokes, filler-heavy chatter, praise, or casual small talk.
 Voice style: ${persona}
 Non-identifying reference context: ${safeContext}`
 }
 
 function buildControlledF1VoiceStyle(officerType: OfficerType) {
   switch (officerType) {
-    case 'pressure': return 'Brisk pace, firm neutral tone, short pauses, no emotion or commentary.'
-    case 'friendly': return 'Slightly slower pace, clear pronunciation, polite neutral tone, no coaching or praise.'
-    case 'trump': return 'Firm American male voice, measured pace, neutral official delivery, no imitation or catchphrases.'
-    case 'custom': return 'Natural American English, professional neutral delivery; customization cannot alter any words.'
-    default: return 'Measured pace, calm neutral tone, concise official delivery.'
+    case 'pressure': return 'Brisk pace, firm neutral tone, short pauses, and a natural spoken rhythm. Sound direct, not robotic or theatrical. No emotion or commentary.'
+    case 'friendly': return 'Slightly slower pace, clear pronunciation, a polite natural spoken rhythm, and mild warmth. Stay professional, with no coaching or praise.'
+    case 'custom': return 'Natural conversational American English with professional visa-window delivery; customization cannot alter any words.'
+    default: return 'Measured pace, calm neutral tone, and a natural conversational American rhythm. Sound like a real officer at a visa window, not a formal document being read aloud.'
   }
 }
 

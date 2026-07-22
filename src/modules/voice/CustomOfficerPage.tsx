@@ -284,7 +284,7 @@ export default function CustomOfficerPage() {
     <motion.div {...pageTransition} className="app-page pb-32">
       {/* ---- 顶栏 ---- */}
       <header className="app-topbar">
-        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-5 sm:px-8">
+        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-4 sm:px-8">
           <button onClick={() => navigate('/voice')} className="app-icon-button" aria-label="返回面签官选择">
             <HiOutlineArrowLeft className="h-[18px] w-[18px]" />
           </button>
@@ -297,16 +297,16 @@ export default function CustomOfficerPage() {
       </header>
 
       {/* ---- 内容 ---- */}
-      <main className="mx-auto max-w-2xl px-5 pb-24 pt-12 sm:px-8 sm:pt-16">
+      <main className="mx-auto max-w-2xl px-4 pb-24 pt-9 sm:px-8 sm:pt-16">
         {/* 简介 */}
-        <div className="mb-9">
+        <div className="mb-7 sm:mb-9">
           <span className="app-eyebrow">Custom officer</span>
-          <h1 className="app-title mt-5">练你最担心的场景。</h1>
+          <h1 className="app-title mt-4 sm:mt-5">练你最担心的场景。</h1>
           <p className="app-subtitle">写下角色风格，再选难度。</p>
         </div>
 
         {/* 描述输入区 */}
-        <section className="app-card mb-4 p-6 sm:p-7">
+        <section className="app-card mb-4 p-5 sm:p-7">
           <h2 className="mb-4 flex items-center gap-2 text-[15px] font-semibold text-[#1d1d1f]">
             <HiOutlinePencilSquare className="h-[18px] w-[18px] text-[#0071e3]" />
             描述你想要的类型
@@ -331,7 +331,7 @@ export default function CustomOfficerPage() {
         </section>
 
         {/* 难度选择区 */}
-        <section className="app-card mb-4 p-6 sm:p-7">
+        <section className="app-card mb-4 p-5 sm:p-7">
           <h2 className="mb-4 flex items-center gap-2 text-[15px] font-semibold text-[#1d1d1f]">
             <HiOutlineAdjustmentsHorizontal
               className="h-[18px] w-[18px] transition-colors duration-300"
@@ -379,7 +379,7 @@ export default function CustomOfficerPage() {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             transition={{ duration: 0.3 }}
-            className="app-card mb-4 overflow-hidden p-6 sm:p-7"
+            className="app-card mb-4 overflow-hidden p-5 sm:p-7"
           >
             <h2 className="mb-4 flex items-center gap-2 text-[15px] font-semibold text-[#1d1d1f]">
               <HiOutlineEye className="h-[18px] w-[18px] text-[#0071e3]" />
@@ -402,7 +402,7 @@ export default function CustomOfficerPage() {
         initial={{ y: 100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.3, ease: [0.25, 0.1, 0, 1] }}
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-black/[0.07] bg-white/82 px-5 py-4 backdrop-blur-2xl sm:px-8"
+        className="mobile-safe-bottom fixed inset-x-0 bottom-0 z-50 border-t border-black/[0.07] bg-white/88 px-4 pt-3 shadow-[0_-12px_36px_rgba(0,0,0,0.06)] backdrop-blur-2xl sm:px-8 sm:py-4"
       >
           <div className="mx-auto flex max-w-2xl items-center gap-4">
             <OfficerIcon type="custom" className="h-10 w-10 flex-shrink-0 rounded-[14px]" />

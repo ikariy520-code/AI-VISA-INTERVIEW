@@ -1,7 +1,7 @@
 import type { InterviewSession, QAPair } from './types'
 import { F1_OFFICIAL_CRITERIA } from '../practice/data/f1OfficialCriteria'
 
-export type ReportSource = 'sample' | 'deepseek' | 'evidence_only' | 'doubao' | 'hybrid' | 'local' | 'unavailable'
+export type ReportSource = 'sample' | 'deepseek' | 'evidence_only' | 'doubao' | 'hybrid' | 'local' | 'unavailable' | 'insufficient'
 
 export interface ReportDimension {
   id: string
@@ -29,6 +29,7 @@ export interface QuestionReview {
   improve: string[]
   betterAnswer: string
   evidenceOnly?: boolean
+  insufficient?: boolean
 }
 
 export interface PracticeStep {
@@ -149,7 +150,7 @@ export function normalizeFeedbackReport(value: unknown): FeedbackReport | null {
   }).filter((item): item is PracticeStep => item !== null).slice(0, 3)
   if (actionPlan.length !== 3) return null
 
-  const source = ['deepseek', 'evidence_only', 'doubao', 'hybrid', 'local', 'sample', 'unavailable'].includes(String(value.source))
+  const source = ['deepseek', 'evidence_only', 'doubao', 'hybrid', 'local', 'sample', 'unavailable', 'insufficient'].includes(String(value.source))
     ? value.source as ReportSource
     : 'deepseek'
 
@@ -286,6 +287,46 @@ function buildUnavailableFeedbackReport(session: InterviewSession): FeedbackRepo
   }
 }
 
+function buildInsufficientFeedbackReport(session: InterviewSession): FeedbackReport {
+  return {
+    id: session.id,
+    source: 'insufficient',
+    title: session.title,
+    subtitle: '模拟面签完成度报告',
+    date: session.date,
+    time: session.time,
+    duration: session.duration,
+    questionCount: session.transcript.length,
+    profile: '继续完成面签',
+    evaluationLabel: 'Interview completion',
+    dimensionIntro: '本次完成度不足，不进入 AI 详细分析。',
+    overallScore: null,
+    readiness: '回答不足',
+    headline: '请再多回答一点问题',
+    summary: '本次有效回答不超过 4 个，暂不进行 AI 分析。完成 5–6 个回答后可获得快速基础分析，完成 7–9 个回答后可获得强分析，完成 10 个及以上回答后可获得完整深度分析。',
+    dimensions: [],
+    strengths: [],
+    priorities: [],
+    questionReviews: session.transcript.map(qa => ({
+      id: qa.id,
+      question: qa.question,
+      answer: qa.answer,
+      score: null,
+      verdict: '需要重答',
+      summary: '本轮回答数量还不够，本题暂不单独进行 AI 分析。',
+      didWell: [],
+      improve: ['认真听完问题并完成作答。', '继续完成至少 5 轮有效问答。'],
+      betterAnswer: '请使用自己的真实信息，先直接回答问题，再补充最相关的具体事实。',
+      insufficient: true,
+    })),
+    actionPlan: [
+      { label: '第 1 步', title: '继续回答问题', detail: '下一次至少完成 5 个有效回答，再查看基础分析。' },
+      { label: '第 2 步', title: '认真回答每一题', detail: '听完问题后，用真实信息给出直接、完整的回答。' },
+      { label: '第 3 步', title: '争取完成 10 题', detail: '完成 10 个及以上回答后，系统会进入完整深度分析。' },
+    ],
+  }
+}
+
 function answerScore(qa: QAPair) {
   return clampScore(average(qa.feedback.content.dimensions.map(item => item.score)) * 20)
 }
@@ -340,6 +381,7 @@ function buildLiveQuestionReview(qa: QAPair): QuestionReview {
 }
 
 export function buildFeedbackReport(session: InterviewSession): FeedbackReport {
+  if (session.analysisSource === 'insufficient') return buildInsufficientFeedbackReport(session)
   if (session.analysisSource === 'unavailable') return buildUnavailableFeedbackReport(session)
   const structured = buildStructuredFeedbackReport(session)
   if (structured) return structured

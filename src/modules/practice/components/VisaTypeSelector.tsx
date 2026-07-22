@@ -45,14 +45,14 @@ export default function VisaTypeSelector({ onSelect }: { onSelect: (type: VisaTy
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.28, 0.11, 0.32, 1] }}
-        className="mb-9 text-center"
+        className="mb-7 text-center sm:mb-9"
       >
         <span className="app-eyebrow">Visa category</span>
-        <h1 className="app-title mt-5">先选择这次要突破的场景。</h1>
+        <h1 className="app-title mt-4 sm:mt-5">先选择这次要突破的场景。</h1>
         <p className="app-subtitle mx-auto">面签问题会根据签证类型重新组织，让练习内容更贴近真实判断重点。</p>
       </motion.div>
 
-      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         {visaTypes.map((visa, index) => {
           const Icon = visa.icon
           return (
@@ -62,19 +62,19 @@ export default function VisaTypeSelector({ onSelect }: { onSelect: (type: VisaTy
               initial={{ opacity: 0, y: 18, scale: 0.985 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ delay: 0.1 + index * 0.08, duration: 0.48, ease: [0.28, 0.11, 0.32, 1] }}
-              whileTap={{ scale: 0.992 }}
+              whileTap={{ scale: 0.978 }}
               onClick={() => onSelect(visa.id)}
-              className="app-card-interactive group flex min-h-[260px] flex-col p-7 text-left sm:p-8"
+              className="app-card-interactive group flex min-h-[210px] flex-col p-5 text-left sm:min-h-[260px] sm:p-8"
             >
               <div className="flex items-start justify-between">
                 <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${visa.tone}`}>
                   <Icon className="h-[23px] w-[23px]" />
                 </span>
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-black/[0.07] bg-white text-[#86868b] transition-all group-hover:bg-[#1d1d1f] group-hover:text-white">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-black/[0.07] bg-white text-[#86868b] transition-all group-active:bg-[#1d1d1f] group-active:text-white sm:group-hover:bg-[#1d1d1f] sm:group-hover:text-white">
                   <HiOutlineArrowRight className="h-4 w-4" />
                 </span>
               </div>
-              <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868b]">{visa.fullName}</p>
+              <p className="mt-7 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868b] sm:mt-8">{visa.fullName}</p>
               <h2 className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">{visa.label}</h2>
               <p className="mt-2 text-[14px] text-[#424245]">{visa.description}</p>
               <p className="mt-auto pt-5 text-[12px] leading-6 text-[#86868b]">{visa.note}</p>

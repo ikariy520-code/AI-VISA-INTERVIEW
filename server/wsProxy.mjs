@@ -5,6 +5,7 @@ const DEFAULT_UPSTREAM_URL = 'wss://openspeech.bytedance.com/api/v3/realtime/dia
 const MAX_MESSAGE_BYTES = 2 * 1024 * 1024
 const DEFAULT_MAX_CONNECTIONS = 30
 const DEFAULT_MAX_SESSION_MS = 45 * 60 * 1000
+const KEEPALIVE_INTERVAL_MS = 25_000
 
 function sendJson(socket, payload) {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
@@ -42,9 +43,12 @@ export function createWSProxy(httpServer, options) {
   const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS
   const maxSessionMs = options.maxSessionMs ?? DEFAULT_MAX_SESSION_MS
   const secrets = [appId, accessKey]
-  const isAuthorized = typeof options.isAuthorized === 'function'
-    ? options.isAuthorized
-    : () => false
+  const realtimeAccess = typeof options.realtimeAccess === 'function'
+    ? options.realtimeAccess
+    : request => ({ allowed: Boolean(options.isAuthorized?.(request)) })
+  const consumeRealtimeUse = typeof options.consumeRealtimeUse === 'function'
+    ? options.consumeRealtimeUse
+    : request => realtimeAccess(request)
 
   let resolvedUpstreamUrl = upstreamUrl
   try {
@@ -65,7 +69,8 @@ export function createWSProxy(httpServer, options) {
   })
 
   function handleUpgrade(request, socket, head) {
-    const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname
+    const requestUrl = new URL(request.url || '/', 'http://127.0.0.1')
+    const pathname = requestUrl.pathname
     if (pathname !== '/api/realtime-voice') return
 
     if (!isSameOrigin(request)) {
@@ -74,8 +79,11 @@ export function createWSProxy(httpServer, options) {
       return
     }
 
-    if (!isAuthorized(request)) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+    const access = realtimeAccess(request, requestUrl.searchParams.get('attempt') || '')
+    if (!access.allowed) {
+      const statusCode = access.statusCode === 403 ? 403 : 401
+      const statusText = statusCode === 403 ? 'Forbidden' : 'Unauthorized'
+      socket.write(`HTTP/1.1 ${statusCode} ${statusText}\r\nConnection: close\r\n\r\n`)
       socket.destroy()
       return
     }
@@ -85,12 +93,15 @@ export function createWSProxy(httpServer, options) {
     })
   }
 
-  browserServer.on('connection', (browserSocket) => {
+  browserServer.on('connection', (browserSocket, request) => {
     if (activeConnections >= maxConnections) {
       browserSocket.close(1013, 'server busy - please try again later')
       return
     }
     activeConnections += 1
+    const connectionStartedAt = Date.now()
+    const requestUrl = new URL(request.url || '/', 'http://127.0.0.1')
+    const attemptId = requestUrl.searchParams.get('attempt') || ''
     let countedConnection = true
     const releaseConnection = () => {
       if (!countedConnection) return
@@ -111,6 +122,9 @@ export function createWSProxy(httpServer, options) {
 
     let upstreamSocket = null
     let browserClosed = false
+    let browserAlive = true
+    let upstreamAlive = true
+    let keepaliveTimer = null
     const sessionLimitTimer = setTimeout(() => {
       sendJson(browserSocket, {
         type: 'local.error',
@@ -149,7 +163,47 @@ export function createWSProxy(httpServer, options) {
     }
 
     upstreamSocket.on('open', () => {
-      sendJson(browserSocket, { type: 'local.connected' })
+      const usage = consumeRealtimeUse(request, attemptId)
+      if (!usage.allowed) {
+        sendJson(browserSocket, {
+          type: 'local.error',
+          code: usage.code || 'INVITE_QUOTA_EXHAUSTED',
+          message: usage.message || '该邀请码的测试机会已经用完。',
+        })
+        browserSocket.close(1008, 'invite quota unavailable')
+        closeUpstream(upstreamSocket)
+        return
+      }
+      sendJson(browserSocket, {
+        type: 'local.connected',
+        access: {
+          role: usage.role,
+          unlimited: usage.unlimited,
+          totalUses: usage.totalUses,
+          usedUses: usage.usedUses,
+          remainingUses: usage.remainingUses,
+        },
+      })
+
+      browserSocket.on('pong', () => { browserAlive = true })
+      upstreamSocket.on('pong', () => { upstreamAlive = true })
+      keepaliveTimer = setInterval(() => {
+        if (browserSocket.readyState === WebSocket.OPEN) {
+          if (!browserAlive) browserSocket.terminate()
+          else {
+            browserAlive = false
+            browserSocket.ping()
+          }
+        }
+        if (upstreamSocket?.readyState === WebSocket.OPEN) {
+          if (!upstreamAlive) upstreamSocket.terminate()
+          else {
+            upstreamAlive = false
+            upstreamSocket.ping()
+          }
+        }
+      }, KEEPALIVE_INTERVAL_MS)
+      keepaliveTimer.unref?.()
     })
 
     upstreamSocket.on('message', (data, isBinary) => {
@@ -180,6 +234,8 @@ export function createWSProxy(httpServer, options) {
     })
 
     upstreamSocket.on('close', (code, reason) => {
+      if (keepaliveTimer) clearInterval(keepaliveTimer)
+      console.warn(`[wsProxy] upstream closed code=${code} durationMs=${Date.now() - connectionStartedAt} reason=${redact(reason.toString(), secrets) || 'none'}`)
       sendJson(browserSocket, {
         type: 'local.closed',
         code,
@@ -210,16 +266,21 @@ export function createWSProxy(httpServer, options) {
       upstreamSocket.send(data, { binary: true })
     })
 
-    browserSocket.on('close', () => {
+    browserSocket.on('close', (code, reason) => {
       browserClosed = true
       clearTimeout(sessionLimitTimer)
+      if (keepaliveTimer) clearInterval(keepaliveTimer)
       releaseConnection()
       closeUpstream(upstreamSocket)
+      if (code !== 1000) {
+        console.warn(`[wsProxy] browser closed code=${code} durationMs=${Date.now() - connectionStartedAt} reason=${redact(reason.toString(), secrets) || 'none'}`)
+      }
     })
 
     browserSocket.on('error', () => {
       browserClosed = true
       clearTimeout(sessionLimitTimer)
+      if (keepaliveTimer) clearInterval(keepaliveTimer)
       releaseConnection()
       closeUpstream(upstreamSocket)
     })

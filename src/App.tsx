@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { Routes, Route, useLocation } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 
@@ -14,25 +14,26 @@ import InviteGate from './components/InviteGate'
 
 function App() {
   const location = useLocation()
+  const reduceMotion = useReducedMotion()
+  const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
 
   return (
-    <InviteGate>
-      <motion.div
-        key={location.pathname}
-        initial={{ opacity: 0, filter: 'blur(5px)' }}
-        animate={{ opacity: 1, filter: 'blur(0px)' }}
-        transition={{ duration: 0.22, ease: [0.28, 0.11, 0.32, 1] }}
-      >
-        <Routes location={location}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/voice" element={<VoicePage />} />
-          <Route path="/voice/custom" element={<CustomOfficerPage />} />
-          <Route path="/practice" element={<PracticePage />} />
-          <Route path="/voice/live" element={<VoiceInterviewRoute />} />
-          <Route path="/feedback" element={<FeedbackPage />} />
-        </Routes>
-      </motion.div>
-    </InviteGate>
+    <motion.div
+      key={location.pathname}
+      initial={reduceMotion ? false : isMobile ? { opacity: 0, y: 8 } : { opacity: 0, filter: 'blur(5px)' }}
+      animate={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, filter: 'blur(0px)' }}
+      transition={{ duration: isMobile ? 0.26 : 0.22, ease: [0.28, 0.11, 0.32, 1] }}
+      className="min-h-[100dvh]"
+    >
+      <Routes location={location}>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/voice" element={<VoicePage />} />
+        <Route path="/voice/custom" element={<CustomOfficerPage />} />
+        <Route path="/practice" element={<PracticePage />} />
+        <Route path="/voice/live" element={<InviteGate><VoiceInterviewRoute /></InviteGate>} />
+        <Route path="/feedback" element={<FeedbackPage />} />
+      </Routes>
+    </motion.div>
   )
 }
 

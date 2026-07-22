@@ -21,6 +21,7 @@ echo "=== Creating deployment package ==="
 tar czf "/tmp/$PACKAGE" \
   dist/ \
   server/ \
+  scripts/inviteAdmin.mjs \
   package.json \
   package-lock.json \
   ecosystem.config.cjs
@@ -33,7 +34,7 @@ ssh $SSH_OPTS "$SERVER" << ENDSSH
   set -e
 
   # Create remote dir if first deploy
-  mkdir -p $REMOTE_DIR/logs
+  mkdir -p $REMOTE_DIR/logs $REMOTE_DIR/data
 
   cd $REMOTE_DIR
 

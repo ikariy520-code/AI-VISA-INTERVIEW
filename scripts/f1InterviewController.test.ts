@@ -43,7 +43,7 @@ function validAnswer(questionId: string) {
 
 function runToClose(context: UserContext) {
   let state = createF1InterviewState(context, { now: 1_000 })
-  const officerMessages = [{ role: 'officer', text: 'Good morning. Passport and I-20, please. Which school will you study at?' }]
+  const officerMessages = [{ role: 'officer', text: `Good morning. Passport and I-20, please. ${F1_QUESTION_CATALOG[0].text}` }]
   for (let turn = 0; turn < 20; turn += 1) {
     const result = advanceF1Interview(state, validAnswer(state.currentQuestionId), context, { now: 2_000 + turn })
     state = result.state

@@ -16,9 +16,16 @@ import type { OfficerType } from '../../voice/types'
 import {
   analyzeInterview,
   analyzeInterviewWithAI,
+  createInsufficientInterviewSession,
   createUnavailableInterviewSession,
 } from '../../shared/store/analysisEngine'
 import { generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
+import {
+  clearInterviewRecovery,
+  loadFeedbackSession,
+  saveFeedbackSession,
+} from '../../shared/store/interviewRecovery'
+import { reportDepthForAnswerCount } from '../../shared/store/reportDepth'
 
 // ========================================
 // Step 5: 面签完成
@@ -46,6 +53,10 @@ interface FeedbackResult {
 }
 
 async function generateFeedbackResult(record: InterviewRecord): Promise<FeedbackResult> {
+  const answerCount = record.messages.filter(message => message.role === 'user' && message.text.trim()).length
+  if (reportDepthForAnswerCount(answerCount) === 'more_answers') {
+    return { session: createInsufficientInterviewSession(record), usedLocalFallback: true }
+  }
   if (record.visaType !== 'F1') {
     return { session: analyzeInterview(record), usedLocalFallback: true }
   }
@@ -60,15 +71,19 @@ async function generateFeedbackResult(record: InterviewRecord): Promise<Feedback
 export default function InterviewComplete({ messages, context, duration, officerType }: Props) {
   const navigate = useNavigate()
   const feedbackPromiseRef = useRef<Promise<FeedbackResult> | null>(null)
-  const [feedbackState, setFeedbackState] = useState<'generating' | 'ready' | 'error'>('generating')
+  const recoveredFeedbackRef = useRef(loadFeedbackSession())
+  const [feedbackState, setFeedbackState] = useState<'generating' | 'ready' | 'error'>(
+    recoveredFeedbackRef.current ? 'ready' : 'generating',
+  )
   const [feedbackError, setFeedbackError] = useState('')
-  const [feedbackSession, setFeedbackSession] = useState<InterviewSession | null>(null)
+  const [feedbackSession, setFeedbackSession] = useState<InterviewSession | null>(recoveredFeedbackRef.current)
 
   const officerQuestions = messages.filter(m => m.role === 'officer')
   const userAnswers = messages.filter(m => m.role === 'user')
 
   // 面签完成后使用脱敏背景与转写生成一次受约束报告；本站不长期保存。
   useEffect(() => {
+    if (feedbackSession) return
     if (messages.length === 0) {
       setFeedbackError('暂无可分析的对话记录。')
       setFeedbackState('error')
@@ -97,9 +112,12 @@ export default function InterviewComplete({ messages, context, duration, officer
     void feedbackPromiseRef.current.then(
       ({ session, usedLocalFallback }) => {
         if (!cancelled) {
+          saveFeedbackSession(session)
           setFeedbackSession(session)
           setFeedbackError(usedLocalFallback
-            ? session.analysisSource === 'unavailable'
+            ? session.analysisSource === 'insufficient'
+              ? '请再多回答一点问题。'
+              : session.analysisSource === 'unavailable'
               ? '综合分析暂不可用；报告页将只保留本次问答记录，不显示推测性评分。'
               : session.analysisSource === 'hybrid'
               ? '部分回答已完成综合分析，其余回答已使用基础规则补全。'
@@ -118,7 +136,7 @@ export default function InterviewComplete({ messages, context, duration, officer
     )
 
     return () => { cancelled = true }
-  }, [context, duration, messages, officerType])
+  }, [context, duration, feedbackSession, messages, officerType])
 
   // Feedback is the natural next step: once ready, open the detailed report automatically.
   useEffect(() => {
@@ -138,11 +156,12 @@ export default function InterviewComplete({ messages, context, duration, officer
   }, [navigate, feedbackSession])
 
   const handleRetry = useCallback(() => {
+    clearInterviewRecovery()
     navigate('/practice', { replace: true })
   }, [navigate])
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col items-center pb-12">
+    <div className="mx-auto flex max-w-2xl flex-col items-center pb-[max(3rem,env(safe-area-inset-bottom))]">
       {/* 完成图标 */}
       <motion.div
         initial={{ scale: 0 }}
@@ -160,7 +179,7 @@ export default function InterviewComplete({ messages, context, duration, officer
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="text-[34px] font-semibold tracking-[-0.05em] text-[#1d1d1f]"
+        className="text-center text-[31px] font-semibold tracking-[-0.05em] text-[#1d1d1f] sm:text-[34px]"
       >
         这次练习，完成了。
       </motion.h1>
@@ -178,7 +197,7 @@ export default function InterviewComplete({ messages, context, duration, officer
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
-        className="app-card mb-4 grid w-full grid-cols-2 gap-3 p-4 sm:grid-cols-4 sm:p-5"
+        className="app-card mb-4 grid w-full grid-cols-2 gap-2.5 p-3.5 sm:grid-cols-4 sm:gap-3 sm:p-5"
       >
         <div className="rounded-2xl bg-[#f5f5f7] p-4">
           <HiOutlineChartBarSquare className="h-5 w-5 text-[#0071e3]" />
@@ -235,7 +254,7 @@ export default function InterviewComplete({ messages, context, duration, officer
         transition={{ delay: 0.8 }}
         className="mt-6 text-[11px] text-slate-400"
       >
-        本次反馈不会长期保存，生成后请立即下载 PDF 或截图留存
+        本次反馈仅在当前标签页临时保留，关闭标签页前请下载 PDF 或截图留存
       </motion.p>
     </div>
   )
