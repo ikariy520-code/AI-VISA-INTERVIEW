@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-21T09:22:41.140Z",
+  "codes": [
+    {
+      "id": "T01",
+      "codeHash": "8a6236881948eb47a5d007b89a4ee494148181c0758c281e2f2e5fd7a9f9cfdb",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T02",
+      "codeHash": "0ef57f99c14b9fc112754d182c4a047c22ef9ddef724755759f20adf4247cbdb",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T03",
+      "codeHash": "de7efd54a82af24ded2beda7328b28bb7429e5c9bf51945d282c8b5897e8120c",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T04",
+      "codeHash": "bbf7c5ad1ace573b46f4ee2dc90c21617f736cbe35660790c25380332f945f79",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T05",
+      "codeHash": "730dc52ee7d60a469fef733bf11ebcee61c715f21ca259ef9ccc252931600533",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T06",
+      "codeHash": "5e0e52845cef647c6ddeb68b675d10c783fb9b4114ff6eb9a23c6387fb688543",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T07",
+      "codeHash": "08530518ee7ca22819083c69b71aa5fdc1dc70a14a447c14db1797df4a33623c",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T08",
+      "codeHash": "29a66a830bf739c1bdd4a14df290be5c7cc6b1fd7fa3c2c3b71c9a9c0894baf9",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T09",
+      "codeHash": "1f7efe87ac021f720aa68551c6901925ebf7107ead05c91d7164d8add1b1396f",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T10",
+      "codeHash": "226efe190255efbc3d13bed95c156dbf4d1088519e691ff04e3e826f3b7c193c",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T11",
+      "codeHash": "3dd7813c54a66a092c89dde61d7a466178acdb8f260073c2dd408c61d4176dc9",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T12",
+      "codeHash": "b66322c7317c04cbe71234ff503b94256034f0e9d15af12f90009951f898c4e3",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T13",
+      "codeHash": "60d09d3eff792040eb8b9bc3f6385626f85e451e94e63477978ec2f575e1cff3",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T14",
+      "codeHash": "5f4f5d2a669dcb971cc60d9a9d1d21a149d3dfb47f65feb708777b12e71d4565",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T15",
+      "codeHash": "d6dadb1137099c5be3d5f973ec6e74caeec602a2b4e92cc9d97ffad04435981e",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T16",
+      "codeHash": "d365bb1ee93c51c9399a6b703a56e553433b0c53d0a293d5efabe82dcdfce0eb",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T17",
+      "codeHash": "8813042fe7f0a2b80a790ba57b03ed1c857a81bdea1044c49debea8b874585f0",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T18",
+      "codeHash": "835c4d8d03374e3f51fd16b4b96a91ada73f4500adb559126d901fb95dbcc58e",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T19",
+      "codeHash": "c7beae26e20da53aadbe3384e47227f16dcba60d3f7285cec179b4d04daac235",
+      "maxUses": 3,
+      "enabled": true
+    },
+    {
+      "id": "T20",
+      "codeHash": "2065022a5f75074844df06c74c0a88060f58cb1ee9491e2cdc0f6981c45dda62",
+      "maxUses": 3,
+      "enabled": true
+    }
+  ]
+}

@@ -8,7 +8,7 @@ import {
 
 export default function HeroSection() {
   return (
-    <section className="mx-auto w-full max-w-6xl px-5 pt-32 text-center sm:px-8 sm:pt-40">
+    <section className="mx-auto w-full max-w-6xl px-4 pt-[7.25rem] text-center sm:px-8 sm:pt-40">
       <motion.div
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
@@ -32,7 +32,7 @@ export default function HeroSection() {
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.72, ease: [0.28, 0.11, 0.32, 1], delay: 0.16 }}
-        className="mx-auto mt-5 max-w-4xl text-[52px] font-semibold leading-[0.98] tracking-[-0.065em] text-[#1d1d1f] sm:text-[76px] lg:text-[92px]"
+        className="mx-auto mt-5 max-w-4xl text-[50px] font-semibold leading-[0.96] tracking-[-0.065em] text-[#1d1d1f] sm:text-[76px] sm:leading-[0.98] lg:text-[92px]"
       >
         练出<span className="gradient-text">信心</span>
         <br />
@@ -43,7 +43,7 @@ export default function HeroSection() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: [0.28, 0.11, 0.32, 1], delay: 0.28 }}
-        className="mx-auto mt-7 max-w-2xl text-[17px] leading-8 text-[#6e6e73] sm:text-[20px]"
+        className="mx-auto mt-6 max-w-2xl text-[16px] leading-7 text-[#6e6e73] sm:mt-7 sm:text-[20px] sm:leading-8"
       >
         模拟真实追问，给出清晰反馈。
       </motion.p>
@@ -52,9 +52,9 @@ export default function HeroSection() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.55, ease: [0.28, 0.11, 0.32, 1], delay: 0.4 }}
-        className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row"
+        className="mt-7 flex flex-col items-center justify-center gap-3 sm:mt-8 sm:flex-row"
       >
-        <Link to="/voice" className="app-button-primary w-full sm:w-auto">
+        <Link to="/voice" className="app-button-primary w-full active:scale-[0.975] sm:w-auto">
           开始练习
           <HiOutlineArrowRight className="h-4 w-4" />
         </Link>

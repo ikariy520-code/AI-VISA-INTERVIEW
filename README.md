@@ -82,3 +82,22 @@ npm run smoke:report
 ## 团队协作
 
 两个人共同开发时通过 Git 拉取、提交和推送代码同步，不需要先购买服务器。服务器只在对外测试或正式上线时需要。
+
+## 邀请码管理
+
+- `.env.production` 中现有的 `INVITE_CODES` 是无限次数的 VIP 邀请码。
+- `server/inviteCodes.json` 只保存测试邀请码的 SHA-256 哈希与额度，不保存明文。
+- 测试邀请码在实时语音上游连接成功时消耗一次；登录、浏览页面和连接失败不消耗。
+- 已用次数保存在 `data/invite-usage.json`，该目录不会进入 Git，部署也不会覆盖。
+- 明文邀请码只在生成时写入 `private/invite-codes_*.csv`，该目录不会进入 Git。
+
+```bash
+# 首次生成测试邀请码（已有 seed 时会拒绝覆盖）
+npm run invite:generate -- --count 20 --uses 3
+
+# 查看每个邀请码的已用与剩余次数
+npm run invite:status
+
+# 管理员为指定编号恢复全部次数
+npm run invite:reset -- --id T01
+```

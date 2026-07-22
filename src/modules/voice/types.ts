@@ -1,7 +1,7 @@
 // ========================================
 // 声音选择模块 — 类型定义
 //
-// 四种面签官类型，影响：
+// 面签官类型，影响：
 //   1. 试音 demo 文案
 //   2. AI 对话的 systemPrompt（LLM 无关，适用于任何模型）
 //   3. Mock 对话的话术风格
@@ -10,7 +10,8 @@
 // ========================================
 
 /** 面签官类型 ID */
-export type OfficerType = 'pressure' | 'standard' | 'friendly' | 'trump' | 'custom'
+export type OfficerType = 'random' | 'pressure' | 'standard' | 'friendly' | 'custom'
+export type ResolvedOfficerType = Exclude<OfficerType, 'random'>
 
 /** 自定义面签官数据 */
 export interface CustomOfficerData {

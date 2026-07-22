@@ -158,6 +158,8 @@ async function main() {
     codes: INVITE_CODES,
     sessionSecret: INVITE_SESSION_SECRET,
     secureCookies: process.env.NODE_ENV === 'production',
+    limitedCodesFile: process.env.INVITE_CODES_FILE || 'server/inviteCodes.json',
+    usageFile: process.env.INVITE_USAGE_FILE || 'data/invite-usage.json',
   })
   const reportHandler = createReportHandler({
     apiKey: DEEPSEEK_API_KEY,
@@ -213,7 +215,8 @@ async function main() {
     accessKey: DOUBAO_ACCESS_KEY,
     upstreamUrl: UPSTREAM_URL,
     maxConnections: WS_MAX_CONNECTIONS,
-    isAuthorized: inviteAuth.isAuthorized,
+    realtimeAccess: inviteAuth.realtimeAccess,
+    consumeRealtimeUse: inviteAuth.consumeRealtimeUse,
   })
 
   // ── graceful shutdown ──
@@ -240,6 +243,7 @@ async function main() {
     console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
     console.log(`[server] AI report   : ${reportHandler.configured ? `DeepSeek ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
     console.log(`[server] Invite gate : ${inviteAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
+    console.log(`[server] Test invites: ${inviteAuth.limitedCodeCount} limited codes; usage at ${inviteAuth.usageFile}`)
   })
 }
 

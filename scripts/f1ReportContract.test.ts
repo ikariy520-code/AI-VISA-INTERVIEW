@@ -21,7 +21,7 @@ import {
   repairF1ReportEvidence,
   validateF1StructuredReport as validateServerReport,
 } from '../server/shared/f1ReportContract.mjs'
-import { generateF1Report } from '../server/reportApi.mjs'
+import { generateF1Report, reportTierForAnswerCount } from '../server/reportApi.mjs'
 
 const input = sanitizeReportRequest({
   visaType: 'F1',
@@ -292,8 +292,13 @@ const generatedFallback = await generateF1Report({
   endpoint: 'https://api.deepseek.com/chat/completions',
   model: 'deepseek-v4-pro',
   input,
-  requestJson: async () => {
+  requestJson: async (_endpoint: string, options: any) => {
     boundedAttempts += 1
+    const body = JSON.parse(options.body)
+    assert.equal(body.thinking.type, 'disabled')
+    assert.equal(body.reasoning_effort, 'low')
+    assert.equal(body.max_tokens, 6_000)
+    assert.equal('timeoutMs' in options, false, 'report requests must not have a generation deadline')
     return {
       ok: true,
       status: 200,
@@ -301,10 +306,90 @@ const generatedFallback = await generateF1Report({
     }
   },
 })
-assert.equal(boundedAttempts, 3, 'invalid upstream drafts must stop after the bounded repair attempts')
+assert.equal(boundedAttempts, 1, 'a standard report must use one fast bounded attempt before evidence fallback')
 assert.ok(validateServerReport(generatedFallback, input, { allowMaterializedEvidence: true }))
 assert.equal(generatedFallback.analysisMode, 'evidence_only')
 assert.equal(generatedFallback.questionReviews.length, input.answers.length)
+assert.equal(reportTierForAnswerCount(4), 'more_answers')
+assert.equal(reportTierForAnswerCount(5), 'basic')
+assert.equal(reportTierForAnswerCount(6), 'basic')
+assert.equal(reportTierForAnswerCount(7), 'strong')
+assert.equal(reportTierForAnswerCount(9), 'strong')
+assert.equal(reportTierForAnswerCount(10), 'full')
+
+const fullInput = {
+  ...input,
+  answers: Array.from({ length: 10 }, (_, index) => ({
+    ...input.answers[index % input.answers.length],
+    index: index + 1,
+    questionId: `f1_${String(index + 1).padStart(2, '0')}`,
+    question: `Question ${index + 1}?`,
+    answer: `Answer ${index + 1}.`,
+  })),
+}
+let fullAttempts = 0
+const generatedFullFallback = await generateF1Report({
+  apiKey: 'test-only',
+  endpoint: 'https://api.deepseek.com/chat/completions',
+  model: 'deepseek-v4-pro',
+  input: fullInput,
+  requestJson: async (_endpoint: string, options: any) => {
+    fullAttempts += 1
+    const body = JSON.parse(options.body)
+    assert.equal(body.thinking.type, 'enabled')
+    assert.equal(body.reasoning_effort, 'high')
+    assert.equal(body.max_tokens, 12_000)
+    assert.equal('timeoutMs' in options, false)
+    return {
+      ok: true,
+      status: 200,
+      payload: { choices: [{ message: { content: JSON.stringify({ schemaVersion: 2 }) } }] },
+    }
+  },
+})
+assert.equal(fullAttempts, 1, 'a full report must use one high-quality AI call without rewriting the entire report')
+assert.equal(generatedFullFallback.analysisMode, 'evidence_only')
+
+let strongAttempts = 0
+await generateF1Report({
+  apiKey: 'test-only',
+  endpoint: 'https://api.deepseek.com/chat/completions',
+  model: 'deepseek-v4-pro',
+  input: { ...fullInput, answers: fullInput.answers.slice(0, 7) },
+  requestJson: async (_endpoint: string, options: any) => {
+    strongAttempts += 1
+    const body = JSON.parse(options.body)
+    assert.equal(body.thinking.type, 'enabled')
+    assert.equal(body.reasoning_effort, 'medium')
+    assert.equal(body.max_tokens, 9_000)
+    assert.equal('timeoutMs' in options, false)
+    return {
+      ok: true,
+      status: 200,
+      payload: { choices: [{ message: { content: JSON.stringify({ schemaVersion: 2 }) } }] },
+    }
+  },
+})
+assert.equal(strongAttempts, 1)
+
+let structuralRepairAttempts = 0
+const structurallyRepaired = await generateF1Report({
+  apiKey: 'test-only',
+  endpoint: 'https://api.deepseek.com/chat/completions',
+  model: 'deepseek-v4-pro',
+  input,
+  requestJson: async () => {
+    structuralRepairAttempts += 1
+    return {
+      ok: true,
+      status: 200,
+      payload: { choices: [{ message: { content: JSON.stringify({ ...catalogEvidenceReport, strengths: [] }) } }] },
+    }
+  },
+})
+assert.equal(structuralRepairAttempts, 1)
+assert.equal(structurallyRepaired.analysisMode, 'model', 'a small schema defect should be repaired locally without discarding valid model analysis')
+assert.ok(structurallyRepaired.strengths.length >= 1)
 
 const forbiddenWordsInAnswerInput = {
   ...input,

@@ -4,9 +4,10 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { HiOutlineArrowLeft, HiOutlineCheck } from 'react-icons/hi2'
 import type { VisaType, UserContext, InterviewStep } from './types'
 import type { OfficerType } from '../voice/types'
-import { officerTypes } from '../voice/data/officerTypes'
+import { isOfficerType, officerTypes, resolveOfficerType } from '../voice/data/officerTypes'
 import VisaTypeSelector from './components/VisaTypeSelector'
 import UserContextForm from './components/UserContextForm'
+import { createInterviewAttempt } from '../shared/store/interviewRecovery'
 
 // ========================================
 // 面签实战 — 主页面
@@ -39,13 +40,14 @@ export default function PracticePage() {
   // 面签官类型：从路由 state 读取，回退到 sessionStorage
   const officerType: OfficerType | null = useMemo(() => {
     const fromRoute = (location.state as any)?.officerType as OfficerType | undefined
-    if (fromRoute && ['pressure', 'standard', 'friendly', 'trump', 'custom'].includes(fromRoute)) {
-      sessionStorage.setItem('visa_officer_type', fromRoute)
-      return fromRoute
+    if (isOfficerType(fromRoute)) {
+      const resolved = resolveOfficerType(fromRoute)
+      sessionStorage.setItem('visa_officer_type', resolved)
+      return resolved
     }
     const fromStorage = sessionStorage.getItem('visa_officer_type') as OfficerType | null
-    if (fromStorage && ['pressure', 'standard', 'friendly', 'trump', 'custom'].includes(fromStorage)) {
-      return fromStorage
+    if (isOfficerType(fromStorage)) {
+      return resolveOfficerType(fromStorage)
     }
     return null
   }, [location.state])
@@ -67,10 +69,13 @@ export default function PracticePage() {
 
   // Step 2 → 跳转实时语音面签
   const handleContextSubmit = useCallback((context: UserContext) => {
+    if (!officerType) return
+    const recovery = createInterviewAttempt(officerType, context)
     navigate('/voice/live', {
       state: {
         officerType,
         userContext: context,
+        attemptId: recovery.attemptId,
       },
     })
   }, [navigate, officerType])
@@ -83,7 +88,7 @@ export default function PracticePage() {
     <div className="app-page">
       {/* ---- 顶部导航条 ---- */}
       <header className="app-topbar">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-8">
           <button
             type="button"
             onClick={() => (step === 'select-type' ? navigate('/') : handleBack())}
@@ -126,7 +131,7 @@ export default function PracticePage() {
       </header>
 
       {/* ---- 步骤内容 ---- */}
-      <main className="px-5 py-10 sm:px-8 sm:py-14">
+      <main className="px-4 py-8 sm:px-8 sm:py-14">
         {officerType && officerConfig ? (
           <AnimatePresence mode="wait">
             <motion.div key={step} {...pageTransition}>

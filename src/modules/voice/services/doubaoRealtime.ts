@@ -17,6 +17,7 @@ export interface DoubaoRealtimeEvent {
 export interface DoubaoRealtimeClientOptions {
   instructions: string
   openingLine: string
+  attemptId: string
   voice: string
   speakingStyle?: string
   /** Speak only application-approved questions; discard model-authored dialogue. */
@@ -248,6 +249,7 @@ export class DoubaoRealtimeClient {
   private lastUserTranscript = ''
   private userTranscriptFinalized = false
   private controlledSpeechActive = false
+  private controlledTurnPending = false
   private controlledTurnQueue = Promise.resolve()
   private userMuted = false
 
@@ -263,6 +265,7 @@ export class DoubaoRealtimeClient {
     this.audioForwardingEnabled = false
     this.messageQueue = Promise.resolve()
     this.controlledSpeechActive = false
+    this.controlledTurnPending = false
     this.controlledTurnQueue = Promise.resolve()
     this.userMuted = false
     this.sessionId = createSessionId()
@@ -355,7 +358,11 @@ export class DoubaoRealtimeClient {
     if (this.options.validateControlledText && !this.options.validateControlledText(approvedText)) {
       return Promise.reject(new Error('Controlled speech blocked unapproved text.'))
     }
+    if (this.controlledTurnPending) {
+      return Promise.reject(new Error('The current officer question is still being played.'))
+    }
 
+    this.controlledTurnPending = true
     const turn = this.controlledTurnQueue.then(async () => {
       if (!this.socket || this.socket.readyState !== WebSocket.OPEN || !this.sessionId) {
         throw new Error('Realtime voice session is not connected.')
@@ -368,7 +375,9 @@ export class DoubaoRealtimeClient {
       this.capture.setMuted(this.userMuted)
       this.audioForwardingEnabled = true
     })
-    this.controlledTurnQueue = turn.catch(() => undefined)
+    this.controlledTurnQueue = turn
+      .finally(() => { this.controlledTurnPending = false })
+      .catch(() => undefined)
     return turn
   }
 
@@ -451,7 +460,7 @@ export class DoubaoRealtimeClient {
         bot_name: 'U.S. Visa Officer',
         system_role: this.options.instructions,
         speaking_style: this.options.speakingStyle
-          || 'Speak in natural American English. Stay professional, concise, and realistic. Ask one question at a time and wait for the applicant to answer.',
+          || 'Speak in natural conversational American English, like a real officer at a visa window. Use everyday wording and common contractions where the system role allows them. Stay professional, concise, and realistic; avoid slang, jokes, excessive filler, and bureaucratic or written-sounding delivery. Ask one question at a time and wait for the applicant to answer.',
         extra: {
           strict_audit: true,
           input_mod: 'keep_alive',
@@ -510,7 +519,8 @@ export class DoubaoRealtimeClient {
 
   private async openSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const socket = new WebSocket(`${protocol}//${window.location.host}/api/realtime-voice`)
+    const query = new URLSearchParams({ attempt: this.options.attemptId })
+    const socket = new WebSocket(`${protocol}//${window.location.host}/api/realtime-voice?${query}`)
     socket.binaryType = 'arraybuffer'
     this.socket = socket
 
@@ -650,6 +660,7 @@ export class DoubaoRealtimeClient {
           })
         }
         this.userTranscriptFinalized = true
+        this.lastUserTranscript = ''
         break
 
       case DOUBAO_EVENT.CHAT_RESPONSE: {

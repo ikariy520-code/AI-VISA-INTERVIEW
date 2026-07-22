@@ -105,11 +105,10 @@ Non-identifying reference context: ${safeContext}`
 
 function buildControlledF1VoiceStyle(officerType: OfficerType) {
   switch (officerType) {
-    case 'pressure': return 'Brisk pace, firm neutral tone, short pauses, no emotion or commentary.'
-    case 'friendly': return 'Slightly slower pace, clear pronunciation, polite neutral tone, no coaching or praise.'
-    case 'trump': return 'Firm American male voice, measured pace, neutral official delivery, no imitation or catchphrases.'
-    case 'custom': return 'Natural American English, professional neutral delivery; customization cannot alter any words.'
-    default: return 'Measured pace, calm neutral tone, concise official delivery.'
+    case 'pressure': return 'Brisk pace, firm neutral tone, short pauses, and a natural spoken rhythm. Sound direct, not robotic or theatrical. No emotion or commentary.'
+    case 'friendly': return 'Slightly slower pace, clear pronunciation, a polite natural spoken rhythm, and mild warmth. Stay professional, with no coaching or praise.'
+    case 'custom': return 'Natural conversational American English with professional visa-window delivery; customization cannot alter any words.'
+    default: return 'Measured pace, calm neutral tone, and a natural conversational American rhythm. Sound like a real officer at a visa window, not a formal document being read aloud.'
   }
 }
 

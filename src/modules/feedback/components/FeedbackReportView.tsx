@@ -101,7 +101,11 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
                 <p className="mt-2 text-[13px] leading-6 text-[#424245]">{review.answer}</p>
               </div>
 
-              {review.score === null && !review.evidenceOnly ? (
+              {review.insufficient ? (
+                <div className="mt-4 rounded-[18px] border border-red-200/60 bg-[#fff5f4] p-4 text-[12px] leading-5 text-[#8f3b36]">
+                  本轮有效回答不足 5 个，本题暂不进行 AI 分析。请继续完成更多问题后再获取反馈。
+                </div>
+              ) : review.score === null && !review.evidenceOnly ? (
                 <div className="mt-4 rounded-[18px] border border-amber-200/60 bg-[#fffbf2] p-4 text-[12px] leading-5 text-[#755f3b]">
                   分析服务暂不可用，本题只保留原始问答，不生成推测性结论。
                 </div>
@@ -136,7 +140,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
   const tone = scoreTone(report.overallScore)
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       {report.source === 'sample' && (
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-blue-200/70 bg-[#eef6ff] px-4 py-3 text-[#315f8d]">
           <HiOutlineSparkles className="mt-0.5 h-4 w-4 flex-shrink-0" />
@@ -167,16 +171,22 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
           <p className="text-[12px] leading-5"><span className="font-semibold">综合分析暂不可用。</span> 为避免误导，本页只展示本次问答，不显示本地推测性评分。</p>
         </div>
       )}
+      {report.source === 'insufficient' && (
+        <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-red-200/70 bg-[#fff0ef] px-4 py-3 text-[#9d302b]">
+          <HiOutlineExclamationTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <p className="text-[12px] leading-5"><span className="font-semibold">请再多回答一点问题。</span> 有效回答不足 5 个，本次暂不调用 AI 分析。</p>
+        </div>
+      )}
 
       <section className="app-card overflow-hidden print:border-0 print:shadow-none">
         <div className="grid gap-0 lg:grid-cols-[1fr_270px]">
-          <div className="px-5 py-7 sm:px-8 sm:py-9">
+          <div className="px-5 py-6 sm:px-8 sm:py-9">
             <div className="flex flex-wrap items-center gap-2">
               <span className="app-segment">{report.subtitle}</span>
               <span className="rounded-full bg-[#f5f5f7] px-3 py-1.5 text-[11px] font-semibold text-[#6e6e73]">{report.profile}</span>
             </div>
-            <h1 className="mt-5 text-[28px] font-semibold tracking-[-0.045em] text-[#1d1d1f] sm:text-[34px]">{report.title}</h1>
-            <p className="mt-4 max-w-2xl text-[18px] font-semibold leading-8 tracking-[-0.02em] text-[#1d1d1f]">{report.headline}</p>
+            <h1 className="mt-4 text-[27px] font-semibold tracking-[-0.045em] text-[#1d1d1f] sm:mt-5 sm:text-[34px]">{report.title}</h1>
+            <p className="mt-3 max-w-2xl text-[17px] font-semibold leading-7 tracking-[-0.02em] text-[#1d1d1f] sm:mt-4 sm:text-[18px] sm:leading-8">{report.headline}</p>
             <p className="mt-3 max-w-2xl text-[13px] leading-6 text-[#6e6e73]">{report.summary}</p>
             <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-medium text-[#86868b]">
               <span className="inline-flex items-center gap-1.5"><HiOutlineCalendarDays className="h-4 w-4" />{report.date} · {report.time}</span>
@@ -185,7 +195,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
             </div>
           </div>
 
-          <div className={`flex flex-col justify-between border-t border-black/[0.06] p-6 lg:border-l lg:border-t-0 ${tone.panel}`}>
+          <div className={`flex flex-col justify-between border-t border-black/[0.06] p-5 sm:p-6 lg:border-l lg:border-t-0 ${tone.panel}`}>
             <div>
               <p className={`text-[11px] font-semibold uppercase tracking-[0.13em] ${tone.text}`}>本次准备度</p>
               <div className="mt-2 flex items-end gap-2">
@@ -201,7 +211,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         </div>
       </section>
 
-      <nav className="print:hidden sticky top-[76px] z-20 flex gap-1 overflow-x-auto rounded-full border border-black/[0.08] bg-white/90 p-1.5 shadow-sm backdrop-blur-xl">
+      <nav className="mobile-snap-rail print:hidden sticky top-[calc(76px+env(safe-area-inset-top))] z-20 flex gap-1 overflow-x-auto rounded-full border border-black/[0.08] bg-white/92 p-1.5 shadow-sm backdrop-blur-xl sm:top-[76px]">
         {[
           ...(report.strengths.length > 0 ? [['#report-overview', '表现总览']] : []),
           ...(report.dimensions.length > 0 ? [['#report-dimensions', '六项能力']] : []),
@@ -243,7 +253,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
           <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">{report.evaluationLabel}</p><h2 className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">六项核心能力</h2></div>
           <p className="max-w-md text-[11px] leading-5 text-[#86868b]">{report.dimensionIntro}</p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
           {report.dimensions.map(dimension => <DimensionCard key={dimension.id} dimension={dimension} />)}
         </div>
       </section>}

@@ -48,6 +48,9 @@ import {
   type DoubaoRealtimeEvent,
 } from '../services/doubaoRealtime'
 import RealtimeVoiceOrb from './RealtimeVoiceOrb'
+import { useInviteAccess } from '../../../shared/inviteAccess'
+import type { LiveInterviewProgress } from '../../shared/store/interviewRecovery'
+import { consumeControlledAnswer } from '../services/controlledTurnGuard'
 
 interface RealtimeChatMessage extends ChatMessage {
   streaming?: boolean
@@ -56,7 +59,10 @@ interface RealtimeChatMessage extends ChatMessage {
 interface Props {
   context: UserContext
   officerType: OfficerType
+  attemptId: string
+  initialProgress?: LiveInterviewProgress
   onComplete: (messages: ChatMessage[], duration: string) => void
+  onProgress?: (progress: LiveInterviewProgress) => void
 }
 
 type Phase =
@@ -79,37 +85,55 @@ const formatElapsed = (seconds: number) => {
   return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
 }
 
-export default function VoiceInterviewRoom({ context, officerType, onComplete }: Props) {
+export default function VoiceInterviewRoom({
+  context,
+  officerType,
+  attemptId,
+  initialProgress,
+  onComplete,
+  onProgress,
+}: Props) {
   const officerConfig = officerTypes.find(officer => officer.id === officerType)
     ?? officerTypes.find(officer => officer.id === 'standard')!
+  const { access, refreshAccess } = useInviteAccess()
+  const hasQuota = access.unlimited || Number(access.remainingUses) > 0
 
   const [phase, setPhase] = useState<Phase>('checking')
-  const [messages, setMessages] = useState<RealtimeChatMessage[]>([])
+  const [messages, setMessages] = useState<RealtimeChatMessage[]>(() => initialProgress?.messages ?? [])
   const [errorMessage, setErrorMessage] = useState('')
   const [micLevel, setMicLevel] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
   const [captionsVisible, setCaptionsVisible] = useState(true)
-  const [elapsed, setElapsed] = useState(0)
+  const [elapsed, setElapsed] = useState(() => initialProgress?.elapsedSeconds ?? 0)
   const [officerName] = useState(() => getRandomOfficerName())
 
   const clientRef = useRef<DoubaoRealtimeClient | null>(null)
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  const captionsScrollRef = useRef<HTMLElement>(null)
+  const captionScrollFrameRef = useRef<number | null>(null)
+  const lastCaptionToggleRef = useRef(0)
   const activeUserMessageRef = useRef<string | null>(null)
   const activeOfficerMessageRef = useRef<string | null>(null)
   const currentUserTextRef = useRef('')
   const currentOfficerTextRef = useRef('')
   const connectedRef = useRef(false)
+  const attemptStartedRef = useRef(Boolean(
+    (initialProgress?.messages.length ?? 0) > 0 || (initialProgress?.elapsedSeconds ?? 0) > 0,
+  ))
   const mutedRef = useRef(false)
   const endingRef = useRef(false)
   const endedRef = useRef(false)
   const autoEndAfterAudioRef = useRef(false)
-  const elapsedRef = useRef(0)
-  const messagesRef = useRef<RealtimeChatMessage[]>([])
+  const awaitingAnswerRef = useRef(false)
+  const pendingQuestionRef = useRef(initialProgress?.pendingQuestion || buildRealtimeOpeningLine(context))
+  const elapsedRef = useRef(initialProgress?.elapsedSeconds ?? 0)
+  const messagesRef = useRef<RealtimeChatMessage[]>(initialProgress?.messages ?? [])
   const f1StateRef = useRef<F1InterviewState | null>(
-    context.visaType === 'F1' ? createF1InterviewState(context) : null,
+    initialProgress?.f1State
+      ?? (context.visaType === 'F1' ? createF1InterviewState(context) : null),
   )
   const b2StateRef = useRef<B2InterviewState | null>(
-    context.visaType === 'B2' ? createB2InterviewState(context) : null,
+    initialProgress?.b2State
+      ?? (context.visaType === 'B2' ? createB2InterviewState(context) : null),
   )
 
   const returnToListening = useCallback(() => {
@@ -169,6 +193,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
   const handleRealtimeEvent = useCallback((event: DoubaoRealtimeEvent) => {
     switch (event.type) {
       case 'conversation.item.input_audio_transcription.started': {
+        if ((context.visaType === 'F1' || context.visaType === 'B2') && !awaitingAnswerRef.current) break
         finishOfficerMessage()
         currentUserTextRef.current = ''
         const id = nextMessageId()
@@ -179,6 +204,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       }
 
       case 'conversation.item.input_audio_transcription.delta': {
+        if ((context.visaType === 'F1' || context.visaType === 'B2') && !awaitingAnswerRef.current) break
         const delta = realtimeEventText(event)
         if (!delta) break
         currentUserTextRef.current += delta
@@ -189,6 +215,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       }
 
       case 'conversation.item.input_audio_transcription.result': {
+        if ((context.visaType === 'F1' || context.visaType === 'B2') && !awaitingAnswerRef.current) break
         const text = realtimeEventText(event)
         if (!text) break
         currentUserTextRef.current = text
@@ -199,18 +226,42 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       }
 
       case 'conversation.item.input_audio_transcription.completed': {
-        const text = realtimeEventText(event) || currentUserTextRef.current
+        let text = realtimeEventText(event) || currentUserTextRef.current
         const id = activeUserMessageRef.current
+        if (context.visaType === 'F1' || context.visaType === 'B2') {
+          const decision = consumeControlledAnswer(awaitingAnswerRef.current, text)
+          awaitingAnswerRef.current = decision.awaitingAnswer
+          text = decision.text
+          if (!decision.accepted && !decision.awaitingAnswer) {
+            if (id) setMessages(current => current.filter(message => message.id !== id))
+            activeUserMessageRef.current = null
+            currentUserTextRef.current = ''
+            break
+          }
+        }
+        if ((context.visaType === 'F1' || context.visaType === 'B2') && !text) {
+          if (id) setMessages(current => current.filter(message => message.id !== id))
+          activeUserMessageRef.current = null
+          currentUserTextRef.current = ''
+          returnToListening()
+          break
+        }
         if (id && text) upsertMessage(id, 'user', text, false)
         if (id && !text) {
           setMessages(current => current.filter(message => message.id !== id))
         }
         activeUserMessageRef.current = null
         currentUserTextRef.current = ''
+        if (!text) {
+          if (context.visaType === 'F1' || context.visaType === 'B2') awaitingAnswerRef.current = true
+          returnToListening()
+          break
+        }
         setPhase('thinking')
         if (context.visaType === 'F1' && text && f1StateRef.current) {
           const result = advanceF1Interview(f1StateRef.current, text, context)
           f1StateRef.current = result.state
+          pendingQuestionRef.current = result.action.text
           if (!isApprovedF1OfficerText(result.action.text)) {
             setErrorMessage('The controlled interview blocked an unapproved officer question.')
             setPhase('error')
@@ -231,6 +282,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
         } else if (context.visaType === 'B2' && text && b2StateRef.current) {
           const result = advanceB2Interview(b2StateRef.current, text, context)
           b2StateRef.current = result.state
+          pendingQuestionRef.current = result.action.text
           if (!isApprovedB2OfficerText(result.action.text)) {
             setErrorMessage('受控面签阻止了未批准的问题。')
             setPhase('error')
@@ -261,8 +313,13 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
           setPhase('error')
           break
         }
-        const id = nextMessageId()
-        upsertMessage(id, 'officer', text, false)
+        awaitingAnswerRef.current = false
+        pendingQuestionRef.current = text
+        const lastMessage = messagesRef.current[messagesRef.current.length - 1]
+        if (lastMessage?.role !== 'officer' || lastMessage.text.trim() !== text.trim()) {
+          const id = nextMessageId()
+          upsertMessage(id, 'officer', text, false)
+        }
         setPhase('speaking')
         break
       }
@@ -270,12 +327,16 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       case 'controlled.speech.done':
         if (context.visaType === 'F1' || context.visaType === 'B2') {
           if (autoEndAfterAudioRef.current) void endInterview()
-          else returnToListening()
+          else {
+            awaitingAnswerRef.current = true
+            returnToListening()
+          }
         }
         break
 
       case 'conversation.item.input_audio_transcription.failed':
         setErrorMessage('这句话没有听清，请靠近麦克风再说一次。')
+        if (context.visaType === 'F1' || context.visaType === 'B2') awaitingAnswerRef.current = true
         returnToListening()
         break
 
@@ -341,31 +402,53 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
     }
   }, [context.visaType, endInterview, finishOfficerMessage, returnToListening, upsertMessage])
 
-  const startInterview = useCallback(async () => {
+  const startInterview = useCallback(async (resume = false) => {
+    const resumable = resume && attemptStartedRef.current
+    if (!hasQuota && !resumable) {
+      setErrorMessage('该邀请码的 3 次测试机会已经用完。')
+      setPhase('error')
+      return
+    }
     clientRef.current?.destroy()
     setErrorMessage('')
-    setMessages([])
     setMicLevel(0)
-    setIsMuted(false)
-    setElapsed(0)
-    elapsedRef.current = 0
-    messagesRef.current = []
-    mutedRef.current = false
+    if (!resumable) {
+      attemptStartedRef.current = false
+      setMessages([])
+      setElapsed(0)
+      elapsedRef.current = 0
+      messagesRef.current = []
+      f1StateRef.current = context.visaType === 'F1' ? createF1InterviewState(context) : null
+      b2StateRef.current = context.visaType === 'B2' ? createB2InterviewState(context) : null
+      pendingQuestionRef.current = buildRealtimeOpeningLine(context)
+      autoEndAfterAudioRef.current = false
+    } else {
+      const completedMessages = messagesRef.current.filter(message => !message.streaming && message.text.trim())
+      messagesRef.current = completedMessages
+      setMessages(completedMessages)
+    }
+    const resumeClosing = resumable && autoEndAfterAudioRef.current
+    mutedRef.current = resumeClosing
+    setIsMuted(resumeClosing)
     endedRef.current = false
     endingRef.current = false
-    autoEndAfterAudioRef.current = false
+    awaitingAnswerRef.current = false
     connectedRef.current = false
     activeUserMessageRef.current = null
     activeOfficerMessageRef.current = null
     currentUserTextRef.current = ''
     currentOfficerTextRef.current = ''
-    f1StateRef.current = context.visaType === 'F1' ? createF1InterviewState(context) : null
-    b2StateRef.current = context.visaType === 'B2' ? createB2InterviewState(context) : null
     setPhase('connecting')
+
+    const openingLine = resumable
+      ? resolveResumeOpeningLine(context, messagesRef.current, pendingQuestionRef.current)
+      : buildRealtimeOpeningLine(context)
+    pendingQuestionRef.current = openingLine
 
     const client = new DoubaoRealtimeClient({
       instructions: buildRealtimeInterviewPrompt(context, officerType),
-      openingLine: buildRealtimeOpeningLine(context),
+      openingLine,
+      attemptId,
       voice: resolveRealtimeVoice(officerConfig.voiceProfile.gender, context.visaType),
       speakingStyle: context.visaType === 'B2'
         ? '使用自然、清晰、简短的普通话，语气专业中性，逐字朗读应用程序发送的问题，不要添加内容。'
@@ -380,7 +463,11 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       onInputLevel: setMicLevel,
       onConnectionState: (state) => {
         if (state === 'connecting') setPhase('connecting')
-        if (state === 'connected') connectedRef.current = true
+        if (state === 'connected') {
+          connectedRef.current = true
+          attemptStartedRef.current = true
+          void refreshAccess().catch(() => undefined)
+        }
         if (state === 'closed') {
           connectedRef.current = false
           if (!endingRef.current && !endedRef.current) setPhase('error')
@@ -402,7 +489,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
       clientRef.current = null
       setPhase('error')
     }
-  }, [context, handleRealtimeEvent, officerConfig.voiceProfile.gender, officerType])
+  }, [attemptId, context, handleRealtimeEvent, hasQuota, officerConfig.voiceProfile.gender, officerType, refreshAccess])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -430,9 +517,36 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
   }, [])
 
   useEffect(() => {
-    if (captionsVisible) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     messagesRef.current = messages
+    if (!captionsVisible) return
+    if (captionScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(captionScrollFrameRef.current)
+    }
+    captionScrollFrameRef.current = window.requestAnimationFrame(() => {
+      const container = captionsScrollRef.current
+      if (container) container.scrollTop = container.scrollHeight
+      captionScrollFrameRef.current = null
+    })
+    return () => {
+      if (captionScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(captionScrollFrameRef.current)
+        captionScrollFrameRef.current = null
+      }
+    }
   }, [captionsVisible, messages])
+
+  useEffect(() => {
+    if (!onProgress || endedRef.current) return
+    onProgress({
+      messages: messages
+        .filter(message => !message.streaming && message.text.trim())
+        .map(({ streaming: _streaming, ...message }) => message),
+      elapsedSeconds: elapsed,
+      f1State: f1StateRef.current,
+      b2State: b2StateRef.current,
+      pendingQuestion: pendingQuestionRef.current,
+    })
+  }, [elapsed, messages, onProgress])
 
   useEffect(() => {
     if (!connectedRef.current || phase === 'ending' || phase === 'ended') return
@@ -466,13 +580,21 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
     setPhase(nextMuted ? 'muted' : 'listening')
   }, [])
 
+  const toggleCaptions = useCallback(() => {
+    const now = performance.now()
+    if (now - lastCaptionToggleRef.current < 220) return
+    lastCaptionToggleRef.current = now
+    setCaptionsVisible(visible => !visible)
+  }, [])
+
   const status = phaseStatus(phase)
   const isConnected = ['listening', 'thinking', 'speaking', 'muted'].includes(phase)
-  const canStart = phase === 'ready' || phase === 'error' || phase === 'ended'
+  const hasResumableProgress = attemptStartedRef.current
+  const canStart = (hasQuota || hasResumableProgress) && (phase === 'ready' || phase === 'error' || phase === 'ended')
 
   return (
-    <div className="app-card relative mx-auto flex h-[calc(100vh-112px)] max-w-3xl flex-col overflow-hidden">
-      <header className="relative z-10 flex shrink-0 items-center justify-between px-5 py-4">
+    <div className="live-room app-card relative mx-auto flex h-[calc(100dvh-112px)] max-w-3xl flex-col overflow-hidden">
+      <header className="relative z-10 flex shrink-0 items-center justify-between px-4 py-3.5 sm:px-5 sm:py-4">
         <span className="w-12 text-[11px] tabular-nums text-[#86868b]">{formatElapsed(elapsed)}</span>
 
         <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold ${status.className}`}>
@@ -494,7 +616,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
         ) : <span className="w-12" />}
       </header>
 
-      <section className={`flex shrink-0 flex-col items-center px-5 pt-1 transition-all ${captionsVisible ? 'pb-3' : 'pb-1'}`}>
+      <section className={`flex shrink-0 flex-col items-center px-4 pt-1 transition-all sm:px-5 ${captionsVisible ? 'pb-3' : 'pb-1'}`}>
         <motion.div
           animate={phase === 'speaking' ? { scale: [1, 1.035, 1] } : { scale: 1 }}
           transition={{ repeat: phase === 'speaking' ? Infinity : 0, duration: 1.3 }}
@@ -516,28 +638,25 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
         <p className="text-[12px] text-[#86868b]">
           {officerConfig.label} · AI Realtime
         </p>
+        <p className={`mt-1 text-[11px] font-semibold ${hasQuota ? 'text-[#158f65]' : 'text-[#c9342f]'}`}>
+          {access.unlimited
+            ? 'VIP · 无限次面签'
+            : `测试邀请码 · 剩余 ${access.remainingUses}/${access.totalUses} 次`}
+        </p>
         <button
           type="button"
-          onClick={() => setCaptionsVisible(visible => !visible)}
+          onClick={toggleCaptions}
           className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-black/[0.08] bg-white/85 px-3.5 py-2 text-[11px] font-semibold text-[#5f6368] shadow-sm transition hover:border-black/[0.14] hover:bg-white hover:text-[#1d1d1f]"
-          aria-pressed={!captionsVisible}
+          aria-pressed={captionsVisible}
         >
           {captionsVisible ? <HiOutlineEyeSlash className="h-4 w-4" /> : <HiOutlineEye className="h-4 w-4" />}
           {captionsVisible ? '关闭对话字幕' : '开启对话字幕'}
         </button>
       </section>
 
-      <main className={`min-h-0 flex-1 px-4 py-3 ${captionsVisible ? 'overflow-y-auto' : 'overflow-hidden'}`}>
-        <AnimatePresence mode="wait" initial={false}>
+      <main ref={captionsScrollRef} className={`min-h-0 flex-1 px-3 py-2 sm:px-4 sm:py-3 ${captionsVisible ? 'overflow-y-auto' : 'overflow-hidden'}`}>
           {captionsVisible ? (
-          <motion.div
-            key="captions"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-            className="mx-auto flex max-w-lg flex-col gap-2.5"
-          >
+          <div className="mx-auto flex max-w-lg flex-col gap-2.5">
           {messages.length === 0 && phase !== 'connecting' && (
             <div className="mx-auto mt-6 max-w-sm rounded-[24px] border border-black/[0.06] bg-white/80 px-6 py-6 text-center shadow-[0_18px_60px_rgba(0,0,0,0.05)] backdrop-blur-xl">
               <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-[#eaf4ff] text-[#0071e3]">
@@ -596,21 +715,12 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
             </div>
           )}
 
-          <div ref={chatEndRef} />
-          </motion.div>
+          </div>
           ) : (
-            <motion.div
-              key="voice-orb"
-              initial={{ opacity: 0, scale: 0.94 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ duration: 0.28, ease: [0.25, 0.1, 0, 1] }}
-              className="flex h-full min-h-[270px] items-center justify-center"
-            >
+            <div className="flex h-full min-h-[270px] items-center justify-center">
               <RealtimeVoiceOrb phase={phase} micLevel={micLevel} />
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
       </main>
 
       <AnimatePresence>
@@ -627,7 +737,7 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
                 <p className="text-[12px] leading-5 text-[#a22d29]">{errorMessage}</p>
               </div>
               <div className="mt-3 flex gap-2">
-                <button type="button" onClick={startInterview} className="rounded-full bg-[#c9342f] px-4 py-1.5 text-[12px] font-semibold text-white">
+                <button type="button" onClick={() => void startInterview(hasResumableProgress)} disabled={!hasQuota && !hasResumableProgress} className="rounded-full bg-[#c9342f] px-4 py-1.5 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
                   重新连接
                 </button>
                 <button type="button" onClick={() => setErrorMessage('')} className="rounded-full bg-white px-4 py-1.5 text-[12px] font-semibold text-[#6e6e73]">
@@ -639,16 +749,16 @@ export default function VoiceInterviewRoom({ context, officerType, onComplete }:
         )}
       </AnimatePresence>
 
-      <footer className="shrink-0 px-5 pb-6 pt-2">
+      <footer className="shrink-0 px-4 pb-6 pt-2 sm:px-5">
         <div className="mx-auto flex max-w-lg flex-col items-center gap-3">
           <p className={`text-[13px] font-medium ${phase === 'speaking' ? 'text-[#7c3aed]' : phase === 'listening' ? 'text-[#0071e3]' : 'text-[#86868b]'}`}>
-            {phaseHint(phase)}
+            {!isConnected && !hasQuota ? '3 次测试机会已用完，感谢完成测试。' : phaseHint(phase)}
           </p>
 
           <motion.button
             type="button"
-            disabled={phase === 'checking' || phase === 'connecting' || phase === 'thinking' || phase === 'speaking' || phase === 'ending'}
-            onClick={isConnected ? toggleMute : startInterview}
+            disabled={!isConnected && !hasQuota && !hasResumableProgress || phase === 'checking' || phase === 'connecting' || phase === 'thinking' || phase === 'speaking' || phase === 'ending'}
+            onClick={isConnected ? toggleMute : () => void startInterview(hasResumableProgress)}
             whileTap={{ scale: 0.94 }}
             className={`relative flex h-[76px] w-[76px] items-center justify-center rounded-full shadow-xl transition-all ${
               phase === 'muted'
@@ -695,6 +805,18 @@ function providerErrorMessage(event: DoubaoRealtimeEvent) {
     ? String(detail).replace(/豆包|doubao|bytedance|volcengine|openspeech/gi, '实时语音服务')
     : ''
   return publicDetail ? `实时语音服务返回错误：${publicDetail}` : '实时语音服务暂时不可用，请重新连接。'
+}
+
+function resolveResumeOpeningLine(
+  context: UserContext,
+  messages: readonly RealtimeChatMessage[],
+  pendingQuestion: string,
+) {
+  if (context.visaType === 'F1' && pendingQuestion.trim()) return pendingQuestion.trim()
+  const lastOfficerQuestion = [...messages]
+    .reverse()
+    .find(message => message.role === 'officer' && message.text.trim())
+  return lastOfficerQuestion?.text.trim() || buildRealtimeOpeningLine(context)
 }
 
 function phaseStatus(phase: Phase) {

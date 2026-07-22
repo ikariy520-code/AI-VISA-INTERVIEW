@@ -502,6 +502,14 @@ export function createUnavailableInterviewSession(record: InterviewRecord): Inte
   }
 }
 
+export function createInsufficientInterviewSession(record: InterviewRecord): InterviewSession {
+  return {
+    ...createUnavailableInterviewSession(record),
+    overallScore: null,
+    analysisSource: 'insufficient',
+  }
+}
+
 export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<InterviewSession> {
   if (record.visaType !== 'F1' && record.visaType !== 'B2') return analyzeInterview(record)
   const input = record.visaType === 'F1' ? buildF1ReportRequest(record) : buildB2ReportRequest(record)
