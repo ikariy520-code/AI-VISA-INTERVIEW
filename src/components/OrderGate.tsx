@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { motion } from 'framer-motion'
 import { HiOutlineArrowRight, HiOutlineLockClosed, HiOutlineShieldCheck } from 'react-icons/hi2'
 import {
-  DEV_INVITE_ACCESS,
-  InviteAccessContext,
-  parseInviteAccess,
-  type InviteAccess,
-} from '../shared/inviteAccess'
+  DEV_ORDER_ACCESS,
+  OrderAccessContext,
+  parseOrderAccess,
+  type OrderAccess,
+} from '../shared/orderAccess'
 
 interface Props {
   children: ReactNode
@@ -14,25 +14,25 @@ interface Props {
 
 type GateState = 'checking' | 'locked' | 'authenticated'
 
-export default function InviteGate({ children }: Props) {
+export default function OrderGate({ children }: Props) {
   const [state, setState] = useState<GateState>(import.meta.env.DEV ? 'authenticated' : 'checking')
-  const [access, setAccess] = useState<InviteAccess | null>(import.meta.env.DEV ? DEV_INVITE_ACCESS : null)
-  const [code, setCode] = useState('')
+  const [access, setAccess] = useState<OrderAccess | null>(import.meta.env.DEV ? DEV_ORDER_ACCESS : null)
+  const [orderNumber, setOrderNumber] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const refreshAccess = useCallback(async () => {
-    if (import.meta.env.DEV) return DEV_INVITE_ACCESS
+    if (import.meta.env.DEV) return DEV_ORDER_ACCESS
     const response = await fetch('/api/auth/status', {
       cache: 'no-store',
       credentials: 'same-origin',
     })
     const payload = await response.json().catch(() => null) as Record<string, unknown> | null
     if (!response.ok) {
-      throw new Error(typeof payload?.message === 'string' ? payload.message : '测试资格验证失败。')
+      throw new Error(typeof payload?.message === 'string' ? payload.message : '使用权益验证失败。')
     }
-    const nextAccess = parseInviteAccess(payload)
-    if (!nextAccess) throw new Error('测试资格数据无效。')
+    const nextAccess = parseOrderAccess(payload)
+    if (!nextAccess) throw new Error('使用权益数据无效。')
     setAccess(nextAccess)
     return nextAccess
   }, [])
@@ -50,8 +50,20 @@ export default function InviteGate({ children }: Props) {
       .then(async response => {
         const payload = await response.json().catch(() => null) as Record<string, unknown> | null
         if (response.ok) {
-          const nextAccess = parseInviteAccess(payload)
-          if (!nextAccess) throw new Error('测试资格数据无效。')
+          const nextAccess = parseOrderAccess(payload)
+          if (!nextAccess) throw new Error('使用权益数据无效。')
+          if (!nextAccess.unlimited && Number(nextAccess.remainingUses) <= 0) {
+            setAccess(null)
+            setError('该订单号的面签次数已经用完，请购买新的面签次数。')
+            setState('locked')
+            return
+          }
+          if (!nextAccess.unlimited && nextAccess.expiresAt && Date.parse(nextAccess.expiresAt) <= Date.now()) {
+            setAccess(null)
+            setError('该订单号已过期，请联系客服或购买新的面签次数。')
+            setState('locked')
+            return
+          }
           setAccess(nextAccess)
           setState('authenticated')
           return
@@ -62,8 +74,8 @@ export default function InviteGate({ children }: Props) {
       .catch(fetchError => {
         if (disposed) return
         setError(fetchError instanceof DOMException && fetchError.name === 'AbortError'
-          ? '测试资格验证超时，请检查网络后重试。'
-          : fetchError instanceof Error ? fetchError.message : '暂时无法连接测试服务器，请稍后重试。')
+          ? '使用权益验证超时，请检查网络后重试。'
+          : fetchError instanceof Error ? fetchError.message : '暂时无法连接服务，请稍后重试。')
         setState('locked')
       })
       .finally(() => window.clearTimeout(timeout))
@@ -74,31 +86,31 @@ export default function InviteGate({ children }: Props) {
     }
   }, [])
 
-  const submitInvite = async (event: FormEvent) => {
+  const submitOrder = async (event: FormEvent) => {
     event.preventDefault()
-    const inviteCode = code.trim()
-    if (!inviteCode || submitting) return
+    const submittedOrderNumber = orderNumber.trim()
+    if (!submittedOrderNumber || submitting) return
     setSubmitting(true)
     setError('')
     try {
-      const response = await fetch('/api/auth/invite', {
+      const response = await fetch('/api/auth/order', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: inviteCode }),
+        body: JSON.stringify({ orderNumber: submittedOrderNumber }),
       })
       const payload = await response.json().catch(() => null) as Record<string, unknown> | null
       if (!response.ok) {
         throw new Error(typeof payload?.message === 'string'
           ? payload.message
-          : '邀请码验证失败，请重新输入。')
+          : '订单号验证失败，请重新输入。')
       }
-      const nextAccess = parseInviteAccess(payload)
-      if (!nextAccess) throw new Error('邀请码权限数据无效，请重新输入。')
+      const nextAccess = parseOrderAccess(payload)
+      if (!nextAccess) throw new Error('订单权益数据无效，请重新输入。')
       setAccess(nextAccess)
       setState('authenticated')
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : '邀请码验证失败，请重新输入。')
+      setError(submitError instanceof Error ? submitError.message : '订单号验证失败，请重新输入。')
     } finally {
       setSubmitting(false)
     }
@@ -106,9 +118,9 @@ export default function InviteGate({ children }: Props) {
 
   if (state === 'authenticated' && access) {
     return (
-      <InviteAccessContext.Provider value={{ access, refreshAccess }}>
+      <OrderAccessContext.Provider value={{ access, refreshAccess }}>
         {children}
-      </InviteAccessContext.Provider>
+      </OrderAccessContext.Provider>
     )
   }
 
@@ -117,7 +129,7 @@ export default function InviteGate({ children }: Props) {
       <main className="flex min-h-[100dvh] items-center justify-center bg-[#f5f5f7] px-6">
         <div className="flex flex-col items-center gap-4 text-[#6e6e73]" role="status">
           <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#d2d2d7] border-t-[#0071e3]" />
-          <p className="text-sm font-medium">正在验证测试资格…</p>
+          <p className="text-sm font-medium">正在验证使用权益…</p>
         </div>
       </main>
     )
@@ -137,26 +149,26 @@ export default function InviteGate({ children }: Props) {
         </div>
 
         <div className="text-center">
-          <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#0071e3]">Private Beta</p>
-          <h1 className="text-[30px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">开始 AI 面签</h1>
+          <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#0071e3]">正式版服务</p>
+          <h1 className="text-[30px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">验证面签订单</h1>
           <p className="mx-auto mt-3 max-w-[310px] text-[15px] leading-6 text-[#6e6e73]">
-            网站内容可以自由浏览。使用实时 AI 面签功能前，请输入邀请码。
+            网站内容可以自由浏览。开始实时 AI 面签前，请输入购买平台中的订单号。
           </p>
         </div>
 
-        <form className="mt-8" onSubmit={submitInvite}>
-          <label htmlFor="invite-code" className="mb-2 block text-[13px] font-medium text-[#424245]">
-            邀请码
+        <form className="mt-8" onSubmit={submitOrder}>
+          <label htmlFor="order-number" className="mb-2 block text-[13px] font-medium text-[#424245]">
+            订单号
           </label>
           <input
-            id="invite-code"
-            value={code}
-            onChange={event => setCode(event.target.value.toUpperCase())}
+            id="order-number"
+            value={orderNumber}
+            onChange={event => setOrderNumber(event.target.value.toUpperCase())}
             autoCapitalize="characters"
             autoComplete="one-time-code"
             spellCheck={false}
-            maxLength={32}
-            placeholder="请输入邀请码"
+            maxLength={64}
+            placeholder="请输入订单号"
             className="h-13 w-full rounded-2xl border border-black/[0.12] bg-[#fbfbfd] px-4 py-3.5 text-center text-[17px] font-semibold tracking-[0.12em] text-[#1d1d1f] outline-none transition placeholder:font-normal placeholder:tracking-normal placeholder:text-[#a1a1a6] focus:border-[#0071e3] focus:bg-white focus:ring-4 focus:ring-[#0071e3]/10"
           />
 
@@ -168,18 +180,22 @@ export default function InviteGate({ children }: Props) {
 
           <button
             type="submit"
-            disabled={!code.trim() || submitting}
+            disabled={!orderNumber.trim() || submitting}
             className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0071e3] px-5 py-3.5 text-[16px] font-semibold text-white shadow-[0_8px_24px_rgba(0,113,227,0.2)] transition hover:bg-[#0068d1] active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
           >
-            {submitting ? '正在验证…' : '进入测试'}
+            {submitting ? '正在验证…' : '验证订单并进入面签'}
             {!submitting && <HiOutlineArrowRight className="h-5 w-5" aria-hidden="true" />}
           </button>
         </form>
 
         <div className="mt-7 flex items-center justify-center gap-1.5 text-[12px] text-[#8e8e93]">
           <HiOutlineShieldCheck className="h-4 w-4" aria-hidden="true" />
-          <span>测试邀请码可完成 3 次完整面签</span>
+          <span>报告成功展示后，订单次数才会扣减 1 次</span>
         </div>
+
+        <a href="/" className="mt-4 block text-center text-[13px] font-medium text-[#6e6e73] transition hover:text-[#1d1d1f]">
+          暂不面签，返回浏览网站
+        </a>
       </motion.section>
     </main>
   )

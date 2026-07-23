@@ -518,7 +518,10 @@ export async function analyzeInterviewWithAI(record: InterviewRecord): Promise<I
   const response = await fetch(AI_REPORT_ENDPOINT, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Interview-Attempt': record.id,
+    },
     body: JSON.stringify(input),
   })
   if (!response.ok) throw new Error(`${record.visaType}_REPORT_FAILED_${response.status}`)

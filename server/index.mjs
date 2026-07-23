@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 
 import { createWSProxy } from './wsProxy.mjs'
-import { createInviteAuth } from './inviteAuth.mjs'
+import { createOrderAuth } from './orderAuth.mjs'
 import { createReportHandler } from './reportApi.mjs'
 
 // ── config ───────────────────────────────────────────────
@@ -34,8 +34,8 @@ const DOUBAO_ACCESS_KEY = process.env.DOUBAO_ACCESS_KEY || ''
 const UPSTREAM_URL = process.env.DOUBAO_REALTIME_URL || undefined
 const WS_MAX_CONNECTIONS = Number(process.env.WS_MAX_CONNECTIONS) || 30
 
-const INVITE_CODES = process.env.INVITE_CODES || ''
-const INVITE_SESSION_SECRET = process.env.INVITE_SESSION_SECRET || ''
+const ADMIN_ORDER_NUMBERS = process.env.ADMIN_ORDER_NUMBERS || process.env.INVITE_CODES || ''
+const ORDER_SESSION_SECRET = process.env.ORDER_SESSION_SECRET || process.env.INVITE_SESSION_SECRET || ''
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || ''
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro'
@@ -154,12 +154,12 @@ async function main() {
     process.exit(1)
   }
 
-  const inviteAuth = createInviteAuth({
-    codes: INVITE_CODES,
-    sessionSecret: INVITE_SESSION_SECRET,
+  const orderAuth = createOrderAuth({
+    adminOrderNumbers: ADMIN_ORDER_NUMBERS,
+    sessionSecret: ORDER_SESSION_SECRET,
     secureCookies: process.env.NODE_ENV === 'production',
-    limitedCodesFile: process.env.INVITE_CODES_FILE || 'server/inviteCodes.json',
-    usageFile: process.env.INVITE_USAGE_FILE || 'data/invite-usage.json',
+    ordersFile: process.env.ORDER_NUMBERS_FILE || 'data/orders.json',
+    usageFile: process.env.ORDER_USAGE_FILE || 'data/order-usage.json',
   })
   const reportHandler = createReportHandler({
     apiKey: DEEPSEEK_API_KEY,
@@ -172,12 +172,17 @@ async function main() {
       const pathname = req.url?.split('?')[0] ?? ''
       res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
 
-      const authHandled = await inviteAuth.handleRequest(req, res, pathname)
+      const authHandled = await orderAuth.handleRequest(req, res, pathname)
       if (authHandled) return
 
       // ── API routes ──
-      if (pathname.startsWith('/api/') && !inviteAuth.isAuthorized(req)) {
-        return inviteAuth.unauthorized(res)
+      if (pathname.startsWith('/api/') && !orderAuth.isAuthorized(req)) {
+        return orderAuth.unauthorized(res)
+      }
+
+      if (pathname === '/api/ai-report') {
+        const reportAccess = orderAuth.reportAccess(req, req.headers['x-interview-attempt'])
+        if (!reportAccess.allowed) return orderAuth.unauthorized(res, reportAccess)
       }
 
       if (pathname === '/api/realtime-health' && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -215,8 +220,8 @@ async function main() {
     accessKey: DOUBAO_ACCESS_KEY,
     upstreamUrl: UPSTREAM_URL,
     maxConnections: WS_MAX_CONNECTIONS,
-    realtimeAccess: inviteAuth.realtimeAccess,
-    consumeRealtimeUse: inviteAuth.consumeRealtimeUse,
+    realtimeAccess: orderAuth.realtimeAccess,
+    reserveInterview: orderAuth.reserveInterview,
   })
 
   // ── graceful shutdown ──
@@ -242,8 +247,8 @@ async function main() {
     console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
     console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
     console.log(`[server] AI report   : ${reportHandler.configured ? `DeepSeek ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
-    console.log(`[server] Invite gate : ${inviteAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
-    console.log(`[server] Test invites: ${inviteAuth.limitedCodeCount} limited codes; usage at ${inviteAuth.usageFile}`)
+    console.log(`[server] Order gate  : ${orderAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
+    console.log(`[server] Orders      : ${orderAuth.orderCount} customer orders from ${orderAuth.ordersFile}; usage at ${orderAuth.usageFile}`)
   })
 }
 

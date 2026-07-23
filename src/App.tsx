@@ -10,7 +10,7 @@ import CustomOfficerPage from './modules/voice/CustomOfficerPage'
 import PracticePage from './modules/practice'
 import FeedbackPage from './modules/feedback'
 import VoiceInterviewRoute from './modules/voice/components/VoiceInterviewRoute'
-import InviteGate from './components/InviteGate'
+import OrderGate from './components/OrderGate'
 
 function App() {
   const location = useLocation()
@@ -30,7 +30,7 @@ function App() {
         <Route path="/voice" element={<VoicePage />} />
         <Route path="/voice/custom" element={<CustomOfficerPage />} />
         <Route path="/practice" element={<PracticePage />} />
-        <Route path="/voice/live" element={<InviteGate><VoiceInterviewRoute /></InviteGate>} />
+        <Route path="/voice/live" element={<OrderGate><VoiceInterviewRoute /></OrderGate>} />
         <Route path="/feedback" element={<FeedbackPage />} />
       </Routes>
     </motion.div>

@@ -19,7 +19,7 @@ import {
   createInsufficientInterviewSession,
   createUnavailableInterviewSession,
 } from '../../shared/store/analysisEngine'
-import { generateSessionId, getNowFormatted } from '../../shared/store/interviewStore'
+import { getNowFormatted } from '../../shared/store/interviewStore'
 import {
   clearInterviewRecovery,
   loadFeedbackSession,
@@ -37,6 +37,7 @@ interface Props {
   context: UserContext
   duration: string
   officerType: OfficerType
+  attemptId: string
 }
 
 const visaTypeLabel: Record<string, string> = {
@@ -68,7 +69,7 @@ async function generateFeedbackResult(record: InterviewRecord): Promise<Feedback
   }
 }
 
-export default function InterviewComplete({ messages, context, duration, officerType }: Props) {
+export default function InterviewComplete({ messages, context, duration, officerType, attemptId }: Props) {
   const navigate = useNavigate()
   const feedbackPromiseRef = useRef<Promise<FeedbackResult> | null>(null)
   const recoveredFeedbackRef = useRef(loadFeedbackSession())
@@ -92,10 +93,8 @@ export default function InterviewComplete({ messages, context, duration, officer
 
     if (!feedbackPromiseRef.current) {
       const { date, time } = getNowFormatted()
-      const id = generateSessionId()
-
       const record: InterviewRecord = {
-        id,
+        id: attemptId,
         date,
         time,
         duration,
@@ -136,7 +135,7 @@ export default function InterviewComplete({ messages, context, duration, officer
     )
 
     return () => { cancelled = true }
-  }, [context, duration, feedbackSession, messages, officerType])
+  }, [attemptId, context, duration, feedbackSession, messages, officerType])
 
   // Feedback is the natural next step: once ready, open the detailed report automatically.
   useEffect(() => {

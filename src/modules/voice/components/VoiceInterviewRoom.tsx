@@ -48,7 +48,7 @@ import {
   type DoubaoRealtimeEvent,
 } from '../services/doubaoRealtime'
 import RealtimeVoiceOrb from './RealtimeVoiceOrb'
-import { useInviteAccess } from '../../../shared/inviteAccess'
+import { useOrderAccess } from '../../../shared/orderAccess'
 import type { LiveInterviewProgress } from '../../shared/store/interviewRecovery'
 import { consumeControlledAnswer } from '../services/controlledTurnGuard'
 
@@ -95,7 +95,7 @@ export default function VoiceInterviewRoom({
 }: Props) {
   const officerConfig = officerTypes.find(officer => officer.id === officerType)
     ?? officerTypes.find(officer => officer.id === 'standard')!
-  const { access, refreshAccess } = useInviteAccess()
+  const { access, refreshAccess } = useOrderAccess()
   const hasQuota = access.unlimited || Number(access.remainingUses) > 0
 
   const [phase, setPhase] = useState<Phase>('checking')
@@ -405,7 +405,7 @@ export default function VoiceInterviewRoom({
   const startInterview = useCallback(async (resume = false) => {
     const resumable = resume && attemptStartedRef.current
     if (!hasQuota && !resumable) {
-      setErrorMessage('该邀请码的 3 次测试机会已经用完。')
+      setErrorMessage('该订单号的面签次数已经用完。')
       setPhase('error')
       return
     }
@@ -640,8 +640,8 @@ export default function VoiceInterviewRoom({
         </p>
         <p className={`mt-1 text-[11px] font-semibold ${hasQuota ? 'text-[#158f65]' : 'text-[#c9342f]'}`}>
           {access.unlimited
-            ? 'VIP · 无限次面签'
-            : `测试邀请码 · 剩余 ${access.remainingUses}/${access.totalUses} 次`}
+            ? '管理员 · 无限次面签'
+            : `订单权益 · 剩余 ${access.remainingUses}/${access.totalUses} 次`}
         </p>
         <button
           type="button"
@@ -752,7 +752,7 @@ export default function VoiceInterviewRoom({
       <footer className="shrink-0 px-4 pb-6 pt-2 sm:px-5">
         <div className="mx-auto flex max-w-lg flex-col items-center gap-3">
           <p className={`text-[13px] font-medium ${phase === 'speaking' ? 'text-[#7c3aed]' : phase === 'listening' ? 'text-[#0071e3]' : 'text-[#86868b]'}`}>
-            {!isConnected && !hasQuota ? '3 次测试机会已用完，感谢完成测试。' : phaseHint(phase)}
+            {!isConnected && !hasQuota ? '订单次数已用完，仍可查看本次报告。' : phaseHint(phase)}
           </p>
 
           <motion.button

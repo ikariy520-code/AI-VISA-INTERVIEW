@@ -66,6 +66,7 @@ export default function VoiceInterviewRoute() {
         context={userContext}
         duration={completedInterview.duration}
         officerType={officerType}
+        attemptId={attemptId}
       />
     )
   }

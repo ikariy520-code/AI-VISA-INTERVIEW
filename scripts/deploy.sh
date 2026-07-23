@@ -21,7 +21,7 @@ echo "=== Creating deployment package ==="
 tar czf "/tmp/$PACKAGE" \
   dist/ \
   server/ \
-  scripts/inviteAdmin.mjs \
+  scripts/orderAdmin.mjs \
   package.json \
   package-lock.json \
   ecosystem.config.cjs
@@ -37,6 +37,13 @@ ssh $SSH_OPTS "$SERVER" << ENDSSH
   mkdir -p $REMOTE_DIR/logs $REMOTE_DIR/data
 
   cd $REMOTE_DIR
+
+  # Remove the retired invite-code implementation before unpacking the order build.
+  rm -f \
+    server/inviteAuth.mjs \
+    server/inviteCodes.json \
+    scripts/inviteAdmin.mjs \
+    scripts/inviteAuth.test.mjs
 
   # Extract
   tar xzf "/tmp/$PACKAGE" --overwrite

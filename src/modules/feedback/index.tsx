@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -23,6 +23,36 @@ export default function FeedbackPage() {
   const [showSample, setShowSample] = useState(false)
   const report = useMemo(() => session ? buildFeedbackReport(session) : showSample ? sampleFeedbackReport : null, [session, showSample])
   const isB2 = Boolean(session && /\bB[\s-]?2\b/i.test(session.title))
+  const [completionState, setCompletionState] = useState<'recording' | 'recorded' | 'error'>(session ? 'recording' : 'recorded')
+  const [completionError, setCompletionError] = useState('')
+  const [completionAttempt, setCompletionAttempt] = useState(0)
+
+  const recordCompletion = useCallback(async () => {
+    if (!session) return
+    setCompletionState('recording')
+    setCompletionError('')
+    try {
+      const response = await fetch('/api/auth/complete', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptId: session.id }),
+      })
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null
+      if (!response.ok || payload?.allowed !== true) {
+        throw new Error(typeof payload?.message === 'string' ? payload.message : '本次面签完成状态确认失败。')
+      }
+      setCompletionState('recorded')
+    } catch (error) {
+      setCompletionError(error instanceof Error ? error.message : '本次面签完成状态确认失败。')
+      setCompletionState('error')
+    }
+  }, [session])
+
+  useEffect(() => {
+    if (!session) return
+    void recordCompletion()
+  }, [completionAttempt, recordCompletion, session])
 
   if (!report) {
     return (
@@ -35,6 +65,33 @@ export default function FeedbackPage() {
               <button onClick={() => { clearInterviewRecovery(); navigate('/practice', { replace: true }) }} className="app-button-primary">重新开始练习</button>
               <button onClick={() => setShowSample(true)} className="app-button-secondary">查看演示报告</button>
             </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (session && completionState !== 'recorded') {
+    return (
+      <div className="app-page">
+        <div className="flex min-h-[100dvh] items-center justify-center px-4 text-center sm:px-6">
+          <div className="app-card max-w-md p-6 sm:p-10" role="status" aria-live="polite">
+            <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-[18px] ${completionState === 'error' ? 'bg-[#fff1f0] text-[#c9342f]' : 'bg-[#eaf4ff] text-[#0071e3]'}`}>
+              <HiOutlineArrowPath className={`h-6 w-6 ${completionState === 'recording' ? 'animate-spin' : ''}`} />
+            </div>
+            <h1 className="mt-5 text-[24px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">
+              {completionState === 'error' ? '暂时无法确认本次完成' : '正在确认本次面签完成'}
+            </h1>
+            <p className="mt-3 text-[13px] leading-6 text-[#6e6e73]">
+              {completionState === 'error'
+                ? completionError
+                : '确认成功后将扣减本订单 1 次面签权益，并立即展示本次报告。'}
+            </p>
+            {completionState === 'error' && (
+              <button onClick={() => setCompletionAttempt(value => value + 1)} className="app-button-primary mt-7 w-full">
+                <HiOutlineArrowPath className="h-4 w-4" /> 重新确认并查看报告
+              </button>
+            )}
           </div>
         </div>
       </div>

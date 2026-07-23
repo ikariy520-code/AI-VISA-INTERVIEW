@@ -46,8 +46,8 @@ export function createWSProxy(httpServer, options) {
   const realtimeAccess = typeof options.realtimeAccess === 'function'
     ? options.realtimeAccess
     : request => ({ allowed: Boolean(options.isAuthorized?.(request)) })
-  const consumeRealtimeUse = typeof options.consumeRealtimeUse === 'function'
-    ? options.consumeRealtimeUse
+  const reserveInterview = typeof options.reserveInterview === 'function'
+    ? options.reserveInterview
     : request => realtimeAccess(request)
 
   let resolvedUpstreamUrl = upstreamUrl
@@ -163,25 +163,26 @@ export function createWSProxy(httpServer, options) {
     }
 
     upstreamSocket.on('open', () => {
-      const usage = consumeRealtimeUse(request, attemptId)
-      if (!usage.allowed) {
+      const access = reserveInterview(request, attemptId)
+      if (!access.allowed) {
         sendJson(browserSocket, {
           type: 'local.error',
-          code: usage.code || 'INVITE_QUOTA_EXHAUSTED',
-          message: usage.message || '该邀请码的测试机会已经用完。',
+          code: access.code || 'ORDER_QUOTA_EXHAUSTED',
+          message: access.message || '该订单号的面签次数已经用完。',
         })
-        browserSocket.close(1008, 'invite quota unavailable')
+        browserSocket.close(1008, 'order quota unavailable')
         closeUpstream(upstreamSocket)
         return
       }
       sendJson(browserSocket, {
         type: 'local.connected',
         access: {
-          role: usage.role,
-          unlimited: usage.unlimited,
-          totalUses: usage.totalUses,
-          usedUses: usage.usedUses,
-          remainingUses: usage.remainingUses,
+          role: access.role,
+          unlimited: access.unlimited,
+          totalUses: access.totalUses,
+          usedUses: access.usedUses,
+          remainingUses: access.remainingUses,
+          availableUses: access.availableUses,
         },
       })
 

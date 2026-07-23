@@ -68,9 +68,9 @@ export default function PracticePage() {
   }, [])
 
   // Step 2 → 跳转实时语音面签
-  const handleContextSubmit = useCallback((context: UserContext) => {
+  const handleContextSubmit = useCallback(async (context: UserContext) => {
     if (!officerType) return
-    const recovery = createInterviewAttempt(officerType, context)
+    const recovery = await createInterviewAttempt(officerType, context)
     navigate('/voice/live', {
       state: {
         officerType,

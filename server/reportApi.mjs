@@ -22,8 +22,6 @@ const MAX_BODY_BYTES = 96_000
 const BASIC_OUTPUT_TOKENS = 6_000
 const STRONG_OUTPUT_TOKENS = 9_000
 const FULL_OUTPUT_TOKENS = 12_000
-const REPORT_CACHE_TTL_MS = 10 * 60 * 1000
-const MAX_REPORT_CACHE_ENTRIES = 200
 const MAX_B2_REPORT_ATTEMPTS = 2
 const MAX_B2_OUTPUT_TOKENS = 10_000
 const RETRYABLE_NETWORK_CODES = new Set([
@@ -371,25 +369,11 @@ export function createReportHandler(options = {}) {
   const model = String(options.model || 'deepseek-v4-pro').trim()
   const endpoint = safeEndpoint(options.baseUrl)
   const configured = Boolean(apiKey && model)
-  const reportCache = new Map()
   const activeReports = new Map()
 
   function reportKey(ip, input) {
     const digest = createHash('sha256').update(JSON.stringify(input)).digest('hex')
     return `${ip}:${digest}`
-  }
-
-  function cachedReport(key) {
-    const now = Date.now()
-    const cached = reportCache.get(key)
-    if (cached && cached.expiresAt > now) return cached.report
-    if (cached) reportCache.delete(key)
-    if (reportCache.size > MAX_REPORT_CACHE_ENTRIES) {
-      for (const [cacheKey, value] of reportCache) {
-        if (value.expiresAt <= now || reportCache.size > MAX_REPORT_CACHE_ENTRIES) reportCache.delete(cacheKey)
-      }
-    }
-    return null
   }
 
   async function handleReport(req, res) {
@@ -437,18 +421,6 @@ export function createReportHandler(options = {}) {
     }
 
     const key = reportKey(ip, input)
-    const cached = cachedReport(key)
-    if (cached) {
-      writeJson(res, 200, {
-        report: cached,
-        provider: cached.analysisMode === 'evidence_only' ? 'evidence-only' : 'deepseek',
-        model,
-        schemaVersion: 2,
-        analysisMode: cached.analysisMode,
-        cached: true,
-      })
-      return true
-    }
     let reportTask = activeReports.get(key)
     if (!reportTask) {
       const startedAt = Date.now()
@@ -456,7 +428,6 @@ export function createReportHandler(options = {}) {
         ? generateB2Report({ apiKey, endpoint, model, input })
         : generateF1Report({ apiKey, endpoint, model, input }))
         .then(report => {
-          reportCache.set(key, { report, expiresAt: Date.now() + REPORT_CACHE_TTL_MS })
           const tier = input.visaType === 'F1' ? reportTierForAnswerCount(input.answers.length) : 'b2'
           console.log(`[report] completed visaType=${input.visaType} tier=${tier} mode=${report.analysisMode} answers=${input.answers.length} durationMs=${Date.now() - startedAt}`)
           return report
