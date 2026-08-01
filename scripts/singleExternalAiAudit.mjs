@@ -135,4 +135,20 @@ assert.ok(voiceInterviewRoom.includes('window.requestAnimationFrame'), 'caption 
 assert.equal(voiceInterviewRoom.includes('AnimatePresence mode="wait"'), false, 'caption panels must not queue exit/enter animations')
 assert.equal(voiceInterviewRoom.includes("scrollIntoView({ behavior: 'smooth'"), false, 'streaming captions must not stack smooth-scroll animations')
 
+const realtimeClient = readFileSync(join(root, 'src/modules/voice/services/doubaoRealtime.ts'), 'utf8')
+const controlledSpeechStart = realtimeClient.indexOf('speakControlled(text: string)')
+const controlledSpeechEnd = realtimeClient.indexOf('cancelResponse()', controlledSpeechStart)
+const controlledSpeechImplementation = realtimeClient.slice(controlledSpeechStart, controlledSpeechEnd)
+assert.ok(controlledSpeechStart >= 0 && controlledSpeechEnd > controlledSpeechStart, 'controlled speech implementation is missing')
+assert.equal(realtimeClient.includes('rotateControlledSession'), false, 'a controlled question must not rebuild the provider Session')
+assert.equal(controlledSpeechImplementation.includes('FINISH_SESSION'), false, 'a controlled turn must not finish the interview Session')
+assert.equal(controlledSpeechImplementation.includes('START_SESSION'), false, 'a controlled turn must not start a new interview Session')
+assert.ok(realtimeClient.includes('DOUBAO_EVENT.CHAT_TTS_TEXT'), 'follow-up questions must use ChatTTSText in the current Session')
+assert.ok(realtimeClient.includes("ttsType(frame) === 'chat_tts_text'"), 'default model TTS must not open the controlled audio gate')
+assert.ok(realtimeClient.includes("type ControlledTtsState"), 'controlled audio needs an explicit source-aware state machine')
+
+const realtimeSmoke = readFileSync(join(root, 'scripts/realtimeVoiceSmoke.mjs'), 'utf8')
+assert.ok(realtimeSmoke.includes('realtime-smoke=continuous-session-complete'), 'realtime smoke must verify multiple questions in one Session')
+assert.equal(realtimeSmoke.includes('controlled-session-rotation-complete'), false, 'realtime smoke must not validate per-question Session rotation')
+
 console.log('deepseek-report-and-doubao-voice-architecture-audit=passed')

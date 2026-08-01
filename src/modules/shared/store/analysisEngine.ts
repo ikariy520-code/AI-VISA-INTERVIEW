@@ -12,27 +12,27 @@
 //   practice/types.ts:InterviewRecord → 本文件 → feedback/types.ts:InterviewSession
 // ========================================
 
-import type { InterviewRecord, ChatMessage } from '../../practice/types'
+import type { InterviewRecord, ChatMessage } from '../../practice/types.ts'
 import type {
   InterviewSession, QAPair,
   VoiceAnalysis, VoiceMetrics, VoiceEmotion,
   ContentAnalysis, ContentDimension,
   AnswerFeedback,
-} from '../../feedback/types'
-import { F1_QUESTION_CATALOG } from '../../practice/data/f1QuestionCatalog'
-import { identifyB2Question } from '../../practice/services/b2InterviewController'
-import { buildSafeInterviewContext } from '../../practice/services/realtimeInterviewPrompt'
+} from '../../feedback/types.ts'
+import { identifyF1InterviewTurn } from '../../practice/services/f1InterviewController.ts'
+import { identifyB2InterviewTurn } from '../../practice/services/b2InterviewController.ts'
+import { buildSafeInterviewContext } from '../../practice/services/realtimeInterviewPrompt.ts'
 import {
   sanitizeReportRequest,
   validateF1StructuredReport,
   type InterviewReportAnswer,
   type InterviewReportRequest,
-} from '../../../shared/f1ReportContract'
+} from '../../../shared/f1ReportContract.ts'
 import {
   sanitizeB2ReportRequest,
   validateB2StructuredReport,
   type B2ReportRequest,
-} from '../../../shared/b2ReportContract'
+} from '../../../shared/b2ReportContract.ts'
 
 function classifyDialogueAct(answer: string) {
   const normalized = answer.trim().toLowerCase().replace(/[.!?]+$/g, '').trim()
@@ -421,28 +421,59 @@ export function analyzeInterview(record: InterviewRecord): InterviewSession {
 
 const AI_REPORT_ENDPOINT = '/api/ai-report'
 
-function normalizeQuestionText(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+interface IdentifiedReportTurn {
+  question: { id: string; text: string }
+  followUp?: { text: string }
 }
 
-function identifyF1Question(questionText: string) {
-  const normalized = normalizeQuestionText(questionText)
-  return F1_QUESTION_CATALOG.find(question => normalized.includes(normalizeQuestionText(question.text)))
+function buildGroupedReportAnswers(
+  messages: ChatMessage[],
+  identifyTurn: (questionText: string) => IdentifiedReportTurn | undefined,
+  followUpLabel: string,
+  unknownQuestionError: string,
+): InterviewReportAnswer[] {
+  const groups = new Map<string, {
+    questionId: string
+    questions: string[]
+    answers: string[]
+    timestamp: string
+  }>()
+
+  for (const pair of extractQAPairs(messages)) {
+    const turn = identifyTurn(pair.question)
+    if (!turn) throw new Error(unknownQuestionError)
+    const questionId = turn.question.id
+    const group = groups.get(questionId) ?? {
+      questionId,
+      questions: [turn.question.text],
+      answers: [],
+      timestamp: pair.timestamp,
+    }
+    const spokenQuestion = turn.followUp?.text
+    if (spokenQuestion && !group.questions.includes(spokenQuestion)) group.questions.push(spokenQuestion)
+    group.answers.push(pair.answer.trim())
+    groups.set(questionId, group)
+  }
+
+  return [...groups.values()].map((group, offset) => ({
+    index: offset + 1,
+    questionId: group.questionId,
+    question: group.questions
+      .map((question, index) => index === 0 ? question : `${followUpLabel}${question}`)
+      .join('\n'),
+    answer: group.answers.join('\n---\n'),
+    timestamp: group.timestamp,
+  }))
 }
 
 export function buildF1ReportRequest(record: InterviewRecord) {
   if (record.visaType !== 'F1') return null
-  const answers: InterviewReportAnswer[] = extractQAPairs(record.messages).map((pair, offset) => {
-    const question = identifyF1Question(pair.question)
-    if (!question) throw new Error('F1_REPORT_UNKNOWN_QUESTION')
-    return {
-      index: offset + 1,
-      questionId: question.id,
-      question: question.text,
-      answer: pair.answer,
-      timestamp: pair.timestamp,
-    }
-  })
+  const answers = buildGroupedReportAnswers(
+    record.messages,
+    identifyF1InterviewTurn,
+    'Follow-up: ',
+    'F1_REPORT_UNKNOWN_QUESTION',
+  )
   return sanitizeReportRequest({
     visaType: 'F1',
     safeContext: buildSafeInterviewContext(record.userContext),
@@ -452,17 +483,12 @@ export function buildF1ReportRequest(record: InterviewRecord) {
 
 export function buildB2ReportRequest(record: InterviewRecord): B2ReportRequest | null {
   if (record.visaType !== 'B2') return null
-  const answers: InterviewReportAnswer[] = extractQAPairs(record.messages).map((pair, offset) => {
-    const question = identifyB2Question(pair.question)
-    if (!question) throw new Error('B2_REPORT_UNKNOWN_QUESTION')
-    return {
-      index: offset + 1,
-      questionId: question.id,
-      question: question.text,
-      answer: pair.answer,
-      timestamp: pair.timestamp,
-    }
-  })
+  const answers = buildGroupedReportAnswers(
+    record.messages,
+    identifyB2InterviewTurn,
+    '追问：',
+    'B2_REPORT_UNKNOWN_QUESTION',
+  )
   return sanitizeB2ReportRequest({
     visaType: 'B2',
     safeContext: buildSafeInterviewContext(record.userContext),

@@ -2,8 +2,8 @@ import {
   B2_OFFICIAL_CRITERIA_VERSION,
   B2_OFFICIAL_RULE_IDS,
   type B2OfficialRuleId,
-} from '../modules/practice/data/b2OfficialCriteria'
-import { redactPotentialIdentifiers, type InterviewReportAnswer } from './f1ReportContract'
+} from '../modules/practice/data/b2OfficialCriteria.ts'
+import { redactPotentialIdentifiers, type InterviewReportAnswer } from './f1ReportContract.ts'
 
 export type B2ReportDimensionId =
   | 'application_consistency'

@@ -5,6 +5,14 @@ export type B2QuestionId =
   | 'b2_19' | 'b2_20' | 'b2_21' | 'b2_22' | 'b2_23' | 'b2_24'
 
 export type B2QuestionTopic = 'purpose' | 'itinerary' | 'funding' | 'current_status' | 'departure' | 'us_contact' | 'travel_history'
+export type B2FollowUpCondition = 'affirmative' | 'negative' | 'uncertain' | 'short' | 'keyword'
+
+export interface B2FollowUpRule {
+  id: string
+  text: string
+  when: B2FollowUpCondition
+  keywords?: string[]
+}
 
 export interface B2QuestionDefinition {
   id: B2QuestionId
@@ -12,28 +20,29 @@ export interface B2QuestionDefinition {
   topic: B2QuestionTopic
   text: string
   answerShape: 'open' | 'yes-no'
+  followUps?: readonly B2FollowUpRule[]
   conditional?: 'tourism' | 'contact' | 'previous-us-visa' | 'denial' | 'overstay' | 'third-party-funding'
 }
 
 export const B2_QUESTION_CATALOG: readonly B2QuestionDefinition[] = [
-  { id: 'b2_01', number: 1, topic: 'purpose', text: '您去美国的主要目的是什么？', answerShape: 'open' },
-  { id: 'b2_02', number: 2, topic: 'itinerary', text: '您计划什么时候出发，在美国停留多久？', answerShape: 'open' },
-  { id: 'b2_03', number: 3, topic: 'itinerary', text: '您计划去哪些城市，主要安排是什么？', answerShape: 'open' },
+  { id: 'b2_01', number: 1, topic: 'purpose', text: '您去美国的主要目的是什么？', answerShape: 'open', followUps: [{ id: 'b2_01_specific_purpose', text: '具体是旅游、探亲，还是其他短期访问？', when: 'uncertain' }] },
+  { id: 'b2_02', number: 2, topic: 'itinerary', text: '您计划什么时候出发，在美国停留多久？', answerShape: 'open', followUps: [{ id: 'b2_02_dates', text: '具体什么时候出发，计划停留多少天？', when: 'short' }] },
+  { id: 'b2_03', number: 3, topic: 'itinerary', text: '您计划去哪些城市，主要安排是什么？', answerShape: 'open', followUps: [{ id: 'b2_03_city_plan', text: '请说一下主要城市和每个城市的安排。', when: 'short' }] },
   { id: 'b2_04', number: 4, topic: 'itinerary', text: '您为什么选择这些目的地？', answerShape: 'open', conditional: 'tourism' },
   { id: 'b2_05', number: 5, topic: 'itinerary', text: '这次谁和您一起旅行？', answerShape: 'open' },
-  { id: 'b2_06', number: 6, topic: 'funding', text: '这次旅行的费用由谁承担？', answerShape: 'open' },
-  { id: 'b2_07', number: 7, topic: 'funding', text: '这次旅行预计总共花费多少？', answerShape: 'open' },
-  { id: 'b2_08', number: 8, topic: 'current_status', text: '您目前是做什么工作的，或者现在是什么状态？', answerShape: 'open' },
+  { id: 'b2_06', number: 6, topic: 'funding', text: '这次旅行的费用由谁承担？', answerShape: 'open', followUps: [{ id: 'b2_06_payer_relation', text: '出资人和您是什么关系，为什么由对方承担？', when: 'keyword', keywords: ['父母', '配偶', '亲属', '亲戚', '朋友', '联系人', '公司', '单位'] }] },
+  { id: 'b2_07', number: 7, topic: 'funding', text: '这次旅行预计总共花费多少？', answerShape: 'open', followUps: [{ id: 'b2_07_budget', text: '大概准备了多少人民币或美元？', when: 'uncertain' }] },
+  { id: 'b2_08', number: 8, topic: 'current_status', text: '您目前是做什么工作的，或者现在是什么状态？', answerShape: 'open', followUps: [{ id: 'b2_08_status_detail', text: '具体做什么工作，这个状态持续多久了？', when: 'short' }] },
   { id: 'b2_09', number: 9, topic: 'current_status', text: '您目前的工作或这个状态持续多久了？', answerShape: 'open' },
   { id: 'b2_10', number: 10, topic: 'current_status', text: '这次旅行期间，您的工作或学习是怎么安排的？', answerShape: 'open' },
-  { id: 'b2_11', number: 11, topic: 'departure', text: '旅行结束以后，您回来有什么安排？', answerShape: 'open' },
-  { id: 'b2_12', number: 12, topic: 'us_contact', text: '您在美国有亲属或朋友吗？', answerShape: 'yes-no' },
+  { id: 'b2_11', number: 11, topic: 'departure', text: '旅行结束以后，您回来有什么安排？', answerShape: 'open', followUps: [{ id: 'b2_11_return_detail', text: '什么具体安排要求您按计划回来？', when: 'short' }] },
+  { id: 'b2_12', number: 12, topic: 'us_contact', text: '您在美国有亲属或朋友吗？', answerShape: 'yes-no', followUps: [{ id: 'b2_12_contact_detail', text: '是什么关系，对方住在哪个州？', when: 'affirmative' }] },
   { id: 'b2_13', number: 13, topic: 'us_contact', text: '您和美国联系人的关系是什么？', answerShape: 'open', conditional: 'contact' },
   { id: 'b2_14', number: 14, topic: 'us_contact', text: '您在美国期间住在哪里，由谁安排住宿？', answerShape: 'open' },
-  { id: 'b2_15', number: 15, topic: 'travel_history', text: '您以前去过哪些国家或地区？', answerShape: 'open' },
-  { id: 'b2_16', number: 16, topic: 'travel_history', text: '您以前去过美国吗？上次停留了多久？', answerShape: 'open', conditional: 'previous-us-visa' },
-  { id: 'b2_17', number: 17, topic: 'travel_history', text: '您以前申请美国签证时被拒签过吗？', answerShape: 'yes-no', conditional: 'denial' },
-  { id: 'b2_18', number: 18, topic: 'travel_history', text: '您以前在美国有没有逾期停留？', answerShape: 'yes-no', conditional: 'overstay' },
+  { id: 'b2_15', number: 15, topic: 'travel_history', text: '您以前去过哪些国家或地区？', answerShape: 'open', followUps: [{ id: 'b2_15_latest_trip', text: '最近一次去哪里，什么时候回来的？', when: 'short' }] },
+  { id: 'b2_16', number: 16, topic: 'travel_history', text: '您以前去过美国吗？上次停留了多久？', answerShape: 'open', followUps: [{ id: 'b2_16_us_compliance', text: '上次去美国的目的是什么，是否按期离境？', when: 'affirmative' }], conditional: 'previous-us-visa' },
+  { id: 'b2_17', number: 17, topic: 'travel_history', text: '您以前申请美国签证时被拒签过吗？', answerShape: 'yes-no', followUps: [{ id: 'b2_17_denial_change', text: '上次是什么时候，之后情况有什么变化？', when: 'affirmative' }], conditional: 'denial' },
+  { id: 'b2_18', number: 18, topic: 'travel_history', text: '您以前在美国有没有逾期停留？', answerShape: 'yes-no', followUps: [{ id: 'b2_18_overstay_detail', text: '逾期多久，原因是什么？', when: 'affirmative' }], conditional: 'overstay' },
   { id: 'b2_19', number: 19, topic: 'purpose', text: '您为什么选择现在去美国？', answerShape: 'open' },
   { id: 'b2_20', number: 20, topic: 'itinerary', text: '这次行程是谁安排的？', answerShape: 'open' },
   { id: 'b2_21', number: 21, topic: 'funding', text: '这笔旅行费用准备从哪里支付？', answerShape: 'open', conditional: 'third-party-funding' },

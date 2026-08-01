@@ -1,11 +1,15 @@
 import {
   DOUBAO_EVENT,
+  addDoubaoUsageTokens,
   createAudioEventFrame,
   createJsonEventFrame,
+  emptyDoubaoUsageTokens,
   parseServerFrame,
+  parseDoubaoUsageTokens,
   protocolPayloadText,
   type DoubaoServerFrame,
-} from './doubaoRealtimeProtocol'
+  type DoubaoUsageTokens,
+} from './doubaoRealtimeProtocol.ts'
 
 export type RealtimeConnectionState = 'idle' | 'connecting' | 'connected' | 'closed'
 
@@ -20,6 +24,8 @@ export interface DoubaoRealtimeClientOptions {
   attemptId: string
   voice: string
   speakingStyle?: string
+  endOfTurnSilenceMs?: number
+  speechRate?: number
   /** Speak only application-approved questions; discard model-authored dialogue. */
   controlledQuestions?: boolean
   validateControlledText?: (text: string) => boolean
@@ -35,9 +41,80 @@ const INPUT_CHUNK_SAMPLES = 320 // 20 ms at 16 kHz
 const CONNECT_TIMEOUT_MS = 15_000
 const SESSION_TIMEOUT_MS = 20_000
 const GREETING_TIMEOUT_MS = 20_000
-// A slightly longer server-VAD window prevents normal thinking pauses from
-// being treated as the end of an answer while keeping the exchange responsive.
-const END_OF_TURN_SILENCE_MS = 1_800
+const DEFAULT_END_OF_TURN_SILENCE_MS = 1_800
+
+type ControlledTtsState =
+  | 'idle'
+  | 'greeting'
+  | 'blocking-auto'
+  | 'awaiting-approved-start'
+  | 'playing-approved'
+
+interface TtsIdentity {
+  replyId?: string
+  questionId?: string
+}
+
+export type ControlledChatTtsGateEvent =
+  | { type: 'reset' | 'asr-started' | 'consume' }
+  | { type: 'asr-ended'; hasTranscript: boolean }
+
+export function reduceControlledChatTtsEligibility(
+  current: boolean,
+  event: ControlledChatTtsGateEvent,
+) {
+  if (event.type === 'asr-ended') return event.hasTranscript
+  if (event.type === 'reset' || event.type === 'asr-started' || event.type === 'consume') return false
+  return current
+}
+
+type DoubaoRealtimeSessionOptions = Pick<
+  DoubaoRealtimeClientOptions,
+  'instructions' | 'voice' | 'speakingStyle' | 'endOfTurnSilenceMs' | 'speechRate'
+>
+
+export function buildDoubaoStartSessionPayload(
+  options: DoubaoRealtimeSessionOptions,
+): Record<string, unknown> {
+  const speechRate = Number.isFinite(options.speechRate)
+    ? Math.min(100, Math.max(-50, Math.round(options.speechRate ?? 0)))
+    : 0
+  return {
+    asr: {
+      extra: {
+        end_smooth_window_ms: options.endOfTurnSilenceMs ?? DEFAULT_END_OF_TURN_SILENCE_MS,
+        enable_custom_vad: true,
+        enable_asr_twopass: false,
+      },
+    },
+    tts: {
+      speaker: options.voice,
+      audio_config: {
+        channel: 1,
+        format: 'pcm_s16le',
+        sample_rate: OUTPUT_SAMPLE_RATE,
+      },
+      extra: { speech_rate: speechRate },
+    },
+    dialog: {
+      bot_name: 'U.S. Visa Officer',
+      // Start a fresh provider dialogue for each interview; the same Session
+      // remains active for every question inside that interview.
+      dialog_id: '',
+      system_role: options.instructions,
+      speaking_style: options.speakingStyle
+        || 'Speak in natural conversational American English, like a real officer at a visa window. Use everyday wording and common contractions where the system role allows them. Stay professional, concise, and realistic; avoid slang, jokes, excessive filler, and bureaucratic or written-sounding delivery. Ask one question at a time and wait for the applicant to answer.',
+      extra: {
+        strict_audit: true,
+        input_mod: 'keep_alive',
+        enable_volc_websearch: false,
+        enable_music: false,
+        enable_loudness_norm: true,
+        model: '1.2.1.1',
+      },
+    },
+  }
+}
 
 function createSessionId() {
   return typeof crypto.randomUUID === 'function'
@@ -232,6 +309,7 @@ interface EventWaiter {
   resolve: (frame: DoubaoServerFrame) => void
   reject: (error: Error) => void
   timeout: number
+  predicate?: (frame: DoubaoServerFrame) => boolean
 }
 
 export class DoubaoRealtimeClient {
@@ -248,7 +326,11 @@ export class DoubaoRealtimeClient {
   private messageQueue = Promise.resolve()
   private lastUserTranscript = ''
   private userTranscriptFinalized = false
-  private controlledSpeechActive = false
+  private controlledTtsState: ControlledTtsState = 'idle'
+  private controlledAudioGateOpen = false
+  private approvedTtsIdentity: TtsIdentity | null = null
+  private controlledChatTtsEligible = false
+  private usageTotals: DoubaoUsageTokens = emptyDoubaoUsageTokens()
   private controlledTurnPending = false
   private controlledTurnQueue = Promise.resolve()
   private userMuted = false
@@ -264,7 +346,14 @@ export class DoubaoRealtimeClient {
     this.responseActive = false
     this.audioForwardingEnabled = false
     this.messageQueue = Promise.resolve()
-    this.controlledSpeechActive = false
+    this.controlledTtsState = 'idle'
+    this.controlledAudioGateOpen = false
+    this.approvedTtsIdentity = null
+    this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
+      this.controlledChatTtsEligible,
+      { type: 'reset' },
+    )
+    this.usageTotals = emptyDoubaoUsageTokens()
     this.controlledTurnPending = false
     this.controlledTurnQueue = Promise.resolve()
     this.userMuted = false
@@ -311,7 +400,8 @@ export class DoubaoRealtimeClient {
         level => this.options.onInputLevel?.(level),
       )
 
-      this.controlledSpeechActive = Boolean(this.options.controlledQuestions)
+      this.controlledTtsState = this.options.controlledQuestions ? 'greeting' : 'idle'
+      this.controlledAudioGateOpen = Boolean(this.options.controlledQuestions)
       this.options.onEvent({ type: 'controlled.speech.started', text: this.options.openingLine })
       const greetingEnded = this.waitForProviderEvent(
         DOUBAO_EVENT.TTS_ENDED,
@@ -325,7 +415,8 @@ export class DoubaoRealtimeClient {
       ))
       await greetingEnded
       await this.player.waitUntilIdle()
-      this.controlledSpeechActive = false
+      this.controlledTtsState = 'idle'
+      this.controlledAudioGateOpen = false
       this.options.onEvent({ type: 'controlled.speech.done', text: this.options.openingLine })
 
       this.connected = true
@@ -345,10 +436,7 @@ export class DoubaoRealtimeClient {
     this.capture.setMuted(value)
   }
 
-  /**
-   * Rotate the provider session, then read one exact approved question. A
-   * response generated by the previous session is therefore never playable.
-   */
+  /** Read one exact, application-approved question in the interview Session. */
   speakControlled(text: string) {
     if (!this.options.controlledQuestions) {
       return Promise.reject(new Error('Controlled speech is not enabled for this interview.'))
@@ -367,13 +455,32 @@ export class DoubaoRealtimeClient {
       if (!this.socket || this.socket.readyState !== WebSocket.OPEN || !this.sessionId) {
         throw new Error('Realtime voice session is not connected.')
       }
+      if (!this.controlledChatTtsEligible) {
+        throw new Error('Controlled officer speech must follow a completed applicant turn.')
+      }
+      this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
+        this.controlledChatTtsEligible,
+        { type: 'consume' },
+      )
       this.audioForwardingEnabled = false
       this.capture.setMuted(true)
       this.player.stopQueued()
-      await this.rotateControlledSession()
-      await this.speakInCurrentSession(approvedText)
-      this.capture.setMuted(this.userMuted)
-      this.audioForwardingEnabled = true
+      try {
+        await this.speakInCurrentSession(approvedText)
+      } finally {
+        if (this.controlledTtsState !== 'idle') {
+          this.controlledTtsState = 'blocking-auto'
+          this.controlledAudioGateOpen = false
+          this.approvedTtsIdentity = null
+          this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
+            this.controlledChatTtsEligible,
+            { type: 'reset' },
+          )
+          this.player.stopQueued()
+        }
+        this.capture.setMuted(this.userMuted)
+        this.audioForwardingEnabled = this.connected
+      }
     })
     this.controlledTurnQueue = turn
       .finally(() => { this.controlledTurnPending = false })
@@ -440,81 +547,50 @@ export class DoubaoRealtimeClient {
   }
 
   private createStartSessionPayload(): Record<string, unknown> {
-    return {
-      asr: {
-        extra: {
-          end_smooth_window_ms: END_OF_TURN_SILENCE_MS,
-          enable_custom_vad: true,
-        },
-      },
-      tts: {
-        speaker: this.options.voice,
-        audio_config: {
-          channel: 1,
-          format: 'pcm_s16le',
-          sample_rate: OUTPUT_SAMPLE_RATE,
-        },
-        extra: {},
-      },
-      dialog: {
-        bot_name: 'U.S. Visa Officer',
-        system_role: this.options.instructions,
-        speaking_style: this.options.speakingStyle
-          || 'Speak in natural conversational American English, like a real officer at a visa window. Use everyday wording and common contractions where the system role allows them. Stay professional, concise, and realistic; avoid slang, jokes, excessive filler, and bureaucratic or written-sounding delivery. Ask one question at a time and wait for the applicant to answer.',
-        extra: {
-          strict_audit: true,
-          input_mod: 'keep_alive',
-          enable_music: false,
-          enable_loudness_norm: true,
-          model: '1.2.1.1',
-        },
-      },
-    }
-  }
-
-  private async rotateControlledSession() {
-    const oldSessionId = this.sessionId
-    const sessionFinished = this.waitForProviderEvent(
-      DOUBAO_EVENT.SESSION_FINISHED,
-      4_000,
-      'Timed out while closing the previous controlled voice turn.',
-    )
-    this.sendFrame(createJsonEventFrame(DOUBAO_EVENT.FINISH_SESSION, {}, oldSessionId))
-    await sessionFinished
-
-    this.sessionId = createSessionId()
-    this.lastUserTranscript = ''
-    this.userTranscriptFinalized = false
-    const sessionStarted = this.waitForProviderEvent(
-      DOUBAO_EVENT.SESSION_STARTED,
-      SESSION_TIMEOUT_MS,
-      'Timed out while opening the next controlled voice turn.',
-    )
-    this.sendFrame(createJsonEventFrame(
-      DOUBAO_EVENT.START_SESSION,
-      this.createStartSessionPayload(),
-      this.sessionId,
-    ))
-    await sessionStarted
+    return buildDoubaoStartSessionPayload(this.options)
   }
 
   private async speakInCurrentSession(text: string) {
-    this.controlledSpeechActive = true
+    this.controlledTtsState = 'awaiting-approved-start'
+    this.controlledAudioGateOpen = false
+    this.approvedTtsIdentity = null
     this.options.onEvent({ type: 'controlled.speech.started', text })
     const ended = this.waitForProviderEvent(
       DOUBAO_EVENT.TTS_ENDED,
       GREETING_TIMEOUT_MS,
       'Controlled officer speech generation timed out.',
+      frame => this.isApprovedTtsEnd(frame),
     )
     this.sendFrame(createJsonEventFrame(
-      DOUBAO_EVENT.SAY_HELLO,
-      { content: text },
+      DOUBAO_EVENT.CHAT_TTS_TEXT,
+      { start: true, content: text, end: false },
+      this.sessionId,
+    ))
+    this.sendFrame(createJsonEventFrame(
+      DOUBAO_EVENT.CHAT_TTS_TEXT,
+      { start: false, content: '', end: true },
       this.sessionId,
     ))
     await ended
     await this.player.waitUntilIdle()
-    this.controlledSpeechActive = false
+    this.controlledTtsState = 'idle'
+    this.controlledAudioGateOpen = false
+    this.approvedTtsIdentity = null
     this.options.onEvent({ type: 'controlled.speech.done', text })
+  }
+
+  private isControlledAudioPlayable() {
+    return this.controlledAudioGateOpen && (
+      this.controlledTtsState === 'greeting'
+      || this.controlledTtsState === 'playing-approved'
+    )
+  }
+
+  private isApprovedTtsEnd(frame: DoubaoServerFrame) {
+    if (this.controlledTtsState !== 'playing-approved' || !this.controlledAudioGateOpen) return false
+    const source = ttsType(frame)
+    if (source && source !== 'chat_tts_text') return false
+    return sameTtsIdentity(this.approvedTtsIdentity, ttsIdentity(frame))
   }
 
   private async openSocket() {
@@ -619,30 +695,73 @@ export class DoubaoRealtimeClient {
         break
 
       case DOUBAO_EVENT.TTS_SENTENCE_START:
-        this.responseActive = true
-        if (!this.options.controlledQuestions || this.controlledSpeechActive) {
+        if (!this.options.controlledQuestions) {
+          this.responseActive = true
           this.options.onEvent({ type: 'response.output_audio.started', ...frame.json })
+          break
+        }
+        if (this.controlledTtsState === 'greeting') {
+          this.controlledAudioGateOpen = true
+          this.responseActive = true
+          this.options.onEvent({ type: 'response.output_audio.started', ...frame.json })
+          break
+        }
+        if (isChatTtsTextFrame(frame) && (
+          this.controlledTtsState === 'awaiting-approved-start'
+          || this.controlledTtsState === 'playing-approved'
+        )) {
+          const identity = ttsIdentity(frame)
+          const identityMatches = this.controlledTtsState === 'awaiting-approved-start'
+            ? hasTtsIdentity(identity)
+            : sameTtsIdentity(this.approvedTtsIdentity, identity)
+          if (identityMatches) {
+            this.approvedTtsIdentity ??= identity
+            this.controlledTtsState = 'playing-approved'
+            this.controlledAudioGateOpen = true
+            this.responseActive = true
+            this.options.onEvent({ type: 'response.output_audio.started', ...frame.json })
+          } else {
+            this.controlledAudioGateOpen = false
+          }
+        } else {
+          this.controlledAudioGateOpen = false
         }
         break
 
       case DOUBAO_EVENT.TTS_RESPONSE:
-        this.responseActive = true
-        if (!this.options.controlledQuestions || this.controlledSpeechActive) {
+        if (!this.options.controlledQuestions || this.isControlledAudioPlayable()) {
+          this.responseActive = true
           await this.player.enqueue(frame.payload)
           this.options.onEvent({ type: 'response.output_audio.delta' })
         }
         break
 
       case DOUBAO_EVENT.TTS_ENDED:
-        this.responseActive = false
-        if (!this.options.controlledQuestions || this.controlledSpeechActive) {
+        if (
+          !this.options.controlledQuestions
+          || this.controlledTtsState === 'greeting'
+          || this.isApprovedTtsEnd(frame)
+        ) {
+          this.responseActive = false
           this.options.onEvent({ type: 'response.output_audio.done' })
           this.options.onEvent({ type: 'response.done' })
         }
         break
 
       case DOUBAO_EVENT.ASR_INFO:
-        this.cancelResponse()
+        if (this.options.controlledQuestions) {
+          this.player.stopQueued()
+          this.responseActive = false
+          this.controlledTtsState = 'blocking-auto'
+          this.controlledAudioGateOpen = false
+          this.approvedTtsIdentity = null
+          this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
+            this.controlledChatTtsEligible,
+            { type: 'asr-started' },
+          )
+        } else {
+          this.cancelResponse()
+        }
         this.lastUserTranscript = ''
         this.userTranscriptFinalized = false
         this.options.onEvent({ type: 'conversation.item.input_audio_transcription.started' })
@@ -652,7 +771,8 @@ export class DoubaoRealtimeClient {
         this.handleAsrResponse(frame)
         break
 
-      case DOUBAO_EVENT.ASR_ENDED:
+      case DOUBAO_EVENT.ASR_ENDED: {
+        const hasTranscript = Boolean(this.lastUserTranscript.trim())
         if (this.lastUserTranscript && !this.userTranscriptFinalized) {
           this.options.onEvent({
             type: 'conversation.item.input_audio_transcription.completed',
@@ -661,7 +781,14 @@ export class DoubaoRealtimeClient {
         }
         this.userTranscriptFinalized = true
         this.lastUserTranscript = ''
+        if (this.options.controlledQuestions) {
+          this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
+            this.controlledChatTtsEligible,
+            { type: 'asr-ended', hasTranscript },
+          )
+        }
         break
+      }
 
       case DOUBAO_EVENT.CHAT_RESPONSE: {
         if (this.options.controlledQuestions) break
@@ -681,9 +808,23 @@ export class DoubaoRealtimeClient {
         break
 
       case DOUBAO_EVENT.USAGE_RESPONSE:
-        // The provider automatically reports repeated context/system-prompt
-        // portions as cached_text_tokens / cached_audio_tokens each round.
-        this.options.onEvent({ type: 'usage.updated', usage: frame.json?.usage ?? frame.json })
+        {
+          // Retain only numeric counters. Provider metadata may contain
+          // identifiers or text and must never reach application logging.
+          const current = parseDoubaoUsageTokens(frame.json?.usage ?? frame.json)
+          this.usageTotals = addDoubaoUsageTokens(this.usageTotals, current)
+          this.options.onEvent({
+            type: 'usage.updated',
+            usage: {
+              current,
+              cumulative: { ...this.usageTotals },
+            },
+          })
+          console.info('[realtime-voice-usage]', {
+            current,
+            cumulative: { ...this.usageTotals },
+          })
+        }
         break
 
       default:
@@ -735,11 +876,26 @@ export class DoubaoRealtimeClient {
     this.socket.send(frame)
   }
 
-  private waitForProviderEvent(event: number, timeoutMs: number, timeoutMessage: string) {
+  private waitForProviderEvent(
+    event: number,
+    timeoutMs: number,
+    timeoutMessage: string,
+    predicate?: (frame: DoubaoServerFrame) => boolean,
+  ) {
+    return this.waitForProviderEventMatching(event, timeoutMs, timeoutMessage, predicate)
+  }
+
+  private waitForProviderEventMatching(
+    event: number,
+    timeoutMs: number,
+    timeoutMessage: string,
+    predicate?: (frame: DoubaoServerFrame) => boolean,
+  ) {
     return new Promise<DoubaoServerFrame>((resolve, reject) => {
       const waiter: EventWaiter = {
         resolve,
         reject,
+        predicate,
         timeout: window.setTimeout(() => {
           this.waiters.get(event)?.delete(waiter)
           reject(new Error(timeoutMessage))
@@ -754,11 +910,13 @@ export class DoubaoRealtimeClient {
   private resolveWaiters(event: number, frame: DoubaoServerFrame) {
     const eventWaiters = this.waiters.get(event)
     if (!eventWaiters) return
-    this.waiters.delete(event)
-    for (const waiter of eventWaiters) {
+    for (const waiter of [...eventWaiters]) {
+      if (waiter.predicate && !waiter.predicate(frame)) continue
+      eventWaiters.delete(waiter)
       window.clearTimeout(waiter.timeout)
       waiter.resolve(frame)
     }
+    if (eventWaiters.size === 0) this.waiters.delete(event)
   }
 
   private rejectAllWaiters(error: Error) {
@@ -787,6 +945,13 @@ export class DoubaoRealtimeClient {
     this.connected = false
     this.responseActive = false
     this.audioForwardingEnabled = false
+    this.controlledTtsState = 'idle'
+    this.controlledAudioGateOpen = false
+    this.approvedTtsIdentity = null
+    this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
+      this.controlledChatTtsEligible,
+      { type: 'reset' },
+    )
     this.rejectAllWaiters(new Error('实时语音连接已关闭。'))
     await this.capture.stop()
     await this.player.close()
@@ -808,6 +973,50 @@ export function realtimeEventText(event: DoubaoRealtimeEvent) {
     if (typeof value === 'string') return value
   }
   return ''
+}
+
+function ttsType(frame: DoubaoServerFrame) {
+  return nestedString(frame.json, 'tts_type')?.toLowerCase()
+}
+
+export function isChatTtsTextFrame(frame: DoubaoServerFrame) {
+  return ttsType(frame) === 'chat_tts_text'
+}
+
+function ttsIdentity(frame: DoubaoServerFrame): TtsIdentity {
+  return {
+    replyId: nestedString(frame.json, 'reply_id'),
+    questionId: nestedString(frame.json, 'question_id'),
+  }
+}
+
+function hasTtsIdentity(identity: TtsIdentity) {
+  return Boolean(identity.replyId || identity.questionId)
+}
+
+function sameTtsIdentity(expected: TtsIdentity | null, actual: TtsIdentity) {
+  if (!expected || !hasTtsIdentity(expected) || !hasTtsIdentity(actual)) return false
+  if (expected.replyId && actual.replyId !== expected.replyId) return false
+  if (expected.questionId && actual.questionId !== expected.questionId) return false
+  return true
+}
+
+export function strictlyMatchesTtsFrameIdentity(
+  expectedFrame: DoubaoServerFrame,
+  actualFrame: DoubaoServerFrame,
+) {
+  return sameTtsIdentity(ttsIdentity(expectedFrame), ttsIdentity(actualFrame))
+}
+
+function nestedString(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record[key] === 'string') return record[key]
+  for (const nestedKey of ['data', 'meta', 'result']) {
+    const found = nestedString(record[nestedKey], key)
+    if (found) return found
+  }
+  return undefined
 }
 
 function publicServiceMessage(value: unknown) {

@@ -1,4 +1,5 @@
 import type { InterviewStage } from '../types.ts'
+import type { F1OfficialRuleId } from './f1OfficialCriteria.ts'
 
 export type F1QuestionId =
   | 'f1_01' | 'f1_02' | 'f1_03' | 'f1_04' | 'f1_05' | 'f1_06'
@@ -9,6 +10,26 @@ export type F1QuestionId =
 export type F1SelectionPolicy = 'core' | 'adaptive' | 'mandatory' | 'high-frequency'
 export type F1AnswerShape = 'open' | 'yes-no' | 'compound'
 
+export type F1FollowUpCondition = 'affirmative' | 'negative' | 'uncertain' | 'evidence-gap' | 'keyword'
+export type F1VisaReviewFactor =
+  | 'academic-preparation'
+  | 'study-purpose-and-program-fit'
+  | 'financial-capacity'
+  | 'departure-intent'
+  | 'application-consistency'
+  | 'eligibility-and-compliance'
+
+export interface F1FollowUpRule {
+  id: string
+  text: string
+  when: F1FollowUpCondition
+  reviewFactor: F1VisaReviewFactor
+  officialRuleIds: readonly F1OfficialRuleId[]
+  keywords?: readonly string[]
+  evidenceKeywords?: readonly string[]
+  riskKeywords?: readonly string[]
+}
+
 export interface F1QuestionDefinition {
   id: F1QuestionId
   number: number
@@ -18,6 +39,7 @@ export interface F1QuestionDefinition {
   selection: F1SelectionPolicy
   answerShape: F1AnswerShape
   evaluationFocus: string[]
+  followUps?: readonly F1FollowUpRule[]
   sensitive?: boolean
   privacyGuidance?: string
 }
@@ -31,41 +53,49 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
     id: 'f1_01', number: 1, stage: 'BASIC_INFO', topic: 'school', selection: 'core', answerShape: 'open',
     text: 'Which school are you going to?',
     evaluationFocus: ['directness', 'consistency_with_background'],
+    followUps: [{ id: 'f1_01_school_name', text: 'What is the full name of the school?', when: 'uncertain', reviewFactor: 'application-consistency', officialRuleIds: ['DOS_ACADEMIC_PREPARATION'] }],
   },
   {
     id: 'f1_02', number: 2, stage: 'SCHOOL_AND_MAJOR', topic: 'school', selection: 'adaptive', answerShape: 'open',
     text: 'How did you hear about this school?',
     evaluationFocus: ['specificity', 'independent_research'],
+    followUps: [{ id: 'f1_02_research', text: 'What research did you do before deciding to apply?', when: 'keyword', reviewFactor: 'study-purpose-and-program-fit', officialRuleIds: ['DOS_ACADEMIC_PREPARATION'], keywords: ['agent', 'agency', 'friend', 'relative', 'consultant'] }],
   },
   {
     id: 'f1_03', number: 3, stage: 'SCHOOL_AND_MAJOR', topic: 'school', selection: 'adaptive', answerShape: 'open',
     text: 'Why did you choose this school?',
     evaluationFocus: ['school_knowledge', 'program_fit', 'specificity'],
+    followUps: [{ id: 'f1_03_program_fit', text: 'What specific part of the program fits your academic plan?', when: 'evidence-gap', reviewFactor: 'study-purpose-and-program-fit', officialRuleIds: ['DOS_ACADEMIC_PREPARATION'], evidenceKeywords: ['program', 'curriculum', 'course', 'faculty', 'professor', 'research', 'laboratory', 'lab', 'specialization', 'concentration'], riskKeywords: ['ranking', 'reputation', 'famous', 'prestige', 'good school', 'best school'] }],
   },
   {
     id: 'f1_04', number: 4, stage: 'BASIC_INFO', topic: 'major', selection: 'core', answerShape: 'open',
     text: "What's your major?",
     evaluationFocus: ['directness', 'consistency_with_background'],
+    followUps: [{ id: 'f1_04_program_name', text: 'What is the exact name of the program?', when: 'uncertain', reviewFactor: 'application-consistency', officialRuleIds: ['DOS_ACADEMIC_PREPARATION'] }],
   },
   {
     id: 'f1_05', number: 5, stage: 'ACADEMIC_PLAN', topic: 'major', selection: 'adaptive', answerShape: 'open',
     text: 'Why did you choose this major?',
     evaluationFocus: ['academic_motivation', 'background_fit', 'specificity'],
+    followUps: [{ id: 'f1_05_background_fit', text: 'How does it connect to your previous studies or work?', when: 'evidence-gap', reviewFactor: 'academic-preparation', officialRuleIds: ['DOS_ACADEMIC_PREPARATION'], evidenceKeywords: ['previous', 'undergraduate', 'degree', 'course', 'study', 'studies', 'work', 'job', 'research', 'experience', 'background', 'skill'] }],
   },
   {
     id: 'f1_06', number: 6, stage: 'ACADEMIC_PLAN', topic: 'study_purpose', selection: 'adaptive', answerShape: 'open',
     text: 'Why do you want to study in the United States?',
     evaluationFocus: ['academic_purpose', 'nonimmigrant_intent', 'specificity'],
+    followUps: [{ id: 'f1_06_us_specific', text: 'What specific academic reason supports your plan to study in the United States?', when: 'evidence-gap', reviewFactor: 'study-purpose-and-program-fit', officialRuleIds: ['DOS_ACADEMIC_PREPARATION', 'FAM_EDUCATION_HOME_COUNTRY_CALIBRATION'], evidenceKeywords: ['program', 'curriculum', 'course', 'faculty', 'professor', 'research', 'training', 'laboratory', 'lab', 'academic'] }],
   },
   {
     id: 'f1_07', number: 7, stage: 'ACADEMIC_PLAN', topic: 'program', selection: 'adaptive', answerShape: 'open',
     text: 'How long is your program?',
     evaluationFocus: ['program_knowledge', 'consistency_with_background'],
+    followUps: [{ id: 'f1_07_i20_length', text: 'What program length is shown on your I-20?', when: 'uncertain', reviewFactor: 'application-consistency', officialRuleIds: ['DOS_ACADEMIC_PREPARATION'] }],
   },
   {
     id: 'f1_08', number: 8, stage: 'CURRENT_STATUS', topic: 'current_status', selection: 'adaptive', answerShape: 'compound',
     text: 'Where are you studying or working now?',
     evaluationFocus: ['current_status', 'timeline_consistency'],
+    followUps: [{ id: 'f1_08_gap_activity', text: 'What have you been doing during that period?', when: 'keyword', reviewFactor: 'application-consistency', officialRuleIds: ['DOS_ACADEMIC_PREPARATION'], keywords: ['unemployed', 'nothing', 'gap', 'not working', 'not studying'] }],
   },
   {
     id: 'f1_09', number: 9, stage: 'CURRENT_STATUS', topic: 'personal', selection: 'adaptive', answerShape: 'open',
@@ -81,16 +111,19 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
     id: 'f1_11', number: 11, stage: 'FUTURE_PLAN', topic: 'future_plan', selection: 'core', answerShape: 'compound',
     text: 'What are your plans after graduation?',
     evaluationFocus: ['career_plan', 'home_country_ties', 'internal_consistency'],
+    followUps: [{ id: 'f1_11_return_plan', text: 'What is your present plan when your program is complete?', when: 'keyword', reviewFactor: 'departure-intent', officialRuleIds: ['DOS_DEPARTURE_INTENT', 'FAM_RESIDENCE_ABROAD', 'FAM_PRESENT_INTENT_CALIBRATION'], keywords: ['not sure', 'maybe', 'stay', 'depends', 'undecided', 'see what happens'] }],
   },
   {
     id: 'f1_12', number: 12, stage: 'FUNDING_CHECK', topic: 'funding', selection: 'core', answerShape: 'open',
     text: "Who's paying for your studies?",
     evaluationFocus: ['funding_source', 'financial_consistency'],
+    followUps: [{ id: 'f1_12_sponsor_relation', text: 'What is your relationship to that sponsor?', when: 'keyword', reviewFactor: 'financial-capacity', officialRuleIds: ['DOS_FINANCIAL_CAPACITY'], keywords: ['relative', 'friend', 'uncle', 'aunt', 'company', 'employer'] }],
   },
   {
     id: 'f1_13', number: 13, stage: 'FUNDING_CHECK', topic: 'funding', selection: 'adaptive', answerShape: 'open',
     text: 'About how much will your studies cost each year?',
     evaluationFocus: ['cost_awareness', 'financial_consistency'],
+    followUps: [{ id: 'f1_13_annual_total', text: 'What is the approximate annual total for tuition and living expenses?', when: 'uncertain', reviewFactor: 'financial-capacity', officialRuleIds: ['DOS_FINANCIAL_CAPACITY'] }],
   },
   {
     id: 'f1_14', number: 14, stage: 'FUNDING_CHECK', topic: 'family_funding', selection: 'adaptive', answerShape: 'compound',
@@ -108,6 +141,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
     id: 'f1_16', number: 16, stage: 'FAMILY_AND_TIES', topic: 'us_relatives', selection: 'adaptive', answerShape: 'yes-no',
     text: 'Do you have any relatives in the United States? What is your relationship, which state do they live in, and what do they do?',
     evaluationFocus: ['ds160_consistency', 'relationship_context'],
+    followUps: [{ id: 'f1_16_relative_details', text: 'Which relative, which state, and what do they do?', when: 'affirmative', reviewFactor: 'application-consistency', officialRuleIds: ['FAM_RESIDENCE_ABROAD', 'FAM_PRESENT_INTENT_CALIBRATION'] }],
     sensitive: true,
     privacyGuidance: 'Do not ask for a relative’s name, exact address, phone number, email address, or immigration document number.',
   },
@@ -115,6 +149,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
     id: 'f1_17', number: 17, stage: 'TRAVEL_HISTORY', topic: 'travel_history', selection: 'adaptive', answerShape: 'compound',
     text: 'Have you traveled abroad before? Have you ever traveled to the United States?',
     evaluationFocus: ['travel_history', 'timeline_consistency', 'compliance_history'],
+    followUps: [{ id: 'f1_17_us_trip', text: 'What was the purpose of your U.S. trip, and did you leave on time?', when: 'keyword', reviewFactor: 'eligibility-and-compliance', officialRuleIds: [], keywords: ['united states', 'usa', 'u.s.', 'america'] }],
   },
   {
     id: 'f1_18', number: 18, stage: 'SECURITY_AND_DS160', topic: 'us_contact', selection: 'adaptive', answerShape: 'open',
@@ -127,6 +162,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
     id: 'f1_19', number: 19, stage: 'SECURITY_AND_DS160', topic: 'mistreatment', selection: 'mandatory', answerShape: 'yes-no',
     text: 'Have you ever experienced harm or mistreatment in China?',
     evaluationFocus: ['directness', 'internal_consistency'],
+    followUps: [{ id: 'f1_19_brief_details', text: 'Briefly, what happened? Do not include names or exact locations.', when: 'affirmative', reviewFactor: 'eligibility-and-compliance', officialRuleIds: [] }],
     sensitive: true,
     privacyGuidance: 'Allow a brief category-level explanation only. Do not collect names, exact locations, organizations, dates of birth, or evidence files.',
   },
@@ -134,6 +170,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
     id: 'f1_20', number: 20, stage: 'SECURITY_AND_DS160', topic: 'return_fear', selection: 'mandatory', answerShape: 'yes-no',
     text: 'Do you fear harm or mistreatment if you return to China?',
     evaluationFocus: ['directness', 'internal_consistency_with_question_19'],
+    followUps: [{ id: 'f1_20_return_concern', text: 'What specifically makes you concerned about returning?', when: 'affirmative', reviewFactor: 'eligibility-and-compliance', officialRuleIds: [] }],
     sensitive: true,
     privacyGuidance: 'Accept a brief reason only and do not request identifying incident details or supporting documents.',
   },
@@ -141,6 +178,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
     id: 'f1_21', number: 21, stage: 'TRAVEL_HISTORY', topic: 'africa_travel', selection: 'mandatory', answerShape: 'yes-no',
     text: 'Have you ever traveled to Africa?',
     evaluationFocus: ['travel_history', 'timeline_consistency'],
+    followUps: [{ id: 'f1_21_trip_details', text: 'Which country did you visit, when did you go, and what was the purpose?', when: 'affirmative', reviewFactor: 'eligibility-and-compliance', officialRuleIds: [] }],
   },
   {
     id: 'f1_22', number: 22, stage: 'SECURITY_AND_DS160', topic: 'safety_judgment', selection: 'high-frequency', answerShape: 'yes-no',

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   HiMiniMicrophone,
@@ -23,8 +23,13 @@ import {
 import {
   buildRealtimeOpeningLine,
   buildRealtimeInterviewPrompt,
+  buildRealtimeSpeakingStyle,
+  isExactRealtimeClosingLine,
+  resolveRealtimeOfficerType,
+  resolveRealtimeResumeOpeningLine,
   resolveRealtimeVoice,
 } from '../../practice/services/realtimeInterviewPrompt'
+import { resolveInterviewModePolicy } from '../../practice/services/interviewModePolicy'
 import {
   advanceF1Interview,
   createF1InterviewState,
@@ -95,6 +100,7 @@ export default function VoiceInterviewRoom({
 }: Props) {
   const officerConfig = officerTypes.find(officer => officer.id === officerType)
     ?? officerTypes.find(officer => officer.id === 'standard')!
+  const realtimeOfficerType = useMemo(() => resolveRealtimeOfficerType(officerType), [officerType])
   const { access, refreshAccess } = useOrderAccess()
   const hasQuota = access.unlimited || Number(access.remainingUses) > 0
 
@@ -129,11 +135,11 @@ export default function VoiceInterviewRoom({
   const messagesRef = useRef<RealtimeChatMessage[]>(initialProgress?.messages ?? [])
   const f1StateRef = useRef<F1InterviewState | null>(
     initialProgress?.f1State
-      ?? (context.visaType === 'F1' ? createF1InterviewState(context) : null),
+      ?? (context.visaType === 'F1' ? createF1InterviewState(context, { officerType: realtimeOfficerType }) : null),
   )
   const b2StateRef = useRef<B2InterviewState | null>(
     initialProgress?.b2State
-      ?? (context.visaType === 'B2' ? createB2InterviewState(context) : null),
+      ?? (context.visaType === 'B2' ? createB2InterviewState(context, { officerType: realtimeOfficerType }) : null),
   )
 
   const returnToListening = useCallback(() => {
@@ -259,7 +265,7 @@ export default function VoiceInterviewRoom({
         }
         setPhase('thinking')
         if (context.visaType === 'F1' && text && f1StateRef.current) {
-          const result = advanceF1Interview(f1StateRef.current, text, context)
+          const result = advanceF1Interview(f1StateRef.current, text, context, { officerType: realtimeOfficerType })
           f1StateRef.current = result.state
           pendingQuestionRef.current = result.action.text
           if (!isApprovedF1OfficerText(result.action.text)) {
@@ -280,7 +286,7 @@ export default function VoiceInterviewRoom({
             setPhase('error')
           })
         } else if (context.visaType === 'B2' && text && b2StateRef.current) {
-          const result = advanceB2Interview(b2StateRef.current, text, context)
+          const result = advanceB2Interview(b2StateRef.current, text, context, { officerType: realtimeOfficerType })
           b2StateRef.current = result.state
           pendingQuestionRef.current = result.action.text
           if (!isApprovedB2OfficerText(result.action.text)) {
@@ -400,7 +406,7 @@ export default function VoiceInterviewRoom({
       default:
         break
     }
-  }, [context.visaType, endInterview, finishOfficerMessage, returnToListening, upsertMessage])
+  }, [context.visaType, endInterview, finishOfficerMessage, realtimeOfficerType, returnToListening, upsertMessage])
 
   const startInterview = useCallback(async (resume = false) => {
     const resumable = resume && attemptStartedRef.current
@@ -418,8 +424,12 @@ export default function VoiceInterviewRoom({
       setElapsed(0)
       elapsedRef.current = 0
       messagesRef.current = []
-      f1StateRef.current = context.visaType === 'F1' ? createF1InterviewState(context) : null
-      b2StateRef.current = context.visaType === 'B2' ? createB2InterviewState(context) : null
+      f1StateRef.current = context.visaType === 'F1'
+        ? createF1InterviewState(context, { officerType: realtimeOfficerType })
+        : null
+      b2StateRef.current = context.visaType === 'B2'
+        ? createB2InterviewState(context, { officerType: realtimeOfficerType })
+        : null
       pendingQuestionRef.current = buildRealtimeOpeningLine(context)
       autoEndAfterAudioRef.current = false
     } else {
@@ -427,9 +437,6 @@ export default function VoiceInterviewRoom({
       messagesRef.current = completedMessages
       setMessages(completedMessages)
     }
-    const resumeClosing = resumable && autoEndAfterAudioRef.current
-    mutedRef.current = resumeClosing
-    setIsMuted(resumeClosing)
     endedRef.current = false
     endingRef.current = false
     awaitingAnswerRef.current = false
@@ -441,18 +448,22 @@ export default function VoiceInterviewRoom({
     setPhase('connecting')
 
     const openingLine = resumable
-      ? resolveResumeOpeningLine(context, messagesRef.current, pendingQuestionRef.current)
+      ? resolveRealtimeResumeOpeningLine(context, messagesRef.current, pendingQuestionRef.current)
       : buildRealtimeOpeningLine(context)
     pendingQuestionRef.current = openingLine
+    const resumeClosing = resumable && isExactRealtimeClosingLine(context, openingLine)
+    autoEndAfterAudioRef.current = resumeClosing
+    mutedRef.current = resumeClosing
+    setIsMuted(resumeClosing)
 
     const client = new DoubaoRealtimeClient({
-      instructions: buildRealtimeInterviewPrompt(context, officerType),
+      instructions: buildRealtimeInterviewPrompt(context, realtimeOfficerType),
       openingLine,
       attemptId,
       voice: resolveRealtimeVoice(officerConfig.voiceProfile.gender, context.visaType),
-      speakingStyle: context.visaType === 'B2'
-        ? '使用自然、清晰、简短的普通话，语气专业中性，逐字朗读应用程序发送的问题，不要添加内容。'
-        : 'Speak in natural American English. Stay professional, concise, and realistic. Read the application-approved question exactly.',
+      speakingStyle: buildRealtimeSpeakingStyle(context, realtimeOfficerType),
+      endOfTurnSilenceMs: resolveInterviewModePolicy(realtimeOfficerType).endOfTurnSilenceMs,
+      speechRate: resolveInterviewModePolicy(realtimeOfficerType).speechRate,
       controlledQuestions: context.visaType === 'F1' || context.visaType === 'B2',
       validateControlledText: context.visaType === 'F1'
         ? isApprovedF1OfficerText
@@ -489,7 +500,7 @@ export default function VoiceInterviewRoom({
       clientRef.current = null
       setPhase('error')
     }
-  }, [attemptId, context, handleRealtimeEvent, hasQuota, officerConfig.voiceProfile.gender, officerType, refreshAccess])
+  }, [attemptId, context, handleRealtimeEvent, hasQuota, officerConfig.voiceProfile.gender, realtimeOfficerType, refreshAccess])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -564,6 +575,7 @@ export default function VoiceInterviewRoom({
         setIsMuted(true)
         clientRef.current?.setMuted(true)
         const closingLine = context.visaType === 'F1' ? F1_INTERVIEW_CLOSING_LINE : B2_INTERVIEW_CLOSING_LINE
+        pendingQuestionRef.current = closingLine
         void clientRef.current?.speakControlled(closingLine).catch(() => endInterview())
       }
     }, 1000)
@@ -805,18 +817,6 @@ function providerErrorMessage(event: DoubaoRealtimeEvent) {
     ? String(detail).replace(/豆包|doubao|bytedance|volcengine|openspeech/gi, '实时语音服务')
     : ''
   return publicDetail ? `实时语音服务返回错误：${publicDetail}` : '实时语音服务暂时不可用，请重新连接。'
-}
-
-function resolveResumeOpeningLine(
-  context: UserContext,
-  messages: readonly RealtimeChatMessage[],
-  pendingQuestion: string,
-) {
-  if (context.visaType === 'F1' && pendingQuestion.trim()) return pendingQuestion.trim()
-  const lastOfficerQuestion = [...messages]
-    .reverse()
-    .find(message => message.role === 'officer' && message.text.trim())
-  return lastOfficerQuestion?.text.trim() || buildRealtimeOpeningLine(context)
 }
 
 function phaseStatus(phase: Phase) {

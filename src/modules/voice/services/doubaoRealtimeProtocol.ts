@@ -34,6 +34,7 @@ export const DOUBAO_EVENT = {
   ASR_INFO: 450,
   ASR_RESPONSE: 451,
   ASR_ENDED: 459,
+  CHAT_TTS_TEXT: 500,
   CHAT_RESPONSE: 550,
   CHAT_ENDED: 559,
   DIALOG_ERROR: 599,
@@ -46,6 +47,53 @@ export interface DoubaoServerFrame {
   errorCode?: number
   payload: Uint8Array
   json?: Record<string, unknown>
+}
+
+export const DOUBAO_USAGE_TOKEN_FIELDS = [
+  'input_text_tokens',
+  'input_audio_tokens',
+  'cached_text_tokens',
+  'cached_audio_tokens',
+  'output_text_tokens',
+  'output_audio_tokens',
+] as const
+
+export type DoubaoUsageTokenField = typeof DOUBAO_USAGE_TOKEN_FIELDS[number]
+export type DoubaoUsageTokens = Record<DoubaoUsageTokenField, number>
+
+export function emptyDoubaoUsageTokens(): DoubaoUsageTokens {
+  return {
+    input_text_tokens: 0,
+    input_audio_tokens: 0,
+    cached_text_tokens: 0,
+    cached_audio_tokens: 0,
+    output_text_tokens: 0,
+    output_audio_tokens: 0,
+  }
+}
+
+/** Keep only the six documented counters; never forward provider metadata. */
+export function parseDoubaoUsageTokens(value: unknown): DoubaoUsageTokens {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+  const usage = emptyDoubaoUsageTokens()
+  for (const field of DOUBAO_USAGE_TOKEN_FIELDS) {
+    const count = source[field]
+    usage[field] = typeof count === 'number' && Number.isFinite(count)
+      ? Math.max(0, Math.trunc(count))
+      : 0
+  }
+  return usage
+}
+
+export function addDoubaoUsageTokens(
+  total: DoubaoUsageTokens,
+  increment: DoubaoUsageTokens,
+): DoubaoUsageTokens {
+  const next = emptyDoubaoUsageTokens()
+  for (const field of DOUBAO_USAGE_TOKEN_FIELDS) next[field] = total[field] + increment[field]
+  return next
 }
 
 function writeUint32(target: Uint8Array, offset: number, value: number) {

@@ -46,6 +46,91 @@ function createFrame(event, payload = {}, sessionId) {
   return frame
 }
 
+function createAudioFrame(sessionId, pcmBytes) {
+  const sessionBytes = Buffer.from(sessionId)
+  const frame = Buffer.alloc(4 + 4 + 4 + sessionBytes.length + 4 + pcmBytes.length)
+  frame[0] = 0x11
+  frame[1] = 0x24
+  frame[2] = 0
+  frame[3] = 0
+  let offset = 4
+  frame.writeUInt32BE(200, offset)
+  offset += 4
+  frame.writeUInt32BE(sessionBytes.length, offset)
+  offset += 4
+  sessionBytes.copy(frame, offset)
+  offset += sessionBytes.length
+  frame.writeUInt32BE(pcmBytes.length, offset)
+  offset += 4
+  pcmBytes.copy(frame, offset)
+  return frame
+}
+
+function downsample24kTo16k(chunks) {
+  const input = Buffer.concat(chunks)
+  const inputSamples = Math.floor(input.length / 2)
+  const outputSamples = Math.floor(inputSamples * 2 / 3)
+  const output = Buffer.alloc(outputSamples * 2)
+  for (let index = 0; index < outputSamples; index += 1) {
+    const sourceIndex = Math.min(inputSamples - 1, Math.floor(index * 1.5))
+    output.writeInt16LE(input.readInt16LE(sourceIndex * 2), index * 2)
+  }
+  return output
+}
+
+const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+
+const usageTokenFields = [
+  'input_text_tokens',
+  'input_audio_tokens',
+  'cached_text_tokens',
+  'cached_audio_tokens',
+  'output_text_tokens',
+  'output_audio_tokens',
+]
+const usageTotals = Object.fromEntries(usageTokenFields.map(field => [field, 0]))
+let usageEventCount = 0
+
+function recordUsage(json) {
+  const usage = json?.usage && typeof json.usage === 'object' ? json.usage : json
+  const current = Object.fromEntries(usageTokenFields.map(field => {
+    const count = usage?.[field]
+    return [field, typeof count === 'number' && Number.isFinite(count)
+      ? Math.max(0, Math.trunc(count))
+      : 0]
+  }))
+  for (const field of usageTokenFields) {
+    usageTotals[field] += current[field]
+  }
+  usageEventCount += 1
+  console.log(`realtime-smoke=usage-event-${usageEventCount}:${JSON.stringify(current)}`)
+}
+
+function nestedString(value, key) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  if (typeof value[key] === 'string') return value[key]
+  for (const nestedKey of ['data', 'meta', 'result']) {
+    const found = nestedString(value[nestedKey], key)
+    if (found) return found
+  }
+  return undefined
+}
+
+function ttsIdentity(json) {
+  return {
+    replyId: nestedString(json, 'reply_id'),
+    questionId: nestedString(json, 'question_id'),
+  }
+}
+
+function matchingTtsIdentity(expected, actual) {
+  if (!expected || (!expected.replyId && !expected.questionId)) return false
+  if (!actual.replyId && !actual.questionId) return false
+  if (expected.replyId && actual.replyId !== expected.replyId) return false
+  if (expected.questionId && actual.questionId !== expected.questionId) return false
+  return true
+}
+
 function parseFrame(data) {
   const bytes = Buffer.from(data)
   const messageType = bytes[1] >> 4
@@ -104,6 +189,10 @@ socket.on('open', openResolve)
 socket.on('message', (data, isBinary) => {
   if (!isBinary) return
   const frame = parseFrame(data)
+  if (frame.event === 154) {
+    recordUsage(frame.json)
+    return
+  }
   if (pendingFrame?.events.includes(frame.event) || frame.code !== undefined) {
     const pending = pendingFrame
     pendingFrame = null
@@ -148,19 +237,27 @@ try {
   console.log('realtime-smoke=connection-started')
 
   const sessionPayload = {
-    asr: { extra: { end_smooth_window_ms: 1800, enable_custom_vad: true } },
+    asr: {
+      extra: {
+        end_smooth_window_ms: 1800,
+        enable_custom_vad: true,
+        enable_asr_twopass: false,
+      },
+    },
     tts: {
       speaker: 'en_female_dacey_uranus_bigtts',
       audio_config: { channel: 1, format: 'pcm_s16le', sample_rate: 24000 },
-      extra: {},
+      extra: { speech_rate: 0 },
     },
     dialog: {
       bot_name: 'U.S. Visa Officer',
+      dialog_id: '',
       system_role: smokeSystemRole,
       speaking_style: 'Speak naturally, calmly, and concisely. Ask one question at a time.',
       extra: {
         strict_audit: true,
         input_mod: 'keep_alive',
+        enable_volc_websearch: false,
         enable_music: false,
         enable_loudness_norm: true,
         model: '1.2.1.1',
@@ -179,41 +276,93 @@ try {
   }, sessionId))
 
   let greetingStarted = false
+  const greetingAudio = []
   while (true) {
     const frame = await waitForEvent([350, 352, 359, 599], 20_000)
     assertFrame(frame, 'SayHello')
     if (frame.event === 599) throw new Error(`SayHello failed: ${safeMessage(frame.json?.message)}`)
     if (frame.event === 350 || frame.event === 352) greetingStarted = true
+    if (frame.event === 352 && frame.payload.length) greetingAudio.push(frame.payload)
     if (frame.event === 359) break
   }
   if (!greetingStarted) throw new Error('SayHello ended without greeting audio')
+  if (!greetingAudio.length) throw new Error('SayHello returned no PCM audio for the ASR round-trip check')
   console.log('realtime-smoke=opening-greeting-complete')
+
+  // ChatTTSText is valid only after ASREnded. Reuse the generated greeting PCM
+  // as deterministic speech input so this smoke remains fixture-free.
+  const userPcm = downsample24kTo16k(greetingAudio)
+  const audioChunkBytes = 640
+  for (let offset = 0; offset < userPcm.length; offset += audioChunkBytes) {
+    socket.send(createAudioFrame(sessionId, userPcm.subarray(offset, offset + audioChunkBytes)))
+    await wait(20)
+  }
+  const silence = Buffer.alloc(32_000 * 2)
+  for (let offset = 0; offset < silence.length; offset += audioChunkBytes) {
+    socket.send(createAudioFrame(sessionId, silence.subarray(offset, offset + audioChunkBytes)))
+    await wait(20)
+  }
+
+  let asrCompleted = false
+  while (!asrCompleted) {
+    const frame = await waitForEvent([450, 451, 459, 350, 352, 359, 550, 559, 599], 20_000)
+    assertFrame(frame, 'ASR round trip')
+    if (frame.event === 599) throw new Error(`ASR round trip failed: ${safeMessage(frame.json?.message)}`)
+    asrCompleted = frame.event === 459
+  }
+  console.log('realtime-smoke=asr-ended')
+
+  socket.send(createFrame(500, {
+    start: true,
+    content: 'Do you fear harm or mistreatment if you return to China?',
+    end: false,
+  }, sessionId))
+  socket.send(createFrame(500, {
+    start: false,
+    content: '',
+    end: true,
+  }, sessionId))
+  let nextQuestionStarted = false
+  let approvedTtsActive = false
+  let approvedTtsIdentity
+  while (true) {
+    const frame = await waitForEvent([350, 352, 359, 550, 559, 599], 20_000)
+    assertFrame(frame, 'ChatTTSText')
+    if (frame.event === 599) throw new Error(`ChatTTSText failed: ${safeMessage(frame.json?.message)}`)
+    if (frame.event === 350) {
+      approvedTtsActive = frame.json?.tts_type === 'chat_tts_text'
+      if (approvedTtsActive) {
+        const identity = ttsIdentity(frame.json)
+        if (!identity.replyId && !identity.questionId) {
+          throw new Error('ChatTTSText start returned no TTS identity')
+        }
+        if (approvedTtsIdentity && !matchingTtsIdentity(approvedTtsIdentity, identity)) {
+          throw new Error('ChatTTSText start changed TTS identity')
+        }
+        approvedTtsIdentity ??= identity
+        nextQuestionStarted = true
+      }
+    }
+    if (frame.event === 352 && approvedTtsActive) nextQuestionStarted = true
+    if (
+      frame.event === 359
+      && approvedTtsActive
+      && matchingTtsIdentity(approvedTtsIdentity, ttsIdentity(frame.json))
+    ) {
+      console.log('realtime-smoke=chat-tts-identity-matched')
+      break
+    }
+  }
+  if (!nextQuestionStarted) throw new Error('ChatTTSText ended without audio')
+  console.log('realtime-smoke=continuous-session-complete')
 
   socket.send(createFrame(102, {}, sessionId))
   await waitForEvent([152, 153], 5_000)
-
-  const nextSessionId = randomUUID()
-  socket.send(createFrame(100, sessionPayload, nextSessionId))
-  const nextSession = await waitForEvent([150, 153])
-  assertFrame(nextSession, 'StartNextSession')
-  if (nextSession.event !== 150) throw new Error(`StartNextSession failed: ${safeMessage(nextSession.json?.error)}`)
-
-  socket.send(createFrame(300, {
-    content: 'Do you fear harm or mistreatment if you return to China?',
-  }, nextSessionId))
-  let nextQuestionStarted = false
-  while (true) {
-    const frame = await waitForEvent([350, 352, 359, 599], 20_000)
-    assertFrame(frame, 'ControlledNextQuestion')
-    if (frame.event === 599) throw new Error(`ControlledNextQuestion failed: ${safeMessage(frame.json?.message)}`)
-    if (frame.event === 350 || frame.event === 352) nextQuestionStarted = true
-    if (frame.event === 359) break
+  for (let attempt = 0; attempt < 20 && !usageEventCount; attempt += 1) {
+    await wait(50)
   }
-  if (!nextQuestionStarted) throw new Error('Controlled next question ended without audio')
-  console.log('realtime-smoke=controlled-session-rotation-complete')
-
-  socket.send(createFrame(102, {}, nextSessionId))
-  await waitForEvent([152, 153], 5_000)
+  if (!usageEventCount) throw new Error('Provider returned no UsageResponse events')
+  console.log(`realtime-smoke=usage:${JSON.stringify(usageTotals)}`)
   socket.send(createFrame(2))
   await waitForEvent([52], 5_000)
   socket.close(1000, 'smoke test complete')

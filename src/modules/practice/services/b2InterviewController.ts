@@ -1,9 +1,11 @@
 import type { UserContext } from '../types.ts'
+import type { OfficerType } from '../../voice/types.ts'
 import {
   B2_CORE_TOPICS,
   B2_QUESTION_CATALOG,
   getB2Question,
   type B2QuestionDefinition,
+  type B2FollowUpRule,
   type B2QuestionId,
   type B2QuestionTopic,
 } from '../data/b2QuestionCatalog.ts'
@@ -13,16 +15,20 @@ import {
   B2_INTERVIEW_MAX_MAIN_QUESTIONS,
   B2_INTERVIEW_OPENING_LINE,
 } from '../data/b2InterviewStandard.ts'
+import { resolveInterviewModePolicy } from './interviewModePolicy.ts'
 
 export type B2ControllerAction =
   | { type: 'ASK'; questionId: B2QuestionId; text: string; reason: string }
-  | { type: 'REPEAT_CURRENT'; questionId: B2QuestionId; text: string; reason: 'repeat-request' | 'unclear-answer' }
+  | { type: 'ASK_FOLLOW_UP'; questionId: B2QuestionId; followUpId: string; text: string; reason: B2FollowUpRule['when'] }
+  | { type: 'REPEAT_CURRENT'; questionId: B2QuestionId; followUpId?: string; text: string; reason: 'repeat-request' | 'unclear-answer' }
   | { type: 'CLOSE'; text: string; reason: 'complete' | 'question-limit' | 'time-limit' }
 
 export interface B2AnswerRecord {
   questionId: B2QuestionId
   transcript: string
   quality: 'valid' | 'unclear' | 'repeat-request'
+  turnKind: 'main' | 'follow-up'
+  followUpId?: string
 }
 
 export interface B2InterviewState {
@@ -30,9 +36,19 @@ export interface B2InterviewState {
   askedQuestionIds: B2QuestionId[]
   answers: B2AnswerRecord[]
   repeatedQuestionIds: B2QuestionId[]
+  repeatedTurnIds: string[]
+  activeFollowUpId?: string
+  askedFollowUpIds: string[]
+  followUpCounts: Partial<Record<B2QuestionId, number>>
+  totalFollowUpCount: number
   targetQuestionCount: number
   maxQuestionCount: number
   startedAt: number
+}
+
+export interface B2ControllerOptions {
+  now?: number
+  officerType?: OfficerType
 }
 
 const MIN_TARGET_QUESTIONS = 6
@@ -51,15 +67,23 @@ const continuations: Partial<Record<B2QuestionId, readonly B2QuestionId[]>> = {
   b2_16: ['b2_17', 'b2_18'],
 }
 
-export function createB2InterviewState(context: UserContext, now = Date.now()): B2InterviewState {
+export function createB2InterviewState(
+  context: UserContext,
+  options: number | B2ControllerOptions = {},
+): B2InterviewState {
+  const { now } = resolveOptions(options)
   return {
     currentQuestionId: 'b2_01',
     askedQuestionIds: ['b2_01'],
     answers: [],
     repeatedQuestionIds: [],
+    repeatedTurnIds: [],
+    askedFollowUpIds: [],
+    followUpCounts: {},
+    totalFollowUpCount: 0,
     targetQuestionCount: calculateTargetQuestionCount(context),
     maxQuestionCount: B2_INTERVIEW_MAX_MAIN_QUESTIONS,
-    startedAt: now,
+    startedAt: now ?? Date.now(),
   }
 }
 
@@ -67,40 +91,88 @@ export function advanceB2Interview(
   state: B2InterviewState,
   transcript: string,
   context: UserContext,
-  now = Date.now(),
+  options: number | B2ControllerOptions = {},
 ): { state: B2InterviewState; action: B2ControllerAction } {
-  if (now - state.startedAt >= B2_INTERVIEW_HARD_LIMIT_SECONDS * 1000) {
-    return { state, action: { type: 'CLOSE', text: B2_INTERVIEW_CLOSING_LINE, reason: 'time-limit' } }
+  const { now = Date.now(), officerType = 'standard' } = resolveOptions(options)
+  const currentState = normalizeState(state)
+  if (now - currentState.startedAt >= B2_INTERVIEW_HARD_LIMIT_SECONDS * 1000) {
+    return { state: currentState, action: { type: 'CLOSE', text: B2_INTERVIEW_CLOSING_LINE, reason: 'time-limit' } }
   }
 
-  const quality = classifyAnswer(transcript, getB2Question(state.currentQuestionId))
-  const answers = [...state.answers, { questionId: state.currentQuestionId, transcript: transcript.trim(), quality }]
+  const question = getB2Question(currentState.currentQuestionId)
+  const activeFollowUp = findFollowUp(question, currentState.activeFollowUpId)
+  const quality = activeFollowUp ? classifyFollowUpAnswer(transcript) : classifyAnswer(transcript, question)
+  const turnKind = activeFollowUp ? 'follow-up' : 'main'
+  const answers: B2AnswerRecord[] = [...currentState.answers, {
+    questionId: currentState.currentQuestionId,
+    transcript: transcript.trim(),
+    quality,
+    turnKind,
+    ...(activeFollowUp ? { followUpId: activeFollowUp.id } : {}),
+  }]
+  const turnId = activeFollowUp ? `follow-up:${activeFollowUp.id}` : `main:${currentState.currentQuestionId}`
+  const activeText = activeFollowUp?.text ?? question.text
 
   if (quality === 'repeat-request') {
     return {
-      state: { ...state, answers },
+      state: { ...currentState, answers },
       action: {
         type: 'REPEAT_CURRENT',
-        questionId: state.currentQuestionId,
-        text: getB2Question(state.currentQuestionId).text,
+        questionId: currentState.currentQuestionId,
+        ...(activeFollowUp ? { followUpId: activeFollowUp.id } : {}),
+        text: activeText,
         reason: 'repeat-request',
       },
     }
   }
 
-  if (quality === 'unclear' && !state.repeatedQuestionIds.includes(state.currentQuestionId)) {
+  if (quality === 'unclear' && !currentState.repeatedTurnIds.includes(turnId)) {
     return {
-      state: { ...state, answers, repeatedQuestionIds: [...state.repeatedQuestionIds, state.currentQuestionId] },
+      state: {
+        ...currentState,
+        answers,
+        repeatedQuestionIds: activeFollowUp
+          ? currentState.repeatedQuestionIds
+          : unique([...currentState.repeatedQuestionIds, currentState.currentQuestionId]),
+        repeatedTurnIds: [...currentState.repeatedTurnIds, turnId],
+      },
       action: {
         type: 'REPEAT_CURRENT',
-        questionId: state.currentQuestionId,
-        text: getB2Question(state.currentQuestionId).text,
+        questionId: currentState.currentQuestionId,
+        ...(activeFollowUp ? { followUpId: activeFollowUp.id } : {}),
+        text: activeText,
         reason: 'unclear-answer',
       },
     }
   }
 
-  const completedState = { ...state, answers }
+  const completedState = { ...currentState, answers, activeFollowUpId: undefined }
+
+  if (!activeFollowUp) {
+    const policy = resolveInterviewModePolicy(officerType)
+    const followUp = selectFollowUp(question, transcript, quality, completedState, policy)
+    if (followUp) {
+      const followUpCount = completedState.followUpCounts[question.id] ?? 0
+      const nextState: B2InterviewState = {
+        ...completedState,
+        activeFollowUpId: followUp.id,
+        askedFollowUpIds: [...completedState.askedFollowUpIds, followUp.id],
+        followUpCounts: { ...completedState.followUpCounts, [question.id]: followUpCount + 1 },
+        totalFollowUpCount: completedState.totalFollowUpCount + 1,
+      }
+      return {
+        state: nextState,
+        action: {
+          type: 'ASK_FOLLOW_UP',
+          questionId: question.id,
+          followUpId: followUp.id,
+          text: followUp.text,
+          reason: followUp.when,
+        },
+      }
+    }
+  }
+
   const coveredTopics = new Set(completedState.askedQuestionIds.map(id => getB2Question(id).topic))
   const hasCoreCoverage = B2_CORE_TOPICS.every(topic => coveredTopics.has(topic))
   const reachedTarget = completedState.askedQuestionIds.length >= completedState.targetQuestionCount
@@ -132,15 +204,90 @@ export function advanceB2Interview(
 }
 
 export function isApprovedB2OfficerText(text: string) {
-  const normalized = normalizeText(text)
-  return normalized === normalizeText(B2_INTERVIEW_CLOSING_LINE)
-    || normalized === normalizeText(B2_INTERVIEW_OPENING_LINE)
-    || B2_QUESTION_CATALOG.some(question => normalized === normalizeText(question.text))
+  const exact = exactOfficerText(text)
+  return exact === exactOfficerText(B2_INTERVIEW_CLOSING_LINE)
+    || exact === exactOfficerText(B2_INTERVIEW_OPENING_LINE)
+    || B2_QUESTION_CATALOG.some(question =>
+      exact === exactOfficerText(question.text)
+      || question.followUps?.some(followUp => exact === exactOfficerText(followUp.text)),
+    )
+}
+
+function normalizeState(state: B2InterviewState): B2InterviewState {
+  const question = getB2Question(state.currentQuestionId)
+  const activeFollowUpId = findFollowUp(question, state.activeFollowUpId)?.id
+  const askedFollowUpIds = unique(state.askedFollowUpIds ?? [])
+  return {
+    ...state,
+    repeatedTurnIds: state.repeatedTurnIds ?? (state.repeatedQuestionIds ?? []).map(id => `main:${id}`),
+    activeFollowUpId,
+    askedFollowUpIds,
+    followUpCounts: state.followUpCounts ?? countFollowUpsByQuestion(askedFollowUpIds),
+    totalFollowUpCount: state.totalFollowUpCount ?? askedFollowUpIds.length,
+  }
+}
+
+function countFollowUpsByQuestion(ids: readonly string[]) {
+  const counts: Partial<Record<B2QuestionId, number>> = {}
+  for (const question of B2_QUESTION_CATALOG) {
+    const count = question.followUps?.filter(followUp => ids.includes(followUp.id)).length ?? 0
+    if (count) counts[question.id] = count
+  }
+  return counts
+}
+
+function findFollowUp(question: B2QuestionDefinition, followUpId?: string) {
+  return followUpId ? question.followUps?.find(followUp => followUp.id === followUpId) : undefined
+}
+
+function selectFollowUp(
+  question: B2QuestionDefinition,
+  transcript: string,
+  quality: B2AnswerRecord['quality'],
+  state: B2InterviewState,
+  policy: ReturnType<typeof resolveInterviewModePolicy>,
+) {
+  if (state.totalFollowUpCount >= policy.maxFollowUps) return undefined
+  if ((state.followUpCounts[question.id] ?? 0) >= policy.maxFollowUpsPerQuestion) return undefined
+  return question.followUps?.find(followUp =>
+    !state.askedFollowUpIds.includes(followUp.id)
+    && matchesFollowUp(followUp, transcript, quality, policy.shortAnswerCharacterThreshold),
+  )
+}
+
+function matchesFollowUp(
+  followUp: B2FollowUpRule,
+  transcript: string,
+  quality: B2AnswerRecord['quality'],
+  shortAnswerThreshold: number,
+) {
+  const text = normalizeText(transcript)
+  switch (followUp.when) {
+    case 'affirmative': return /^(是|是的|有|我有|去过|我(?:以前)?去过|以前去过|yes|yeah|i do|i have|i did)/.test(text)
+    case 'negative': return /^(不|没有|没去过|从未|no|never|i do not|i don t)/.test(text)
+    case 'uncertain':
+      if (followUp.id === 'b2_07_budget' && hasConcreteMoneyAmount(transcript)) return false
+      if (followUp.id === 'b2_01_specific_purpose' && hasConcreteVisitPurpose(text)) return false
+      return quality === 'unclear' || /(不确定|不清楚|还没想好|大概|可能|应该|随便|看看|有点事|notsure|maybe|about)/.test(text)
+    case 'short': return quality === 'valid' && meaningfulLength(transcript) < shortAnswerThreshold
+    case 'keyword': return followUp.keywords?.some(keyword => containsUnnegatedKeyword(text, keyword)) ?? false
+    default: return false
+  }
 }
 
 export function identifyB2Question(questionText: string) {
+  return identifyB2InterviewTurn(questionText)?.question
+}
+
+export function identifyB2InterviewTurn(questionText: string) {
+  const exact = exactOfficerText(questionText)
+  for (const question of B2_QUESTION_CATALOG) {
+    const followUp = question.followUps?.find(candidate => exact === exactOfficerText(candidate.text))
+    if (followUp) return { question, followUp }
+  }
   const normalized = normalizeText(questionText)
-  return B2_QUESTION_CATALOG.find(question => normalized.includes(normalizeText(question.text)))
+  const question = B2_QUESTION_CATALOG.find(candidate => normalized.includes(normalizeText(candidate.text)))
+  return question ? { question, followUp: undefined } : undefined
 }
 
 function selectNextQuestion(
@@ -220,15 +367,76 @@ function classifyAnswer(transcript: string, question: B2QuestionDefinition): B2A
   const text = normalizeText(transcript)
   if (!text) return 'unclear'
   if (isRepeatRequest(text)) return 'repeat-request'
-  if (/^(不知道|不清楚|没想好|什么|啊|嗯|sorry|what|huh|not sure|i don t know)$/.test(text)) return 'unclear'
+  if (isPromptInjection(text)) return 'unclear'
+  if (/^(不知道|不清楚|没想好|什么|啊|嗯|sorry|what|huh|notsure|idontknow)$/.test(text)) return 'unclear'
   if (question.answerShape === 'open' && text.length < 2) return 'unclear'
   return 'valid'
 }
 
+function classifyFollowUpAnswer(transcript: string): B2AnswerRecord['quality'] {
+  const text = normalizeText(transcript)
+  if (!text) return 'unclear'
+  if (isRepeatRequest(text)) return 'repeat-request'
+  if (isPromptInjection(text)) return 'unclear'
+  if (/^(不知道|不清楚|没想好|什么|啊|嗯|sorry|what|huh|notsure|idontknow)$/.test(text)) return 'unclear'
+  return 'valid'
+}
+
 function isRepeatRequest(text: string) {
-  return /没听清|没听见|再说一遍|重复一遍|请重复|您说什么|pardon|repeat|say that again|didn t hear|couldn t hear/.test(text)
+  return /没听清|没听见|再说一遍|重复一遍|请重复|您说什么|pardon|repeat|saythatagain|didnthear|couldnthear/.test(text)
+}
+
+function isPromptInjection(text: string) {
+  return /忽略.{0,12}(规则|指令|提示)|别问签证|换个话题|聊点别的|问我.{0,8}(电影|游戏|体育)/.test(text)
+    || /(ignore|forget|disregard).{0,24}(instruction|instructions|rule|rules|prompt)/.test(text)
+    || /(askmeabout|changethe(subject|topic)|letschat|stoptheinterview)/.test(text)
 }
 
 function normalizeText(value: string) {
   return value.toLowerCase().replace(/[，。！？、,.!?;；:'"“”‘’()（）\s_-]+/g, '').trim()
+}
+
+function exactOfficerText(value: string) {
+  return value.trim()
+}
+
+function meaningfulLength(value: string) {
+  const hanCharacters = value.match(/[\p{Script=Han}]/gu)?.length ?? 0
+  const latinWords = value
+    .replace(/[\p{Script=Han}]/gu, ' ')
+    .toLowerCase()
+    .match(/[a-z0-9]+/g)?.length ?? 0
+  return hanCharacters + latinWords
+}
+
+function containsUnnegatedKeyword(text: string, keyword: string) {
+  const target = normalizeText(keyword)
+  if (!target) return false
+
+  let offset = 0
+  while (offset < text.length) {
+    const index = text.indexOf(target, offset)
+    if (index < 0) return false
+    const prefix = text.slice(Math.max(0, index - 8), index)
+    if (!/(?:不是(?:由)?|并非(?:由)?|不由|不用|不靠|没有|非)$/.test(prefix)) return true
+    offset = index + target.length
+  }
+  return false
+}
+
+function hasConcreteMoneyAmount(value: string) {
+  const text = normalizeText(value)
+  return /(?:\d+(?:万|千|百)?|[零〇一二两三四五六七八九十百千万亿]+)(?:元|人民币|美元|美金)/.test(text)
+}
+
+function hasConcreteVisitPurpose(text: string) {
+  return /旅游|观光|探亲|访友|商务|开会|会议|参展|就医|医疗|短期访问|tourism|visitfamily|visitfriends|business|conference|medical/.test(text)
+}
+
+function resolveOptions(options: number | B2ControllerOptions): B2ControllerOptions {
+  return typeof options === 'number' ? { now: options } : options
+}
+
+function unique<T>(values: readonly T[]) {
+  return [...new Set(values)]
 }
