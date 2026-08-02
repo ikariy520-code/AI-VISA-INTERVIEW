@@ -19,9 +19,9 @@ const STANDARD_POLICY: InterviewModePolicy = {
   maxFollowUpsPerQuestion: 1,
   shortAnswerWordThreshold: 5,
   shortAnswerCharacterThreshold: 6,
-  endOfTurnSilenceMs: 1_800,
+  endOfTurnSilenceMs: 2_000,
   speechRate: 0,
-  speakingStyleEn: 'Measured, natural American visa-window pace; calm, serious, concise, neutral, and attentive. Read supplied text exactly.',
+  speakingStyleEn: 'Start promptly. Use natural connected American speech, restrained variation in intonation, and short conversational pauses. Sound like you are asking the applicant directly, not reading a script. Keep a serious, neutral visa-window tone.',
   speakingStyleZh: '使用正常、自然的面签窗口语速；语气冷静、严肃、简短、中立、专注；逐字朗读给定文本。',
 }
 
@@ -34,9 +34,9 @@ export function resolveInterviewModePolicy(officerType: OfficerType): InterviewM
         maxFollowUpsPerQuestion: 1,
         shortAnswerWordThreshold: 8,
         shortAnswerCharacterThreshold: 10,
-        endOfTurnSilenceMs: 1_300,
+        endOfTurnSilenceMs: 1_800,
         speechRate: 20,
-        speakingStyleEn: 'Brisk but intelligible American visa-window pace; firm neutral tone, short pauses, restrained skepticism, serious and precise. Read supplied text exactly.',
+        speakingStyleEn: 'Start promptly. Use a brisk, clear American visa-window pace, clipped pauses, and a firm neutral tone with restrained skepticism. Sound direct and conversational, not theatrical or scripted.',
         speakingStyleZh: '使用更快但清晰的面签窗口语速；语气坚定、中立、停顿短，保持克制审慎；逐字朗读给定文本。',
       }
     case 'friendly':
@@ -46,9 +46,9 @@ export function resolveInterviewModePolicy(officerType: OfficerType): InterviewM
         maxFollowUpsPerQuestion: 1,
         shortAnswerWordThreshold: 4,
         shortAnswerCharacterThreshold: 4,
-        endOfTurnSilenceMs: 2_100,
+        endOfTurnSilenceMs: 2_400,
         speechRate: -10,
-        speakingStyleEn: 'Slightly slower, clear American visa-window pace with mild professional warmth; serious, neutral, and evidence-focused. Read supplied text exactly.',
+        speakingStyleEn: 'Start promptly. Use a slightly slower, clear American visa-window pace with natural connected speech and mild professional warmth. Stay serious, neutral, and evidence-focused; do not praise or reassure.',
         speakingStyleZh: '使用略慢、清晰的面签窗口语速；保持轻微职业礼貌、严肃、中立并专注事实；逐字朗读给定文本。',
       }
     case 'custom':

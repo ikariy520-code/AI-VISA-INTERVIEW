@@ -92,6 +92,53 @@ function runToClose(context: UserContext) {
 
 {
   const initial = createF1InterviewState(baseContext, { now: 1_000 })
+  const fundingState: F1InterviewState = {
+    ...initial,
+    currentQuestionId: 'f1_12',
+    askedQuestionIds: ['f1_01', 'f1_03', 'f1_04', 'f1_11', 'f1_12'],
+  }
+
+  const parents = advanceF1Interview(fundingState, 'My parents.', baseContext, { now: 2_000 })
+  assert.notEqual(parents.action.type, 'REPEAT_CURRENT', 'a follow-up must never repeat the funding question')
+  assert.notEqual(parents.action.type, 'ASK_FOLLOW_UP', 'a complete parent-funding answer needs no follow-up')
+
+  const vagueSponsor = advanceF1Interview(fundingState, 'They will.', baseContext, { now: 2_100 })
+  assert.equal(vagueSponsor.action.type, 'ASK_FOLLOW_UP', 'a vague pronoun requires a new clarifying question')
+  if (vagueSponsor.action.type === 'ASK_FOLLOW_UP') {
+    assert.equal(vagueSponsor.action.followUpId, 'f1_12_sponsor_identity')
+    assert.equal(vagueSponsor.action.text, 'Who exactly is your sponsor?')
+  }
+
+  const thirdParty = advanceF1Interview(fundingState, 'My aunt will pay.', baseContext, { now: 2_200 })
+  assert.equal(thirdParty.action.type, 'ASK_FOLLOW_UP', 'third-party funding can be expanded on a material point')
+  if (thirdParty.action.type === 'ASK_FOLLOW_UP') {
+    assert.equal(thirdParty.action.followUpId, 'f1_12_sponsor_basis')
+    assert.equal(thirdParty.action.text, 'Why are they paying for your studies?')
+  }
+}
+
+for (const [questionId, answer] of [
+  ['f1_01', 'Stanford.'],
+  ['f1_04', 'Computer Science.'],
+  ['f1_07', 'Two years.'],
+  ['f1_08', 'Student.'],
+  ['f1_09', 'Reading.'],
+  ['f1_13', '$50,000.'],
+  ['f1_15', 'No.'],
+  ['f1_17', 'No.'],
+] as const) {
+  const initial = createF1InterviewState(baseContext, { now: 1_000 })
+  const shortAnswerState: F1InterviewState = {
+    ...initial,
+    currentQuestionId: questionId,
+    askedQuestionIds: questionId === 'f1_01' ? ['f1_01'] : ['f1_01', questionId],
+  }
+  const result = advanceF1Interview(shortAnswerState, answer, baseContext, { now: 2_000 })
+  assert.notEqual(result.action.type, 'REPEAT_CURRENT', `${questionId} must not repeat merely because the answer is short`)
+}
+
+{
+  const initial = createF1InterviewState(baseContext, { now: 1_000 })
   const futurePlanState: F1InterviewState = {
     ...initial,
     currentQuestionId: 'f1_11',
@@ -176,13 +223,10 @@ function runToClose(context: UserContext) {
 }
 
 {
-  let state: F1InterviewState = createF1InterviewState(baseContext, { now: 1_000 })
+  const state = createF1InterviewState(baseContext, { now: 1_000 })
   const unclear = advanceF1Interview(state, 'I do not know', baseContext, { now: 2_000 })
-  assert.equal(unclear.action.type, 'REPEAT_CURRENT')
-  state = unclear.state
-  const secondUnclear = advanceF1Interview(state, 'I do not know', baseContext, { now: 3_000 })
-  assert.equal(secondUnclear.action.type, 'ASK_FOLLOW_UP')
-  assert.equal(secondUnclear.action.questionId, 'f1_01')
+  assert.notEqual(unclear.action.type, 'REPEAT_CURRENT', 'an unclear answer is not a request to repeat')
+  assert.notEqual(unclear.action.text, F1_QUESTION_CATALOG[0].text, 'a follow-up must not disguise the same main question')
 }
 
 {
@@ -397,8 +441,9 @@ for (const [questionId, answer] of [
     baseContext,
     { now: 2_000 },
   )
-  assert.equal(injection.action.type, 'REPEAT_CURRENT')
-  assert.equal(injection.action.text, F1_QUESTION_CATALOG[0].text)
+  assert.notEqual(injection.action.type, 'REPEAT_CURRENT', 'off-topic instructions are not requests to repeat')
+  assert.notEqual(injection.action.text, F1_QUESTION_CATALOG[0].text)
+  assert.equal(isApprovedF1OfficerText(injection.action.text), true)
 }
 
 {

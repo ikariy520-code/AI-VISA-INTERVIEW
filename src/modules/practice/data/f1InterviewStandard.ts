@@ -8,6 +8,8 @@ export const F1_FAM_SOURCE_URL =
 // This is a safety ceiling, not a target. The controller normally closes as
 // soon as its dynamic evidence target and mandatory coverage are complete.
 export const F1_INTERVIEW_MAX_MAIN_QUESTIONS = 10
+/** Opening question plus every new main question and follow-up; explicit repeats do not add to the count. */
+export const F1_INTERVIEW_MAX_TOTAL_QUESTIONS = 16
 export const F1_INTERVIEW_HARD_LIMIT_SECONDS = 10 * 60
 
 export const F1_INTERVIEW_CLOSING_LINE =

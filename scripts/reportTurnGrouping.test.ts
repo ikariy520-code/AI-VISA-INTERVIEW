@@ -50,6 +50,23 @@ assert.match(f1Request.answers[0].question, /Follow-up:/)
 assert.match(f1Request.answers[0].answer, /My aunt will pay/)
 assert.match(f1Request.answers[0].answer, /mother's sister/)
 
+const nativeFollowUpRecord: InterviewRecord = {
+  ...f1Record,
+  id: 'f1-native-follow-up-grouping',
+  messages: [
+    officer(fundingQuestion.text, 1),
+    user('My aunt will pay for my studies.', 2),
+    officer('Why has your aunt agreed to cover these costs?', 3),
+    user('She has supported my education for several years.', 4),
+  ],
+}
+const nativeFollowUpRequest = buildF1ReportRequest(nativeFollowUpRecord)
+assert.ok(nativeFollowUpRequest)
+assert.equal(nativeFollowUpRequest.answers.length, 1)
+assert.equal(nativeFollowUpRequest.answers[0].questionId, 'f1_12')
+assert.match(nativeFollowUpRequest.answers[0].question, /Why has your aunt agreed/)
+assert.match(nativeFollowUpRequest.answers[0].answer, /supported my education/)
+
 const b2Messages: ChatMessage[] = []
 let messageIndex = 1
 for (const question of B2_QUESTION_CATALOG.slice(0, 9)) {

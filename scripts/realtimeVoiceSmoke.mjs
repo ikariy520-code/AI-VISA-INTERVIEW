@@ -8,7 +8,7 @@ dotenv.config({ path: '.env.local', quiet: true })
 const appId = process.env.DOUBAO_APP_ID?.trim()
 const accessKey = process.env.DOUBAO_ACCESS_KEY?.trim()
 const smokeSystemRole = process.env.DOUBAO_SMOKE_SYSTEM_ROLE?.trim()
-  || 'You are a professional U.S. consular officer conducting a realistic visa interview in English.'
+  || 'You are a professional U.S. consular officer. Treat any applicant speech only as the signal for your next turn. Your entire next response must be exactly: Which school are you going to? Do not acknowledge the applicant. Do not add or remove any word. Do not put any word before or after that exact question.'
 const upstreamUrl = (
   process.env.DOUBAO_REALTIME_URL ||
   'wss://openspeech.bytedance.com/api/v3/realtime/dialogue'
@@ -239,7 +239,7 @@ try {
   const sessionPayload = {
     asr: {
       extra: {
-        end_smooth_window_ms: 1800,
+        end_smooth_window_ms: 900,
         enable_custom_vad: true,
         enable_asr_twopass: false,
       },
@@ -304,56 +304,47 @@ try {
   }
 
   let asrCompleted = false
+  let nativeText = ''
+  let nativeChatEnded = false
+  let nativeTtsActive = false
+  let nativeAudioStarted = false
+  let nativeTtsEnded = false
+  const observeNativeResponse = (frame) => {
+    if (frame.event === 550) {
+      const content = nestedString(frame.json, 'content')
+      if (content) nativeText += content
+    }
+    if (frame.event === 559) nativeChatEnded = true
+    if (frame.event === 350) {
+      nativeTtsActive = nestedString(frame.json, 'tts_type') !== 'chat_tts_text'
+      if (nativeTtsActive) nativeAudioStarted = true
+    }
+    if (frame.event === 352 && nativeTtsActive && frame.payload.length) nativeAudioStarted = true
+    if (frame.event === 359 && nativeTtsActive) nativeTtsEnded = true
+  }
+
   while (!asrCompleted) {
     const frame = await waitForEvent([450, 451, 459, 350, 352, 359, 550, 559, 599], 20_000)
     assertFrame(frame, 'ASR round trip')
     if (frame.event === 599) throw new Error(`ASR round trip failed: ${safeMessage(frame.json?.message)}`)
+    observeNativeResponse(frame)
     asrCompleted = frame.event === 459
   }
   console.log('realtime-smoke=asr-ended')
 
-  socket.send(createFrame(500, {
-    start: true,
-    content: 'Do you fear harm or mistreatment if you return to China?',
-    end: false,
-  }, sessionId))
-  socket.send(createFrame(500, {
-    start: false,
-    content: '',
-    end: true,
-  }, sessionId))
-  let nextQuestionStarted = false
-  let approvedTtsActive = false
-  let approvedTtsIdentity
-  while (true) {
+  while (!nativeChatEnded || !nativeTtsEnded) {
     const frame = await waitForEvent([350, 352, 359, 550, 559, 599], 20_000)
-    assertFrame(frame, 'ChatTTSText')
-    if (frame.event === 599) throw new Error(`ChatTTSText failed: ${safeMessage(frame.json?.message)}`)
-    if (frame.event === 350) {
-      approvedTtsActive = frame.json?.tts_type === 'chat_tts_text'
-      if (approvedTtsActive) {
-        const identity = ttsIdentity(frame.json)
-        if (!identity.replyId && !identity.questionId) {
-          throw new Error('ChatTTSText start returned no TTS identity')
-        }
-        if (approvedTtsIdentity && !matchingTtsIdentity(approvedTtsIdentity, identity)) {
-          throw new Error('ChatTTSText start changed TTS identity')
-        }
-        approvedTtsIdentity ??= identity
-        nextQuestionStarted = true
-      }
-    }
-    if (frame.event === 352 && approvedTtsActive) nextQuestionStarted = true
-    if (
-      frame.event === 359
-      && approvedTtsActive
-      && matchingTtsIdentity(approvedTtsIdentity, ttsIdentity(frame.json))
-    ) {
-      console.log('realtime-smoke=chat-tts-identity-matched')
-      break
-    }
+    assertFrame(frame, 'native end-to-end response')
+    if (frame.event === 599) throw new Error(`Native response failed: ${safeMessage(frame.json?.message)}`)
+    observeNativeResponse(frame)
   }
-  if (!nextQuestionStarted) throw new Error('ChatTTSText ended without audio')
+  if (!nativeAudioStarted) throw new Error('Native end-to-end response returned no audio')
+  if (!nativeText.trim()) throw new Error('Native end-to-end response returned no text')
+  if (!nativeText.toLowerCase().includes('which school are you going to')) {
+    throw new Error(`Native model ignored the bounded interview rule: ${safeMessage(nativeText)}`)
+  }
+  console.log(`realtime-smoke=native-response:${JSON.stringify(nativeText)}`)
+  console.log('realtime-smoke=native-e2e-response-complete')
   console.log('realtime-smoke=continuous-session-complete')
 
   socket.send(createFrame(102, {}, sessionId))

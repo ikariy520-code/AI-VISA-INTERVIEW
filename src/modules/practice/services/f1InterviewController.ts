@@ -143,7 +143,6 @@ export function advanceF1Interview(
     turnKind,
     ...(activeFollowUp ? { followUpId: activeFollowUp.id } : {}),
   }]
-  const turnId = activeFollowUp ? `follow-up:${activeFollowUp.id}` : `main:${currentState.currentQuestionId}`
   const activeText = activeFollowUp?.text ?? question.text
 
   if (quality === 'repeat-request') {
@@ -159,26 +158,6 @@ export function advanceF1Interview(
     }
   }
 
-  if (quality === 'unclear' && !currentState.repeatedTurnIds.includes(turnId)) {
-    return {
-      state: {
-        ...currentState,
-        answers,
-        repeatedQuestionIds: activeFollowUp
-          ? currentState.repeatedQuestionIds
-          : unique([...currentState.repeatedQuestionIds, currentState.currentQuestionId]),
-        repeatedTurnIds: [...currentState.repeatedTurnIds, turnId],
-      },
-      action: {
-        type: 'REPEAT_CURRENT',
-        questionId: currentState.currentQuestionId,
-        ...(activeFollowUp ? { followUpId: activeFollowUp.id } : {}),
-        text: activeText,
-        reason: 'unclear-answer',
-      },
-    }
-  }
-
   const shouldExtend = !activeFollowUp && (
     quality === 'unclear' || hasMaterialAnswerSignal(currentState.currentQuestionId, transcript)
   )
@@ -190,32 +169,26 @@ export function advanceF1Interview(
       ? Math.min(currentState.maxQuestionCount, currentState.targetQuestionCount + 1)
       : currentState.targetQuestionCount,
   }
+  const policy = resolveInterviewModePolicy(options.officerType ?? 'standard')
+
+  // A directed clarification is a real follow-up: it asks about the missing
+  // fact in the applicant's answer. Prefer it to repeating a compound main
+  // question, but do not turn a generic non-answer into an invented topic.
+  if (quality === 'unclear' && !activeFollowUp) {
+    const directedFollowUp = selectFollowUp(
+      question,
+      transcript,
+      quality,
+      completedState,
+      policy,
+      followUp => followUp.when === 'keyword' || followUp.when === 'affirmative',
+    )
+    if (directedFollowUp) return startFollowUp(completedState, question, directedFollowUp)
+  }
 
   if (!activeFollowUp) {
-    const policy = resolveInterviewModePolicy(options.officerType ?? 'standard')
     const followUp = selectFollowUp(question, transcript, quality, completedState, policy)
-    if (followUp) {
-      const followUpCount = completedState.followUpCounts[question.id] ?? 0
-      const nextState: F1InterviewState = {
-        ...completedState,
-        activeFollowUpId: followUp.id,
-        askedFollowUpIds: [...completedState.askedFollowUpIds, followUp.id],
-        followUpCounts: { ...completedState.followUpCounts, [question.id]: followUpCount + 1 },
-        totalFollowUpCount: completedState.totalFollowUpCount + 1,
-      }
-      return {
-        state: nextState,
-        action: {
-          type: 'ASK_FOLLOW_UP',
-          questionId: question.id,
-          followUpId: followUp.id,
-          text: followUp.text,
-          reason: followUp.when,
-          reviewFactor: followUp.reviewFactor,
-          officialRuleIds: followUp.officialRuleIds,
-        },
-      }
-    }
+    if (followUp) return startFollowUp(completedState, question, followUp)
   }
 
   const requiredRemaining = F1_MANDATORY_QUESTION_IDS.filter(id => !completedState.askedQuestionIds.includes(id))
@@ -305,13 +278,43 @@ function selectFollowUp(
   quality: F1AnswerRecord['quality'],
   state: F1InterviewState,
   policy: ReturnType<typeof resolveInterviewModePolicy>,
+  allow: (followUp: F1FollowUpRule) => boolean = () => true,
 ) {
   if (state.totalFollowUpCount >= policy.maxFollowUps) return undefined
   if ((state.followUpCounts[question.id] ?? 0) >= policy.maxFollowUpsPerQuestion) return undefined
   return question.followUps?.find(followUp =>
+    allow(followUp)
+    &&
     !state.askedFollowUpIds.includes(followUp.id)
     && matchesFollowUp(followUp, transcript, quality, policy.shortAnswerWordThreshold),
   )
+}
+
+function startFollowUp(
+  state: F1InterviewState,
+  question: F1QuestionDefinition,
+  followUp: F1FollowUpRule,
+): { state: F1InterviewState; action: Extract<F1ControllerAction, { type: 'ASK_FOLLOW_UP' }> } {
+  const followUpCount = state.followUpCounts[question.id] ?? 0
+  const nextState: F1InterviewState = {
+    ...state,
+    activeFollowUpId: followUp.id,
+    askedFollowUpIds: [...state.askedFollowUpIds, followUp.id],
+    followUpCounts: { ...state.followUpCounts, [question.id]: followUpCount + 1 },
+    totalFollowUpCount: state.totalFollowUpCount + 1,
+  }
+  return {
+    state: nextState,
+    action: {
+      type: 'ASK_FOLLOW_UP',
+      questionId: question.id,
+      followUpId: followUp.id,
+      text: followUp.text,
+      reason: followUp.when,
+      reviewFactor: followUp.reviewFactor,
+      officialRuleIds: followUp.officialRuleIds,
+    },
+  }
 }
 
 function matchesFollowUp(
@@ -321,6 +324,7 @@ function matchesFollowUp(
   shortAnswerWordThreshold: number,
 ) {
   const text = normalizeText(transcript)
+  if (isPromptInjection(text)) return false
   switch (followUp.when) {
     case 'affirmative':
       if (hasTargetNegation(followUp.id, text)) return false
@@ -331,7 +335,7 @@ function matchesFollowUp(
     case 'uncertain':
       if (followUp.id === 'f1_13_annual_total' && hasConcreteMoneyAmount(transcript)) return false
       if (followUp.id === 'f1_07_i20_length' && hasConcreteDuration(transcript)) return false
-      return quality === 'unclear' || /\b(not sure|maybe|approximately|about|i think|i guess|do not remember|don t remember)\b/.test(text)
+      return /\b(not sure|maybe|approximately|about|i think|i guess|do not remember|don t remember)\b/.test(text)
     case 'evidence-gap': {
       if (quality !== 'valid') return false
       const hasRiskSignal = followUp.riskKeywords?.some(keyword => containsUnnegatedKeyword(text, keyword)) ?? false
@@ -340,6 +344,7 @@ function matchesFollowUp(
       return !hasFactorEvidence && wordCount(text) < shortAnswerWordThreshold
     }
     case 'keyword':
+      if (followUp.id === 'f1_12_sponsor_identity' && hasSpecificFundingSource(text)) return false
       if (followUp.id === 'f1_17_us_trip' && explicitlyDeniesUsTravel(text)) return false
       if (followUp.id === 'f1_17_us_trip' && hasCompleteUsTripDetails(text)) return false
       return followUp.keywords?.some(keyword => containsUnnegatedKeyword(text, keyword)) ?? false
@@ -442,8 +447,43 @@ function classifyAnswer(transcript: string, question: F1QuestionDefinition): F1A
   if (isPromptInjection(text)) return 'unclear'
   if (/^(i do not know|i don t know|not sure|no idea|what|huh|sorry)$/i.test(text)) return 'unclear'
   const words = text.split(' ').filter(Boolean)
+  if (hasConciseCompleteAnswer(question.id, transcript, text)) return 'valid'
   if (question.answerShape !== 'yes-no' && words.length < 3) return 'unclear'
   return 'valid'
+}
+
+function hasConciseCompleteAnswer(questionId: F1QuestionId, raw: string, text: string) {
+  switch (questionId) {
+    case 'f1_01':
+      return wordCount(text) >= 1 && !/^(?:school|university|college|this school|that school)$/.test(text)
+    case 'f1_04':
+      return wordCount(text) >= 1 && !/^(?:major|program|degree)$/.test(text)
+    case 'f1_07':
+      return hasConcreteDuration(raw)
+    case 'f1_08':
+      return /\b(?:student|studying|employed|working|work|unemployed|gap|retired)\b/.test(text)
+    case 'f1_09':
+    case 'f1_10':
+      return wordCount(text) >= 1 && !/^(?:yes|no|maybe)$/.test(text)
+    case 'f1_11':
+      return /\b(?:return|work|career|job|home|china|continue|graduate|business)\b/.test(text)
+    case 'f1_12':
+      return hasSpecificFundingSource(text)
+    case 'f1_13':
+      return hasConcreteMoneyAmount(raw)
+    case 'f1_15':
+      return /^(?:no|none|only child|i am an only child|i do not|i don t)\b/.test(text)
+    case 'f1_17':
+      return /^(?:no|never|i have not|i haven t)\b/.test(text)
+    case 'f1_18':
+      return /\b(?:professor|teacher|adviser|advisor|school|university|relative|friend|employer|company)\b/.test(text)
+    default:
+      return false
+  }
+}
+
+function hasSpecificFundingSource(text: string) {
+  return /\b(?:parents?|mother|father|myself|self|scholarship|grant|government|employer|company|uncle|aunt|relative|friend|spouse|husband|wife)\b/.test(text)
 }
 
 function classifyFollowUpAnswer(transcript: string): F1AnswerRecord['quality'] {

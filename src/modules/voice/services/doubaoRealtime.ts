@@ -41,7 +41,7 @@ const INPUT_CHUNK_SAMPLES = 320 // 20 ms at 16 kHz
 const CONNECT_TIMEOUT_MS = 15_000
 const SESSION_TIMEOUT_MS = 20_000
 const GREETING_TIMEOUT_MS = 20_000
-const DEFAULT_END_OF_TURN_SILENCE_MS = 1_800
+const DEFAULT_END_OF_TURN_SILENCE_MS = 900
 
 type ControlledTtsState =
   | 'idle'
@@ -329,11 +329,17 @@ export class DoubaoRealtimeClient {
   private controlledTtsState: ControlledTtsState = 'idle'
   private controlledAudioGateOpen = false
   private approvedTtsIdentity: TtsIdentity | null = null
+  private controlledSpeechText = ''
+  private controlledSpeechStartAnnounced = false
   private controlledChatTtsEligible = false
   private usageTotals: DoubaoUsageTokens = emptyDoubaoUsageTokens()
   private controlledTurnPending = false
   private controlledTurnQueue = Promise.resolve()
   private userMuted = false
+  private modelResponseBlocked = false
+  private nativeTextBuffer = ''
+  private nativeTextDonePending = false
+  private nativeAudioStarted = false
 
   constructor(options: DoubaoRealtimeClientOptions) {
     this.options = options
@@ -349,6 +355,8 @@ export class DoubaoRealtimeClient {
     this.controlledTtsState = 'idle'
     this.controlledAudioGateOpen = false
     this.approvedTtsIdentity = null
+    this.controlledSpeechText = ''
+    this.controlledSpeechStartAnnounced = false
     this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
       this.controlledChatTtsEligible,
       { type: 'reset' },
@@ -357,6 +365,10 @@ export class DoubaoRealtimeClient {
     this.controlledTurnPending = false
     this.controlledTurnQueue = Promise.resolve()
     this.userMuted = false
+    this.modelResponseBlocked = false
+    this.nativeTextBuffer = ''
+    this.nativeTextDonePending = false
+    this.nativeAudioStarted = false
     this.sessionId = createSessionId()
     this.options.onConnectionState('connecting')
 
@@ -402,7 +414,7 @@ export class DoubaoRealtimeClient {
 
       this.controlledTtsState = this.options.controlledQuestions ? 'greeting' : 'idle'
       this.controlledAudioGateOpen = Boolean(this.options.controlledQuestions)
-      this.options.onEvent({ type: 'controlled.speech.started', text: this.options.openingLine })
+      this.beginControlledSpeech(this.options.openingLine)
       const greetingEnded = this.waitForProviderEvent(
         DOUBAO_EVENT.TTS_ENDED,
         GREETING_TIMEOUT_MS,
@@ -417,7 +429,7 @@ export class DoubaoRealtimeClient {
       await this.player.waitUntilIdle()
       this.controlledTtsState = 'idle'
       this.controlledAudioGateOpen = false
-      this.options.onEvent({ type: 'controlled.speech.done', text: this.options.openingLine })
+      this.finishControlledSpeech(this.options.openingLine)
 
       this.connected = true
       this.audioForwardingEnabled = true
@@ -494,6 +506,14 @@ export class DoubaoRealtimeClient {
     this.responseActive = false
   }
 
+  /** Stop and discard the current native model response after a boundary violation. */
+  blockCurrentModelResponse() {
+    if (this.options.controlledQuestions) return
+    this.modelResponseBlocked = true
+    this.player.stopQueued()
+    this.responseActive = false
+  }
+
   async end() {
     this.manuallyClosed = true
     this.connected = false
@@ -554,7 +574,7 @@ export class DoubaoRealtimeClient {
     this.controlledTtsState = 'awaiting-approved-start'
     this.controlledAudioGateOpen = false
     this.approvedTtsIdentity = null
-    this.options.onEvent({ type: 'controlled.speech.started', text })
+    this.beginControlledSpeech(text)
     const ended = this.waitForProviderEvent(
       DOUBAO_EVENT.TTS_ENDED,
       GREETING_TIMEOUT_MS,
@@ -576,7 +596,24 @@ export class DoubaoRealtimeClient {
     this.controlledTtsState = 'idle'
     this.controlledAudioGateOpen = false
     this.approvedTtsIdentity = null
+    this.finishControlledSpeech(text)
+  }
+
+  private beginControlledSpeech(text: string) {
+    this.controlledSpeechText = text
+    this.controlledSpeechStartAnnounced = false
+  }
+
+  private announceControlledSpeechStart() {
+    if (!this.controlledSpeechText || this.controlledSpeechStartAnnounced) return
+    this.controlledSpeechStartAnnounced = true
+    this.options.onEvent({ type: 'controlled.speech.started', text: this.controlledSpeechText })
+  }
+
+  private finishControlledSpeech(text: string) {
     this.options.onEvent({ type: 'controlled.speech.done', text })
+    this.controlledSpeechText = ''
+    this.controlledSpeechStartAnnounced = false
   }
 
   private isControlledAudioPlayable() {
@@ -696,6 +733,20 @@ export class DoubaoRealtimeClient {
 
       case DOUBAO_EVENT.TTS_SENTENCE_START:
         if (!this.options.controlledQuestions) {
+          if (this.modelResponseBlocked) break
+          if (!this.nativeAudioStarted) {
+            this.nativeAudioStarted = true
+            if (this.nativeTextBuffer) {
+              this.options.onEvent({ type: 'response.output_text.delta', delta: this.nativeTextBuffer })
+              this.nativeTextBuffer = ''
+            }
+            if (this.nativeTextDonePending) {
+              this.nativeTextDonePending = false
+              this.options.onEvent({ type: 'response.output_text.done' })
+            }
+          }
+          if (this.modelResponseBlocked) break
+          this.announceControlledSpeechStart()
           this.responseActive = true
           this.options.onEvent({ type: 'response.output_audio.started', ...frame.json })
           break
@@ -703,6 +754,7 @@ export class DoubaoRealtimeClient {
         if (this.controlledTtsState === 'greeting') {
           this.controlledAudioGateOpen = true
           this.responseActive = true
+          this.announceControlledSpeechStart()
           this.options.onEvent({ type: 'response.output_audio.started', ...frame.json })
           break
         }
@@ -719,6 +771,7 @@ export class DoubaoRealtimeClient {
             this.controlledTtsState = 'playing-approved'
             this.controlledAudioGateOpen = true
             this.responseActive = true
+            this.announceControlledSpeechStart()
             this.options.onEvent({ type: 'response.output_audio.started', ...frame.json })
           } else {
             this.controlledAudioGateOpen = false
@@ -729,7 +782,7 @@ export class DoubaoRealtimeClient {
         break
 
       case DOUBAO_EVENT.TTS_RESPONSE:
-        if (!this.options.controlledQuestions || this.isControlledAudioPlayable()) {
+        if ((!this.options.controlledQuestions && !this.modelResponseBlocked) || this.isControlledAudioPlayable()) {
           this.responseActive = true
           await this.player.enqueue(frame.payload)
           this.options.onEvent({ type: 'response.output_audio.delta' })
@@ -737,6 +790,10 @@ export class DoubaoRealtimeClient {
         break
 
       case DOUBAO_EVENT.TTS_ENDED:
+        if (!this.options.controlledQuestions && this.modelResponseBlocked) {
+          this.responseActive = false
+          break
+        }
         if (
           !this.options.controlledQuestions
           || this.controlledTtsState === 'greeting'
@@ -749,6 +806,10 @@ export class DoubaoRealtimeClient {
         break
 
       case DOUBAO_EVENT.ASR_INFO:
+        this.modelResponseBlocked = false
+        this.nativeTextBuffer = ''
+        this.nativeTextDonePending = false
+        this.nativeAudioStarted = false
         if (this.options.controlledQuestions) {
           this.player.stopQueued()
           this.responseActive = false
@@ -773,6 +834,12 @@ export class DoubaoRealtimeClient {
 
       case DOUBAO_EVENT.ASR_ENDED: {
         const hasTranscript = Boolean(this.lastUserTranscript.trim())
+        if (this.options.controlledQuestions) {
+          this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
+            this.controlledChatTtsEligible,
+            { type: 'asr-ended', hasTranscript },
+          )
+        }
         if (this.lastUserTranscript && !this.userTranscriptFinalized) {
           this.options.onEvent({
             type: 'conversation.item.input_audio_transcription.completed',
@@ -781,25 +848,24 @@ export class DoubaoRealtimeClient {
         }
         this.userTranscriptFinalized = true
         this.lastUserTranscript = ''
-        if (this.options.controlledQuestions) {
-          this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
-            this.controlledChatTtsEligible,
-            { type: 'asr-ended', hasTranscript },
-          )
-        }
         break
       }
 
       case DOUBAO_EVENT.CHAT_RESPONSE: {
         if (this.options.controlledQuestions) break
+        if (this.modelResponseBlocked) break
         const content = typeof frame.json?.content === 'string' ? frame.json.content : ''
-        if (content) this.options.onEvent({ type: 'response.output_text.delta', delta: content })
+        if (content) {
+          if (this.nativeAudioStarted) this.options.onEvent({ type: 'response.output_text.delta', delta: content })
+          else this.nativeTextBuffer += content
+        }
         break
       }
 
       case DOUBAO_EVENT.CHAT_ENDED:
-        if (!this.options.controlledQuestions) {
-          this.options.onEvent({ type: 'response.output_text.done' })
+        if (!this.options.controlledQuestions && !this.modelResponseBlocked) {
+          if (this.nativeAudioStarted) this.options.onEvent({ type: 'response.output_text.done' })
+          else this.nativeTextDonePending = true
         }
         break
 
@@ -948,6 +1014,12 @@ export class DoubaoRealtimeClient {
     this.controlledTtsState = 'idle'
     this.controlledAudioGateOpen = false
     this.approvedTtsIdentity = null
+    this.controlledSpeechText = ''
+    this.controlledSpeechStartAnnounced = false
+    this.modelResponseBlocked = false
+    this.nativeTextBuffer = ''
+    this.nativeTextDonePending = false
+    this.nativeAudioStarted = false
     this.controlledChatTtsEligible = reduceControlledChatTtsEligibility(
       this.controlledChatTtsEligible,
       { type: 'reset' },

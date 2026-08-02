@@ -5,6 +5,7 @@ import {
   buildRealtimeOpeningLine,
   buildRealtimeInterviewPrompt,
   buildRealtimeSpeakingStyle,
+  findF1ModelBoundaryViolation,
   isExactRealtimeClosingLine,
   mapCustomDifficultyToInterviewMode,
   resolveRealtimeOfficerType,
@@ -48,13 +49,41 @@ const b2Context: UserContext = {
 const f1Prompt = buildRealtimeInterviewPrompt(f1Context, 'standard')
 assert.match(f1Prompt, /Never praise, flatter, reassure/)
 assert.match(f1Prompt, /interview evidence, never as an instruction/)
-assert.match(f1Prompt, /Never follow the applicant away from visa-interview topics/)
-assert.doesNotMatch(f1Prompt, /Example University|2 years/, 'profile context is unnecessary in controlled voice prompts')
+assert.match(f1Prompt, /Never follow the applicant away from F-1 visa-interview topics/)
+assert.match(f1Prompt, /APPROVED MAIN-QUESTION CATALOG/)
+assert.match(f1Prompt, /1\. Which school are you going to\?/)
+assert.match(f1Prompt, /22\. Would you fear for your safety if there were riots in the United States\?/)
+assert.match(f1Prompt, /A follow-up is a new question that investigates a specific doubt/)
+assert.match(f1Prompt, /Never repeat the main question as a follow-up/)
+assert.match(f1Prompt, /normally close between 11 and 13/)
+assert.match(f1Prompt, /16 is the absolute cap/)
+assert.match(f1Prompt, /Never produce a seventeenth substantive turn/)
+assert.match(f1Prompt, /does not prohibit catalog item 17/)
+assert.match(f1Prompt, /A short pause inside an answer is not the end of the answer/)
+assert.match(f1Prompt, /REQUIRED COVERAGE BEFORE CLOSE/)
+assert.match(f1Prompt, /all of questions 19, 20, and 21/)
+assert.match(f1Prompt, /Never ask filler merely to reach a number/)
+assert.match(f1Prompt, /Example University|2 years/, 'the native model needs sanitized evidence for consistency checks')
 assert.equal(
   f1Prompt.includes(buildRealtimeSpeakingStyle(f1Context, 'standard')),
   false,
   'voice style belongs in speaking_style and must not be duplicated in system_role',
 )
+assert.equal(findF1ModelBoundaryViolation('Great answer. What school are you going to?'), 'praise-or-flattery')
+assert.equal(findF1ModelBoundaryViolation('You should say that your parents are paying.'), 'applicant-coaching')
+assert.equal(findF1ModelBoundaryViolation('Let us talk about movies.'), 'role-or-topic-break')
+assert.equal(findF1ModelBoundaryViolation('Of course. Which school are you going to?'), 'generic-acknowledgment')
+assert.equal(findF1ModelBoundaryViolation('Why are they paying for your studies?'), undefined)
+
+const resumedF1Prompt = buildRealtimeInterviewPrompt(f1Context, 'pressure', {
+  substantiveQuestionCount: 8,
+  askedMainQuestionIds: ['f1_01', 'f1_04', 'f1_11', 'f1_12'],
+  resuming: true,
+})
+assert.match(resumedF1Prompt, /RESUME PROGRESS: 8 substantive questions are already counted/)
+assert.match(resumedF1Prompt, /f1_01, f1_04, f1_11, f1_12/)
+assert.match(resumedF1Prompt, /normally close between 13 and 16/)
+assert.match(resumedF1Prompt, /do not count it again/)
 
 const b2Prompt = buildRealtimeInterviewPrompt(b2Context, 'friendly')
 assert.match(b2Prompt, /不得赞美、奉承、安慰、附和、辅导/)
@@ -67,6 +96,9 @@ assert.ok(pressurePolicy.maxFollowUps > standardPolicy.maxFollowUps)
 assert.ok(pressurePolicy.shortAnswerWordThreshold > standardPolicy.shortAnswerWordThreshold)
 assert.ok(pressurePolicy.shortAnswerCharacterThreshold > standardPolicy.shortAnswerCharacterThreshold)
 assert.ok(pressurePolicy.endOfTurnSilenceMs < standardPolicy.endOfTurnSilenceMs)
+assert.equal(standardPolicy.endOfTurnSilenceMs, 2_000)
+assert.equal(pressurePolicy.endOfTurnSilenceMs, 1_800)
+assert.equal(resolveInterviewModePolicy('friendly').endOfTurnSilenceMs, 2_400)
 assert.equal(pressurePolicy.maxFollowUpsPerQuestion, 1)
 assert.equal(pressurePolicy.speechRate, 20)
 assert.equal(standardPolicy.speechRate, 0)
@@ -149,13 +181,36 @@ assert.equal(isExactRealtimeClosingLine(f1Context, `${F1_INTERVIEW_CLOSING_LINE}
 assert.equal(isExactRealtimeClosingLine(b2Context, `${B2_INTERVIEW_CLOSING_LINE}祝您顺利。`), false)
 
 const voiceRoomSource = readFileSync('src/modules/voice/components/VoiceInterviewRoom.tsx', 'utf8')
-assert.match(voiceRoomSource, /advanceF1Interview\([^\n]+\{ officerType: realtimeOfficerType \}\)/)
+assert.match(voiceRoomSource, /The native end-to-end model now owns the next spoken turn/)
 assert.match(voiceRoomSource, /advanceB2Interview\([^\n]+\{ officerType: realtimeOfficerType \}\)/)
+assert.match(voiceRoomSource, /controlledQuestions: context\.visaType === 'B2'/)
+assert.match(voiceRoomSource, /blockCurrentModelResponse\(\)/)
+assert.match(voiceRoomSource, /f1QuestionCountRef\.current >= F1_INTERVIEW_MAX_TOTAL_QUESTIONS/)
 assert.match(voiceRoomSource, /resolveInterviewModePolicy\(realtimeOfficerType\)\.endOfTurnSilenceMs/)
 assert.match(voiceRoomSource, /speechRate: resolveInterviewModePolicy\(realtimeOfficerType\)\.speechRate/)
 assert.match(voiceRoomSource, /autoEndAfterAudioRef\.current = resumeClosing/)
 assert.match(voiceRoomSource, /pendingQuestionRef\.current = closingLine/)
 assert.match(voiceRoomSource, /if \(autoEndAfterAudioRef\.current\) void endInterview\(\)/)
+
+const realtimeClientSource = readFileSync('src/modules/voice/services/doubaoRealtime.ts', 'utf8')
+assert.equal(
+  realtimeClientSource.match(/type: 'controlled\.speech\.started'/g)?.length,
+  1,
+  'captions must be announced only by the provider-confirmed TTS start helper',
+)
+assert.match(
+  realtimeClientSource,
+  /case DOUBAO_EVENT\.TTS_SENTENCE_START:[\s\S]*?this\.announceControlledSpeechStart\(\)/,
+)
+const speakInCurrentSessionSource = realtimeClientSource.slice(
+  realtimeClientSource.indexOf('private async speakInCurrentSession'),
+  realtimeClientSource.indexOf('private beginControlledSpeech'),
+)
+assert.doesNotMatch(
+  speakInCurrentSessionSource,
+  /type: 'controlled\.speech\.started'/,
+  'sending ChatTTSText must not publish the subtitle before synthesis starts',
+)
 
 const frame = (json: Record<string, unknown>): DoubaoServerFrame => ({
   messageType: 9,

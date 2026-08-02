@@ -431,6 +431,7 @@ function buildGroupedReportAnswers(
   identifyTurn: (questionText: string) => IdentifiedReportTurn | undefined,
   followUpLabel: string,
   unknownQuestionError: string,
+  allowNativeFollowUps = false,
 ): InterviewReportAnswer[] {
   const groups = new Map<string, {
     questionId: string
@@ -438,18 +439,20 @@ function buildGroupedReportAnswers(
     answers: string[]
     timestamp: string
   }>()
+  let activeQuestionId = ''
 
   for (const pair of extractQAPairs(messages)) {
     const turn = identifyTurn(pair.question)
-    if (!turn) throw new Error(unknownQuestionError)
-    const questionId = turn.question.id
+    if (!turn && (!allowNativeFollowUps || !activeQuestionId)) throw new Error(unknownQuestionError)
+    const questionId = turn?.question.id ?? activeQuestionId
+    if (turn) activeQuestionId = questionId
     const group = groups.get(questionId) ?? {
       questionId,
-      questions: [turn.question.text],
+      questions: [turn?.question.text ?? pair.question.trim()],
       answers: [],
       timestamp: pair.timestamp,
     }
-    const spokenQuestion = turn.followUp?.text
+    const spokenQuestion = turn?.followUp?.text ?? (!turn ? pair.question.trim() : undefined)
     if (spokenQuestion && !group.questions.includes(spokenQuestion)) group.questions.push(spokenQuestion)
     group.answers.push(pair.answer.trim())
     groups.set(questionId, group)
@@ -473,6 +476,7 @@ export function buildF1ReportRequest(record: InterviewRecord) {
     identifyF1InterviewTurn,
     'Follow-up: ',
     'F1_REPORT_UNKNOWN_QUESTION',
+    true,
   )
   return sanitizeReportRequest({
     visaType: 'F1',
