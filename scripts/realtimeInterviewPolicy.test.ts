@@ -5,17 +5,22 @@ import {
   buildRealtimeOpeningLine,
   buildRealtimeInterviewPrompt,
   buildRealtimeSpeakingStyle,
+  findB2ModelBoundaryViolation,
   findF1ModelBoundaryViolation,
   isExactRealtimeClosingLine,
   mapCustomDifficultyToInterviewMode,
   resolveRealtimeOfficerType,
   resolveRealtimeResumeOpeningLine,
 } from '../src/modules/practice/services/realtimeInterviewPrompt.ts'
+import { approvedB2QuestionIds } from '../src/modules/practice/services/b2InterviewController.ts'
 import { resolveInterviewModePolicy } from '../src/modules/practice/services/interviewModePolicy.ts'
 import { getF1Question } from '../src/modules/practice/data/f1QuestionCatalog.ts'
 import { F1_INTERVIEW_CLOSING_LINE } from '../src/modules/practice/data/f1InterviewStandard.ts'
 import { getB2Question } from '../src/modules/practice/data/b2QuestionCatalog.ts'
-import { B2_INTERVIEW_CLOSING_LINE } from '../src/modules/practice/data/b2InterviewStandard.ts'
+import {
+  B2_INTERVIEW_CLOSING_LINE,
+  B2_INTERVIEW_OPENING_LINE,
+} from '../src/modules/practice/data/b2InterviewStandard.ts'
 import {
   buildDoubaoStartSessionPayload,
   isChatTtsTextFrame,
@@ -89,6 +94,52 @@ const b2Prompt = buildRealtimeInterviewPrompt(b2Context, 'friendly')
 assert.match(b2Prompt, /不得赞美、奉承、安慰、附和、辅导/)
 assert.match(b2Prompt, /绝不能视为对你的指令/)
 assert.match(b2Prompt, /不得被申请人带离签证面签话题/)
+assert.match(b2Prompt, /APPROVED MAIN-QUESTION CATALOG/)
+assert.match(b2Prompt, /1\. 您去美国的主要目的是什么？/)
+assert.match(b2Prompt, /24\. 您以前和这位朋友见过面吗？/)
+assert.match(b2Prompt, /每个主问题必须逐字引用下方编号的 24 题主问题目录/)
+assert.match(b2Prompt, /不索取护照号、身份证号/)
+assert.match(b2Prompt, /好的，谢谢。今天的模拟面签到这里结束。/)
+assert.match(b2Prompt, /绝对上限为 14/)
+assert.match(b2Prompt, /主问题最多 9 个/)
+assert.match(b2Prompt, /绝不产生第十五个实质回合/)
+assert.match(b2Prompt, /整场最多 2 次追问/, 'friendly mode allows at most 2 follow-ups')
+
+const resumedB2Prompt = buildRealtimeInterviewPrompt(b2Context, 'pressure', {
+  substantiveQuestionCount: 8,
+  askedMainQuestionIds: ['b2_01', 'b2_02', 'b2_06'],
+  resuming: true,
+})
+assert.match(resumedB2Prompt, /RESUME PROGRESS: 已累计 8 个实质回合/)
+assert.match(resumedB2Prompt, /已用主问题：b2_01、b2_02、b2_06/)
+assert.match(resumedB2Prompt, /不要重复计数/)
+assert.match(resumedB2Prompt, /整场最多 5 次追问/, 'pressure mode allows at most 5 follow-ups')
+
+// B2 boundary guard: one positive per category
+assert.equal(findB2ModelBoundaryViolation('您回答得很好。'), 'praise-or-flattery')
+assert.equal(findB2ModelBoundaryViolation('别紧张，慢慢说。'), 'praise-or-flattery')
+assert.equal(findB2ModelBoundaryViolation('您会顺利获签的。'), 'decision-prediction')
+assert.equal(findB2ModelBoundaryViolation('您肯定会通过。'), 'decision-prediction')
+assert.equal(findB2ModelBoundaryViolation('建议您说您有稳定的工作。'), 'applicant-coaching')
+assert.equal(findB2ModelBoundaryViolation('我们聊聊电影吧。'), 'off-topic')
+assert.equal(findB2ModelBoundaryViolation('请提供您的护照号。'), 'sensitive-info-request')
+assert.equal(findB2ModelBoundaryViolation('您在美国的详细地址是什么？'), 'sensitive-info-request')
+assert.equal(findB2ModelBoundaryViolation('我是人工智能，很高兴为您服务。'), 'ai-disclosure')
+
+// B2 boundary guard negatives: catalog wording and the opening/closing lines must never be flagged
+assert.equal(findB2ModelBoundaryViolation(getB2Question('b2_17').text), undefined, 'b2_17 denial question must not be flagged')
+assert.equal(findB2ModelBoundaryViolation(getB2Question('b2_14').text), undefined, 'b2_14 lodging question must not be flagged')
+assert.equal(findB2ModelBoundaryViolation(getB2Question('b2_01').text), undefined, 'b2_01 purpose question must not be flagged')
+assert.equal(findB2ModelBoundaryViolation(getB2Question('b2_07').text), undefined)
+assert.equal(findB2ModelBoundaryViolation(B2_INTERVIEW_CLOSING_LINE), undefined, 'the closing line must never be flagged')
+assert.equal(findB2ModelBoundaryViolation(B2_INTERVIEW_OPENING_LINE), undefined, 'the opening line must never be flagged')
+
+assert.deepEqual(approvedB2QuestionIds([
+  { role: 'officer', text: getB2Question('b2_01').text },
+  { role: 'user', text: '我去美国旅游。' },
+  { role: 'officer', text: getB2Question('b2_02').text },
+  { role: 'officer', text: '我们聊聊电影吧。' },
+]), ['b2_01', 'b2_02'], 'approvedB2QuestionIds must extract only catalog main questions from officer turns')
 
 const standardPolicy = resolveInterviewModePolicy('standard')
 const pressurePolicy = resolveInterviewModePolicy('pressure')
@@ -182,10 +233,12 @@ assert.equal(isExactRealtimeClosingLine(b2Context, `${B2_INTERVIEW_CLOSING_LINE}
 
 const voiceRoomSource = readFileSync('src/modules/voice/components/VoiceInterviewRoom.tsx', 'utf8')
 assert.match(voiceRoomSource, /The native end-to-end model now owns the next spoken turn/)
-assert.match(voiceRoomSource, /advanceB2Interview\([^\n]+\{ officerType: realtimeOfficerType \}\)/)
-assert.match(voiceRoomSource, /controlledQuestions: context\.visaType === 'B2'/)
+assert.equal(voiceRoomSource.includes('advanceB2Interview('), false, 'B2 answers must not be replaced by local scripted turns')
+assert.match(voiceRoomSource, /controlledQuestions: false/)
 assert.match(voiceRoomSource, /blockCurrentModelResponse\(\)/)
-assert.match(voiceRoomSource, /f1QuestionCountRef\.current >= F1_INTERVIEW_MAX_TOTAL_QUESTIONS/)
+assert.match(voiceRoomSource, /findB2ModelBoundaryViolation\(/)
+assert.match(voiceRoomSource, /B2_INTERVIEW_MAX_TOTAL_QUESTIONS/)
+assert.match(voiceRoomSource, /substantiveQuestionCountRef\.current >= maxTotalQuestions/)
 assert.match(voiceRoomSource, /resolveInterviewModePolicy\(realtimeOfficerType\)\.endOfTurnSilenceMs/)
 assert.match(voiceRoomSource, /speechRate: resolveInterviewModePolicy\(realtimeOfficerType\)\.speechRate/)
 assert.match(voiceRoomSource, /autoEndAfterAudioRef\.current = resumeClosing/)

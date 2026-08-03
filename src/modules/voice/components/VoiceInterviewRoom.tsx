@@ -25,6 +25,7 @@ import {
   buildRealtimeOpeningLine,
   buildRealtimeInterviewPrompt,
   buildRealtimeSpeakingStyle,
+  findB2ModelBoundaryViolation,
   findF1ModelBoundaryViolation,
   isExactRealtimeClosingLine,
   resolveRealtimeOfficerType,
@@ -41,10 +42,11 @@ import {
 import {
   B2_INTERVIEW_CLOSING_LINE,
   B2_INTERVIEW_HARD_LIMIT_SECONDS,
+  B2_INTERVIEW_MAX_TOTAL_QUESTIONS,
   isB2InterviewClosingLine,
 } from '../../practice/data/b2InterviewStandard'
 import {
-  advanceB2Interview,
+  approvedB2QuestionIds,
   createB2InterviewState,
   isApprovedB2OfficerText,
   type B2InterviewState,
@@ -94,12 +96,24 @@ const formatElapsed = (seconds: number) => {
 
 const normalizeOfficerTurn = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 
-const summarizeF1QuestionTurns = (messages: readonly ChatMessage[]) => {
+const normalizeB2OfficerTurn = (text: string) => text
+  .toLowerCase()
+  .replace(/[\s，。！？、；：,.!?;:""''‘’()（）\-_…～~·]+/g, '')
+  .trim()
+
+const normalizeQuestionTurn = (visaType: UserContext['visaType'], text: string) =>
+  visaType === 'B2' ? normalizeB2OfficerTurn(text) : normalizeOfficerTurn(text)
+
+const summarizeQuestionTurns = (
+  messages: readonly ChatMessage[],
+  isClosingLine: (text: string) => boolean,
+  normalize: (text: string) => string,
+) => {
   let count = 0
   let previousOfficerTurn = ''
   for (const message of messages) {
-    if (message.role !== 'officer' || isF1InterviewClosingLine(message.text)) continue
-    const turn = normalizeOfficerTurn(message.text)
+    if (message.role !== 'officer' || isClosingLine(message.text)) continue
+    const turn = normalize(message.text)
     if (!turn || turn === previousOfficerTurn) continue
     count += 1
     previousOfficerTurn = turn
@@ -138,11 +152,14 @@ export default function VoiceInterviewRoom({
   const activeOfficerMessageRef = useRef<string | null>(null)
   const currentUserTextRef = useRef('')
   const currentOfficerTextRef = useRef('')
-  const recoveredF1QuestionTurns = summarizeF1QuestionTurns(initialProgress?.messages ?? [])
-  const f1QuestionCountRef = useRef(context.visaType === 'F1' ? recoveredF1QuestionTurns.count : 0)
-  const lastCountedF1QuestionRef = useRef(
-    context.visaType === 'F1' ? recoveredF1QuestionTurns.previousOfficerTurn : '',
+  const isRealtimeVisa = context.visaType === 'F1' || context.visaType === 'B2'
+  const recoveredQuestionTurns = summarizeQuestionTurns(
+    initialProgress?.messages ?? [],
+    context.visaType === 'B2' ? isB2InterviewClosingLine : isF1InterviewClosingLine,
+    text => normalizeQuestionTurn(context.visaType, text),
   )
+  const substantiveQuestionCountRef = useRef(isRealtimeVisa ? recoveredQuestionTurns.count : 0)
+  const lastCountedQuestionRef = useRef(isRealtimeVisa ? recoveredQuestionTurns.previousOfficerTurn : '')
   const connectedRef = useRef(false)
   const attemptStartedRef = useRef(Boolean(
     (initialProgress?.messages.length ?? 0) > 0 || (initialProgress?.elapsedSeconds ?? 0) > 0,
@@ -286,28 +303,9 @@ export default function VoiceInterviewRoom({
           break
         }
         setPhase('thinking')
-        if (context.visaType === 'F1') {
+        if (context.visaType === 'F1' || context.visaType === 'B2') {
           // The native end-to-end model now owns the next spoken turn. The app
           // supplies the role, catalog, review factors, and fail-safe only.
-        } else if (context.visaType === 'B2' && text && b2StateRef.current) {
-          const result = advanceB2Interview(b2StateRef.current, text, context, { officerType: realtimeOfficerType })
-          b2StateRef.current = result.state
-          pendingQuestionRef.current = result.action.text
-          if (!isApprovedB2OfficerText(result.action.text)) {
-            setErrorMessage('受控面签阻止了未批准的问题。')
-            setPhase('error')
-            break
-          }
-          if (result.action.type === 'CLOSE') {
-            autoEndAfterAudioRef.current = true
-            mutedRef.current = true
-            setIsMuted(true)
-            clientRef.current?.setMuted(true)
-          }
-          void clientRef.current?.speakControlled(result.action.text).catch(error => {
-            setErrorMessage(error instanceof Error ? error.message : '无法播放下一道受控问题。')
-            setPhase('error')
-          })
         }
         break
       }
@@ -329,11 +327,12 @@ export default function VoiceInterviewRoom({
         if (lastMessage?.role !== 'officer' || lastMessage.text.trim() !== text.trim()) {
           const id = nextMessageId()
           upsertMessage(id, 'officer', text, false)
-          if (context.visaType === 'F1' && !isF1InterviewClosingLine(text)) {
-            const normalized = normalizeOfficerTurn(text)
-            if (normalized && normalized !== lastCountedF1QuestionRef.current) {
-              f1QuestionCountRef.current += 1
-              lastCountedF1QuestionRef.current = normalized
+          const isClosing = context.visaType === 'B2' ? isB2InterviewClosingLine(text) : isF1InterviewClosingLine(text)
+          if ((context.visaType === 'F1' || context.visaType === 'B2') && !isClosing) {
+            const normalized = normalizeQuestionTurn(context.visaType, text)
+            if (normalized && normalized !== lastCountedQuestionRef.current) {
+              substantiveQuestionCountRef.current += 1
+              lastCountedQuestionRef.current = normalized
             }
           }
         }
@@ -375,6 +374,21 @@ export default function VoiceInterviewRoom({
             setPhase('error')
             break
           }
+        } else if (context.visaType === 'B2') {
+          const violation = findB2ModelBoundaryViolation(currentOfficerTextRef.current + delta)
+          if (violation) {
+            clientRef.current?.blockCurrentModelResponse()
+            const activeId = activeOfficerMessageRef.current
+            if (activeId) setMessages(current => current.filter(message => message.id !== activeId))
+            activeOfficerMessageRef.current = null
+            currentOfficerTextRef.current = ''
+            mutedRef.current = true
+            setIsMuted(true)
+            clientRef.current?.setMuted(true)
+            setErrorMessage(`实时语音面签官越过了 B-2 面签边界(${violation})，已停止回答。`)
+            setPhase('error')
+            break
+          }
         }
         const id = activeOfficerMessageRef.current ?? nextMessageId()
         activeOfficerMessageRef.current = id
@@ -387,9 +401,15 @@ export default function VoiceInterviewRoom({
       case 'response.output_text.done': {
         const activeOfficerId = activeOfficerMessageRef.current
         const completedText = finishOfficerMessage(realtimeEventText(event))
-        if (context.visaType === 'F1' && completedText) {
-          const closing = isF1InterviewClosingLine(completedText)
-          if (f1QuestionCountRef.current >= F1_INTERVIEW_MAX_TOTAL_QUESTIONS && !closing) {
+        const nativeVisa = context.visaType === 'F1' || context.visaType === 'B2'
+        const closing = context.visaType === 'B2'
+          ? isB2InterviewClosingLine(completedText)
+          : isF1InterviewClosingLine(completedText)
+        if (nativeVisa && completedText) {
+          const maxTotalQuestions = context.visaType === 'B2'
+            ? B2_INTERVIEW_MAX_TOTAL_QUESTIONS
+            : F1_INTERVIEW_MAX_TOTAL_QUESTIONS
+          if (substantiveQuestionCountRef.current >= maxTotalQuestions && !closing) {
             clientRef.current?.blockCurrentModelResponse()
             if (activeOfficerId) {
               const retained = messagesRef.current.filter(message => message.id !== activeOfficerId)
@@ -401,19 +421,14 @@ export default function VoiceInterviewRoom({
           }
           pendingQuestionRef.current = completedText
           if (!closing) {
-            const normalized = normalizeOfficerTurn(completedText)
-            if (normalized && normalized !== lastCountedF1QuestionRef.current) {
-              f1QuestionCountRef.current += 1
-              lastCountedF1QuestionRef.current = normalized
+            const normalized = normalizeQuestionTurn(context.visaType, completedText)
+            if (normalized && normalized !== lastCountedQuestionRef.current) {
+              substantiveQuestionCountRef.current += 1
+              lastCountedQuestionRef.current = normalized
             }
           }
         }
-        if (context.visaType === 'F1' && isF1InterviewClosingLine(completedText)) {
-          autoEndAfterAudioRef.current = true
-          mutedRef.current = true
-          setIsMuted(true)
-          clientRef.current?.setMuted(true)
-        } else if (context.visaType === 'B2' && isB2InterviewClosingLine(completedText)) {
+        if (nativeVisa && closing) {
           autoEndAfterAudioRef.current = true
           mutedRef.current = true
           setIsMuted(true)
@@ -423,19 +438,19 @@ export default function VoiceInterviewRoom({
       }
 
       case 'response.output_audio.started':
-        if (context.visaType === 'F1') awaitingAnswerRef.current = false
+        if (context.visaType === 'F1' || context.visaType === 'B2') awaitingAnswerRef.current = false
         setPhase('speaking')
         break
 
       case 'response.output_audio.done':
-        if (context.visaType === 'F1') awaitingAnswerRef.current = true
+        if (context.visaType === 'F1' || context.visaType === 'B2') awaitingAnswerRef.current = true
         returnToListening()
         if (autoEndAfterAudioRef.current) void endInterview()
         break
 
       case 'response.done':
         finishOfficerMessage()
-        if (context.visaType === 'F1') awaitingAnswerRef.current = true
+        if (context.visaType === 'F1' || context.visaType === 'B2') awaitingAnswerRef.current = true
         returnToListening()
         break
 
@@ -483,8 +498,8 @@ export default function VoiceInterviewRoom({
         ? createB2InterviewState(context, { officerType: realtimeOfficerType })
         : null
       pendingQuestionRef.current = buildRealtimeOpeningLine(context)
-      f1QuestionCountRef.current = 0
-      lastCountedF1QuestionRef.current = ''
+      substantiveQuestionCountRef.current = 0
+      lastCountedQuestionRef.current = ''
       autoEndAfterAudioRef.current = false
     } else {
       const completedMessages = messagesRef.current.filter(message => !message.streaming && message.text.trim())
@@ -514,10 +529,12 @@ export default function VoiceInterviewRoom({
       instructions: buildRealtimeInterviewPrompt(
         context,
         realtimeOfficerType,
-        context.visaType === 'F1'
+        context.visaType === 'F1' || context.visaType === 'B2'
           ? {
-              substantiveQuestionCount: f1QuestionCountRef.current,
-              askedMainQuestionIds: approvedF1QuestionIds(messagesRef.current),
+              substantiveQuestionCount: substantiveQuestionCountRef.current,
+              askedMainQuestionIds: context.visaType === 'B2'
+                ? approvedB2QuestionIds(messagesRef.current)
+                : approvedF1QuestionIds(messagesRef.current),
               resuming: resumable,
             }
           : undefined,
@@ -528,10 +545,8 @@ export default function VoiceInterviewRoom({
       speakingStyle: buildRealtimeSpeakingStyle(context, realtimeOfficerType),
       endOfTurnSilenceMs: resolveInterviewModePolicy(realtimeOfficerType).endOfTurnSilenceMs,
       speechRate: resolveInterviewModePolicy(realtimeOfficerType).speechRate,
-      controlledQuestions: context.visaType === 'B2',
-      validateControlledText: context.visaType === 'B2'
-          ? isApprovedB2OfficerText
-          : undefined,
+      controlledQuestions: false,
+      validateControlledText: undefined,
       onEvent: handleRealtimeEvent,
       onInputLevel: setMicLevel,
       onConnectionState: (state) => {
@@ -638,8 +653,7 @@ export default function VoiceInterviewRoom({
         clientRef.current?.setMuted(true)
         const closingLine = context.visaType === 'F1' ? F1_INTERVIEW_CLOSING_LINE : B2_INTERVIEW_CLOSING_LINE
         pendingQuestionRef.current = closingLine
-        if (context.visaType === 'F1') void endInterview()
-        else void clientRef.current?.speakControlled(closingLine).catch(() => endInterview())
+        void endInterview()
       }
     }, 1000)
     return () => window.clearInterval(timer)
@@ -739,9 +753,9 @@ export default function VoiceInterviewRoom({
               </div>
               <p className="mt-4 text-[15px] font-semibold text-[#1d1d1f]">实时语音面签</p>
               <p className="mt-2 text-[12px] leading-5 text-[#6e6e73]">
-                {context.visaType === 'F1'
-                  ? '端到端语音模型负责实时识别和自然发音；下一题由本地受控题库根据你的背景与回答选择。请听完问题后再回答。'
-                  : '端到端语音模型负责实时识别和中文发音；下一题由本地受控题库根据你的背景与回答选择，避免跑题或自由聊天。'}
+                {context.visaType === 'B2'
+                  ? '端到端语音模型负责实时识别和中文发音，并根据你的背景与回答主导提问节奏；本地只做安全边界校验。请听完问题后再回答。'
+                  : '端到端语音模型负责实时识别和自然发音，并根据你的背景与回答主导提问节奏；本地只做安全边界校验。请听完问题后再回答。'}
               </p>
             </div>
           )}

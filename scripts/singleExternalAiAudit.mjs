@@ -134,7 +134,11 @@ assert.ok(voiceInterviewRoom.includes('lastCaptionToggleRef'), 'caption toggle b
 assert.ok(voiceInterviewRoom.includes('window.requestAnimationFrame'), 'caption scrolling must be frame-batched')
 assert.equal(voiceInterviewRoom.includes('AnimatePresence mode="wait"'), false, 'caption panels must not queue exit/enter animations')
 assert.equal(voiceInterviewRoom.includes("scrollIntoView({ behavior: 'smooth'"), false, 'streaming captions must not stack smooth-scroll animations')
-assert.ok(voiceInterviewRoom.includes("controlledQuestions: context.visaType === 'B2'"), 'F1 must use native end-to-end model turns')
+assert.equal(voiceInterviewRoom.includes("controlledQuestions: context.visaType === 'B2'"), false, 'B2 must use native end-to-end model turns like F1')
+assert.ok(voiceInterviewRoom.includes('controlledQuestions: false'), 'both realtime visas must use native end-to-end model turns')
+assert.equal(voiceInterviewRoom.includes('advanceB2Interview('), false, 'B2 answers must not be replaced by local scripted turns')
+assert.ok(voiceInterviewRoom.includes('findB2ModelBoundaryViolation('), 'the B2 native fail-safe boundary guard is missing')
+assert.ok(voiceInterviewRoom.includes('B2_INTERVIEW_MAX_TOTAL_QUESTIONS'), 'the B2 substantive-turn cap is missing')
 assert.equal(voiceInterviewRoom.includes('advanceF1Interview(f1StateRef.current'), false, 'F1 answers must not be replaced by local scripted turns')
 
 const realtimeClient = readFileSync(join(root, 'src/modules/voice/services/doubaoRealtime.ts'), 'utf8')

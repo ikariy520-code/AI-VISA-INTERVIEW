@@ -92,4 +92,28 @@ assert.equal(new Set(b2Request.answers.map(answer => answer.questionId)).size, 9
 assert.equal(b2Request.answers.filter(answer => answer.question.includes('追问：')).length, 5)
 assert.equal(b2Request.answers.filter(answer => answer.answer.includes('补充回答')).length, 5)
 
+// The native end-to-end B-2 model asks follow-ups of its own that are not in
+// the catalog. They must group under the preceding main question instead of
+// failing the whole report.
+const b2FundingQuestion = B2_QUESTION_CATALOG.find(question => question.id === 'b2_06')!
+const b2NativeFollowUpRecord: InterviewRecord = {
+  ...f1Record,
+  id: 'b2-native-follow-up-grouping',
+  visaType: 'B2',
+  userContext: { ...baseContext, visaType: 'B2' },
+  messages: [
+    officer(b2FundingQuestion.text, 1),
+    user('这次旅行的费用由我的父母承担。', 2),
+    officer('您的父母在哪个城市工作？', 3),
+    user('他们在上海工作。', 4),
+  ],
+}
+const b2NativeFollowUpRequest = buildB2ReportRequest(b2NativeFollowUpRecord)
+assert.ok(b2NativeFollowUpRequest)
+assert.equal(b2NativeFollowUpRequest.answers.length, 1)
+assert.equal(b2NativeFollowUpRequest.answers[0].questionId, 'b2_06')
+assert.match(b2NativeFollowUpRequest.answers[0].question, /追问：/)
+assert.match(b2NativeFollowUpRequest.answers[0].answer, /父母承担/)
+assert.match(b2NativeFollowUpRequest.answers[0].answer, /上海工作/)
+
 console.log('report-turn-grouping=passed')

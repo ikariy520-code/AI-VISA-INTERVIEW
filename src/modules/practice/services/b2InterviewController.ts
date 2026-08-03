@@ -213,6 +213,16 @@ export function isApprovedB2OfficerText(text: string) {
     )
 }
 
+export function approvedB2QuestionIds(messages: readonly { role: string; text: string }[]) {
+  return messages
+    .filter(message => message.role === 'officer')
+    .flatMap(message => {
+      const normalized = normalizeText(message.text)
+      const match = B2_QUESTION_CATALOG.find(question => normalized.includes(normalizeText(question.text)))
+      return match ? [match.id] : []
+    })
+}
+
 function normalizeState(state: B2InterviewState): B2InterviewState {
   const question = getB2Question(state.currentQuestionId)
   const activeFollowUpId = findFollowUp(question, state.activeFollowUpId)?.id

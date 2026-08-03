@@ -492,6 +492,7 @@ export function buildB2ReportRequest(record: InterviewRecord): B2ReportRequest |
     identifyB2InterviewTurn,
     '追问：',
     'B2_REPORT_UNKNOWN_QUESTION',
+    true,
   )
   return sanitizeB2ReportRequest({
     visaType: 'B2',
