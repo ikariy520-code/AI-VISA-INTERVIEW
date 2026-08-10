@@ -162,7 +162,7 @@ function repairInvalidReportSections(draft, input, issues) {
     !draft
     || typeof draft !== 'object'
     || Array.isArray(draft)
-    || issues.includes('FORBIDDEN_CLAIM')
+    || issues.some(issue => issue.startsWith('FORBIDDEN_'))
     || missingMostAnalysis
   ) {
     return { draft: fallback, evidenceOnly: true }

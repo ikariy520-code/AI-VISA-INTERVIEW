@@ -286,6 +286,12 @@ assert.ok(validateServerReport(materialConcern, input, {
 const accusatoryReport = structuredClone(validReport)
 accusatoryReport.dimensions[0].reasoning = '申请人在撒谎。'
 assert.equal(validateF1StructuredReport(accusatoryReport, input), null, 'the report must not turn a conflict into an accusation')
+const accusationIssues: string[] = []
+assert.equal(validateServerReport(accusatoryReport, input, {
+  allowMaterializedEvidence: true,
+  onIssue: (issue: string) => { accusationIssues.push(issue) },
+}), null)
+assert.ok(accusationIssues.includes('FORBIDDEN_ACCUSATION'), 'the repair model needs a specific forbidden-language category')
 
 const demeanorReport = structuredClone(validReport)
 demeanorReport.questionReviews[0].improvements = ['眼神回避说明回答不可信。']
@@ -324,6 +330,7 @@ const repairMessages = buildServerReportMessages(input, {
 assert.equal(repairMessages.length, 4)
 assert.equal(repairMessages[2].role, 'assistant')
 assert.match(repairMessages[3].content, /Preserve every section and dimension not implicated/)
+assert.match(repairMessages[3].content, /FORBIDDEN_ACCUSATION means remove every fraud/)
 assert.match(repairMessages[3].content, /DIMENSION_EVIDENCE_MISSING:application_consistency/)
 assert.match(repairMessages[3].content, /QUESTION_REVIEW_EVIDENCE:f1_01/)
 

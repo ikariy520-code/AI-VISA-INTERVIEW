@@ -135,8 +135,8 @@ export function buildF1EvidenceCatalog(input) {
   ]
 }
 
-function hasForbiddenClaim(value) {
-  if (!isRecord(value)) return false
+function forbiddenClaimIssue(value) {
+  if (!isRecord(value)) return ''
   const generatedEvaluation = {
     readiness: value.readiness,
     headline: value.headline,
@@ -159,7 +159,13 @@ function hasForbiddenClaim(value) {
     actionPlan: value.actionPlan,
     disclaimer: value.disclaimer,
   }
-  return /(获签概率|过签率|有利于过签|不利于过签|一定(?:会)?通过|一定(?:会)?拒签|will be approved|will be refused|approval probability|回答过短|回答太短|字数太少|高级词汇|word count|too short|欺诈|撒谎|说谎|造假|虚假陈述|眼神|肢体语言|nervousness indicates|demeanor proves)/i.test(JSON.stringify(generatedEvaluation))
+  const serialized = JSON.stringify(generatedEvaluation)
+  if (/(获签概率|过签率|一定(?:会)?通过|一定(?:会)?拒签|will be approved|will be refused|approval probability)/i.test(serialized)) return 'FORBIDDEN_OUTCOME_PREDICTION'
+  if (/(有利于过签|不利于过签)/i.test(serialized)) return 'FORBIDDEN_PASS_FRAMING'
+  if (/(回答过短|回答太短|字数太少|高级词汇|word count|too short)/i.test(serialized)) return 'FORBIDDEN_STYLE_SCORING'
+  if (/(欺诈|撒谎|说谎|造假|虚假陈述)/i.test(serialized)) return 'FORBIDDEN_ACCUSATION'
+  if (/(眼神|肢体语言|nervousness indicates|demeanor proves)/i.test(serialized)) return 'FORBIDDEN_DEMEANOR_INFERENCE'
+  return ''
 }
 
 function cleanFeedbackArray(value) {
@@ -247,7 +253,8 @@ export function validateF1StructuredReport(value, input, options = {}) {
   if (!isRecord(value)) return fail('REPORT_NOT_OBJECT')
   if (value.schemaVersion !== 2 || value.reportType !== 'practice_readiness') fail('REPORT_IDENTITY')
   if (value.criteriaVersion !== input.criteriaVersion) fail('CRITERIA_VERSION')
-  if (hasForbiddenClaim(value)) fail('FORBIDDEN_CLAIM')
+  const forbiddenIssue = forbiddenClaimIssue(value)
+  if (forbiddenIssue) fail(forbiddenIssue)
   const overallScore = cleanScore(value.overallScore)
   const readiness = ['准备较充分', '仍需补充', '建议重点准备'].includes(value.readiness) ? value.readiness : null
   if (overallScore === null) fail('OVERALL_SCORE')
@@ -571,7 +578,7 @@ Evaluate the whole chain: supplied profile and I-20-like summary consistency; ge
     if (repair.draft) messages.push({ role: 'assistant', content: JSON.stringify(repair.draft) })
     messages.push({
       role: 'user',
-      content: `The preceding report draft was rejected by the strict machine validator. This is a defect in the report draft, not a defect in the applicant's answers. Fix every listed issue and return the entire corrected JSON object; do not merely explain the errors. Validation issues: ${JSON.stringify(repair.issues)}. Preserve every section and dimension not implicated by those issues; repair only the invalid or missing parts. Use only exact evidenceId values from evidenceCatalog, keep all six unique dimensions, keep every question review in input order, use only allowed officialRuleIds, include 1-3 strengths and priorities, and include exactly three action-plan items. Enforce the four question-effect prefixes with their score/verdict bands, begin every preparationDirection with “下一步核查：”, and keep dimension and overall calibration consistent. If information is insufficient, use “尚未建立：” or needs_evidence rather than creating a negative finding. Do not change a score merely because the previous draft failed validation.`,
+      content: `The preceding report draft was rejected by the strict machine validator. This is a defect in the report draft, not a defect in the applicant's answers. Fix every listed issue and return the entire corrected JSON object; do not merely explain the errors. Validation issues: ${JSON.stringify(repair.issues)}. FORBIDDEN_OUTCOME_PREDICTION means remove any approval/refusal prediction; FORBIDDEN_PASS_FRAMING means replace “有利于过签/不利于过签” with the qualification-element effect; FORBIDDEN_STYLE_SCORING means remove length, vocabulary, grammar, accent, or performance-based scoring; FORBIDDEN_ACCUSATION means remove every fraud, lying, or misrepresentation label and state only the exact provisional discrepancy; FORBIDDEN_DEMEANOR_INFERENCE means remove eye-contact, body-language, pause, or nervousness inferences. Preserve every section and dimension not implicated by those issues; repair only the invalid or missing parts. Use only exact evidenceId values from evidenceCatalog, keep all six unique dimensions, keep every question review in input order, use only allowed officialRuleIds, include 1-3 strengths and priorities, and include exactly three action-plan items. Enforce the four question-effect prefixes with their score/verdict bands, begin every preparationDirection with “下一步核查：”, and keep dimension and overall calibration consistent. If information is insufficient, use “尚未建立：” or needs_evidence rather than creating a negative finding. Do not change a score merely because the previous draft failed validation.`,
     })
   }
   return messages
