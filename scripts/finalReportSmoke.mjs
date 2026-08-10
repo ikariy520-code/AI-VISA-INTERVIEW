@@ -116,7 +116,18 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
 
 if (!report) {
   console.error(`final-report-validation-issues=${validationIssues.join(',') || 'unknown'}`)
-  throw lastError || new Error('DeepSeek report did not pass the evidence contract')
+  throw lastError || new Error('Report model output did not pass the evidence contract')
+}
+
+const directSupportQuestionIds = new Set(['f1_01', 'f1_04', 'f1_11', 'f1_12', 'f1_13'])
+for (const review of report.questionReviews) {
+  if (!directSupportQuestionIds.has(review.questionId)) continue
+  if (review.verdict !== 'complete' || review.score < 85 || !review.summary.startsWith('支持资格：')) {
+    throw new Error(`Direct factual answer was not recognized as supporting evidence: ${review.questionId}`)
+  }
+}
+if (!report.questionReviews.every(review => review.preparationDirection.startsWith('下一步核查：'))) {
+  throw new Error('One or more question reviews did not state the next officer inquiry')
 }
 
 console.log(`model-neutral-final-report-smoke=passed provider=${provider} model=${model} attempts=${attempts} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)
