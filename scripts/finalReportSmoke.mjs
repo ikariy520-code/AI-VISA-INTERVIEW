@@ -9,13 +9,19 @@ import {
 
 dotenv.config({ path: '.env.local', quiet: true })
 
-const apiKey = process.env.DEEPSEEK_API_KEY?.trim()
-const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-pro'
-const endpoint = new URL(process.env.DEEPSEEK_BASE_URL?.trim() || 'https://api.deepseek.com')
+const provider = process.env.REPORT_PROVIDER?.trim() || 'deepseek'
+const apiKey = (process.env.REPORT_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim()
+const model = (process.env.REPORT_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro').trim()
+const endpoint = new URL((process.env.REPORT_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').trim())
+const supportsJsonMode = process.env.REPORT_SUPPORTS_JSON_MODE !== 'false'
+const supportsReasoningOptions = process.env.REPORT_SUPPORTS_REASONING_OPTIONS
+  ? process.env.REPORT_SUPPORTS_REASONING_OPTIONS !== 'false'
+  : provider === 'deepseek'
 
-if (!apiKey) throw new Error('DeepSeek API key is not configured')
-if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'api.deepseek.com') {
-  throw new Error('DeepSeek endpoint is not allowed')
+const anonymousLoopback = endpoint.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(endpoint.hostname)
+if (!apiKey && !anonymousLoopback) throw new Error('Report model API key is not configured')
+if (endpoint.protocol !== 'https:' && !anonymousLoopback) {
+  throw new Error('Report model endpoint must use HTTPS or loopback HTTP')
 }
 endpoint.pathname = endpoint.pathname.replace(/\/$/, '')
 if (!endpoint.pathname.endsWith('/chat/completions')) {
@@ -53,29 +59,31 @@ let lastError
 let repairContext = ''
 let validationIssues = []
 let attempts = 0
-for (attempts = 1; attempts <= 3; attempts += 1) {
+for (attempts = 1; attempts <= 2; attempts += 1) {
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify({
         model,
         messages: buildF1ReportMessages(input, repairContext),
-        response_format: { type: 'json_object' },
-        thinking: { type: 'enabled' },
-        reasoning_effort: 'high',
+        ...(supportsJsonMode ? { response_format: { type: 'json_object' } } : {}),
+        ...(supportsReasoningOptions ? {
+          thinking: { type: 'enabled' },
+          reasoning_effort: 'high',
+        } : {}),
         max_tokens: 32_000,
         stream: false,
       }),
     })
 
     const payload = await response.json().catch(() => null)
-    if (!response.ok) throw new Error(`DeepSeek final-report request failed with status ${response.status}`)
+    if (!response.ok) throw new Error(`Report model request failed with status ${response.status}`)
     const content = getModelMessageContent(payload)
-    if (!content) throw new Error('DeepSeek returned no final-report content')
+    if (!content) throw new Error('Report model returned no final-report content')
     const originalDraft = JSON.parse(content)
     parsed = originalDraft
     validationIssues = []
@@ -99,7 +107,7 @@ for (attempts = 1; attempts <= 3; attempts += 1) {
     }
     validationIssues = validationIssues.length > 0 ? [...new Set(validationIssues)] : ['UNKNOWN_VALIDATION_FAILURE']
     repairContext = { issues: validationIssues, draft: parsed }
-    lastError = new Error(`DeepSeek report did not pass the evidence contract: ${validationIssues.join(',')}`)
+    lastError = new Error(`Report model output did not pass the evidence contract: ${validationIssues.join(',')}`)
   } catch (error) {
     lastError = error
     if (error instanceof SyntaxError) repairContext = { issues: ['INVALID_JSON'], draft: null }
@@ -111,4 +119,4 @@ if (!report) {
   throw lastError || new Error('DeepSeek report did not pass the evidence contract')
 }
 
-console.log(`deepseek-final-report-smoke=passed model=${model} attempts=${attempts} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)
+console.log(`model-neutral-final-report-smoke=passed provider=${provider} model=${model} attempts=${attempts} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)

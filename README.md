@@ -4,7 +4,7 @@
 
 - 当前由豆包端到端实时语音负责连续听取、理解、决定下一问并直接生成语音；本地程序不把模型回答替换成逐题脚本。
 - F1 的角色、审查边界、动态问答和结束规则位于模型无关策略层，豆包只是当前适配器；后续可由其他支持高优先级指令和连续会话的语音模型复用。
-- 面试结束后，DeepSeek 只调用一次，并严格按照对应签证的官方依据、证据引用和结构化报告合同生成最终综合报告。
+- 面试结束后，报告模型严格按照项目自有的官方依据、证据分类、评分校准和结构化报告合同生成综合报告；当前生产环境使用 DeepSeek，但报告规则不属于某个模型。
 
 ## F1 面签规则
 
@@ -41,6 +41,15 @@
 - 不编造学校、课程、收入、资金、家庭情况、文件内容或回国计划。
 - 分析 API 失败时只展示原始问答，不生成本地假分数。
 
+### 报告生成方法与模型适配
+
+1. 项目先生成脱敏证据目录，模型只能通过固定 `evidenceId` 引用用户真实资料和原始回答。
+2. 每题必须按同一条路径分析：本题核查的签证要件 → 回答是否直接回应 → 回答提供的事实 → 与前文是否一致 → 证据作用 → 下一步核查。
+3. 证据作用只有四种：`支持资格`、`中性信息`、`尚未建立`、`实质疑点`。缺少信息不能写成负面事实；具体矛盾也必须先建议中立澄清，不能直接判断用户撒谎。
+4. 逐题分数、六个维度状态和整场准备度都有固定对应区间。模型输出若自相矛盾、引用伪造证据、预测签证结果或使用表演风格评分，会被机器拒绝。
+5. 第一次输出不合格时，只允许依据校验错误进行一次定向修复；仍不合格则降级为无推测分数的证据复盘。因此更换模型不会绕过分析边界。
+6. 服务器原生支持 OpenAI-compatible Chat Completions 接口。其他协议只需新增传输适配器，把相同 messages 交给模型并返回同一 JSON 合同，不应改写核心判断规则。
+
 官方依据版本位于：
 
 - `src/modules/practice/data/f1OfficialCriteria.ts`（前端）
@@ -59,9 +68,12 @@ DOUBAO_APP_ID=端到端语音应用ID
 DOUBAO_ACCESS_KEY=端到端语音Access Token
 DOUBAO_REALTIME_URL=wss://openspeech.bytedance.com/api/v3/realtime/dialogue
 
-DEEPSEEK_API_KEY=DeepSeek API Key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-pro
+REPORT_PROVIDER=deepseek
+REPORT_API_KEY=Report model API key
+REPORT_BASE_URL=https://api.deepseek.com
+REPORT_MODEL=deepseek-v4-pro
+REPORT_SUPPORTS_JSON_MODE=true
+REPORT_SUPPORTS_REASONING_OPTIONS=true
 
 VITE_DEV_PORT=5173
 ```
@@ -82,11 +94,11 @@ npm run smoke:report
 - `test:f1-controller`：验证保留的本地确定性 F1 控制器（兼容与回退路径）。
 - `test:interview-policy`：验证实时 F1 模型可以自由生成相关问题，同时遵守角色、审查边界、追问、恢复和结束约束。
 - `test:b2-controller`：验证中文受控题库、背景触发、动态题量、重复和超时。
-- `test:f1-report`：验证隐私脱敏、证据真实性、官方依据、简短回答和禁用获签预测。
+- `test:f1-report`：验证隐私脱敏、证据真实性、官方依据、四类证据作用、分数校准、简短回答、禁用获签预测以及无专有推理参数的兼容模型路径。
 - `test:b2-report`：验证 B2 摘要脱敏、回答证据、官方依据和禁用获签预测。
-- `test:architecture`：确保浏览器只访问同源报告接口，豆包只负责实时语音，DeepSeek 只负责最终报告。
+- `test:architecture`：确保浏览器只访问同源报告接口，实时语音与最终报告职责分离，报告模型不能绕过证据合同和校验器。
 - `smoke:deepseek`：用极小请求检查 DeepSeek 密钥、模型和网络连接。
-- `smoke:report`：使用非真实个人资料调用 DeepSeek，验证最终报告能够被严格数据合同接收。
+- `smoke:report`：使用非真实个人资料调用当前配置的报告模型，验证最终报告能够被严格数据合同接收。
 
 ## 团队协作
 

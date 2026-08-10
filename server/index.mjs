@@ -4,7 +4,7 @@
 // Responsibilities:
 //   1. Serve Vite-built static files (dist/) with SPA fallback
 //   2. WebSocket proxy  /api/realtime-voice → Doubao
-//   3. Final report     /api/ai-report → DeepSeek constrained evaluator
+//   3. Final report     /api/ai-report → model-neutral constrained evaluator
 //   4. Health checks    /api/realtime-health, /api/report-health
 // ========================================
 
@@ -37,9 +37,14 @@ const WS_MAX_CONNECTIONS = Number(process.env.WS_MAX_CONNECTIONS) || 30
 const ADMIN_ORDER_NUMBERS = process.env.ADMIN_ORDER_NUMBERS || process.env.INVITE_CODES || ''
 const ORDER_SESSION_SECRET = process.env.ORDER_SESSION_SECRET || process.env.INVITE_SESSION_SECRET || ''
 
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || ''
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro'
-const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || ''
+const REPORT_PROVIDER = process.env.REPORT_PROVIDER || 'deepseek'
+const REPORT_API_KEY = process.env.REPORT_API_KEY || process.env.DEEPSEEK_API_KEY || ''
+const REPORT_MODEL = process.env.REPORT_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro'
+const REPORT_BASE_URL = process.env.REPORT_BASE_URL || process.env.DEEPSEEK_BASE_URL || ''
+const REPORT_SUPPORTS_JSON_MODE = process.env.REPORT_SUPPORTS_JSON_MODE !== 'false'
+const REPORT_SUPPORTS_REASONING_OPTIONS = process.env.REPORT_SUPPORTS_REASONING_OPTIONS
+  ? process.env.REPORT_SUPPORTS_REASONING_OPTIONS !== 'false'
+  : REPORT_PROVIDER === 'deepseek'
 
 // ── MIME map ─────────────────────────────────────────────
 
@@ -162,9 +167,12 @@ async function main() {
     usageFile: process.env.ORDER_USAGE_FILE || 'data/order-usage.json',
   })
   const reportHandler = createReportHandler({
-    apiKey: DEEPSEEK_API_KEY,
-    model: DEEPSEEK_MODEL,
-    baseUrl: DEEPSEEK_BASE_URL,
+    apiKey: REPORT_API_KEY,
+    model: REPORT_MODEL,
+    baseUrl: REPORT_BASE_URL,
+    provider: REPORT_PROVIDER,
+    supportsJsonMode: REPORT_SUPPORTS_JSON_MODE,
+    supportsReasoningOptions: REPORT_SUPPORTS_REASONING_OPTIONS,
   })
 
   const server = createServer(async (req, res) => {
@@ -246,7 +254,7 @@ async function main() {
     console.log(`[server] Static files: ${DIST_DIR}`)
     console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
     console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
-    console.log(`[server] AI report   : ${reportHandler.configured ? `DeepSeek ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
+    console.log(`[server] AI report   : ${reportHandler.configured ? `${reportHandler.provider} ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
     console.log(`[server] Order gate  : ${orderAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
     console.log(`[server] Orders      : ${orderAuth.orderCount} customer orders from ${orderAuth.ordersFile}; usage at ${orderAuth.usageFile}`)
   })

@@ -5,13 +5,16 @@ interface DeepSeekReportBridgeOptions {
   apiKey: string
   model: string
   baseUrl?: string
+  provider?: string
+  supportsJsonMode?: boolean
+  supportsReasoningOptions?: boolean
 }
 
 export function deepseekReportBridge(options: DeepSeekReportBridgeOptions): Plugin {
   const handleReport = createReportHandler(options)
 
   return {
-    name: 'deepseek-final-report-local-bridge',
+    name: 'model-neutral-final-report-local-bridge',
     apply: 'serve',
     configureServer(server: ViteDevServer) {
       server.middlewares.use(async (request, response, next) => {
@@ -22,7 +25,7 @@ export function deepseekReportBridge(options: DeepSeekReportBridgeOptions): Plug
           next(error as Error)
         }
       })
-      server.config.logger.info('DeepSeek 最终报告桥接已启用：/api/ai-report')
+      server.config.logger.info('模型无关最终报告桥接已启用：/api/ai-report')
     },
   }
 }

@@ -44,21 +44,21 @@ const providerFiles = files
 assert.deepEqual(
   providerFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
   ['server/reportApi.mjs'],
-  'DeepSeek provider access must remain in the shared server-side report handler',
+  'default report provider access must remain in the shared server-side report handler',
 )
 
-assert.equal(existsSync(join(root, 'server/reportApi.mjs')), true, 'production DeepSeek report route is missing')
+assert.equal(existsSync(join(root, 'server/reportApi.mjs')), true, 'production model-neutral report route is missing')
 assert.equal(existsSync(join(root, 'local/deepseekReportBridge.ts')), true, 'local DeepSeek report bridge is missing')
 assert.equal(existsSync(join(root, 'server/deepseekFeedback.mjs')), false, 'legacy DeepSeek report implementation must be removed')
 assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false, 'legacy Ark report bridge must be removed')
 
 const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
 assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')
-assert.ok(reportHandler.includes("? 'evidence-only' : 'deepseek'"), 'model and evidence-only report modes must remain distinguishable')
+assert.ok(reportHandler.includes("? 'evidence-only' : provider"), 'model and evidence-only report modes must remain distinguishable')
 assert.ok(reportHandler.includes('BASIC_OUTPUT_TOKENS') && reportHandler.includes('STRONG_OUTPUT_TOKENS') && reportHandler.includes('FULL_OUTPUT_TOKENS'), 'tiered report output caps are missing')
-assert.equal(reportHandler.includes('createTokenBudget'), false, 'DeepSeek report token budget must remain disabled')
-assert.equal(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), false, 'DeepSeek report rate limit must remain disabled')
-assert.equal(reportHandler.includes('MAX_ACTIVE_REQUESTS'), false, 'DeepSeek report concurrency limit must remain disabled')
+assert.equal(reportHandler.includes('createTokenBudget'), false, 'report token budget must remain disabled')
+assert.equal(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), false, 'report rate limit must remain disabled')
+assert.equal(reportHandler.includes('MAX_ACTIVE_REQUESTS'), false, 'report concurrency limit must remain disabled')
 assert.equal(reportHandler.includes('ATTEMPT_TIMEOUT_MS'), false, 'report generation deadlines must remain disabled')
 assert.equal(reportHandler.includes('request.setTimeout'), false, 'upstream report requests must not be cut off by time')
 assert.ok(reportHandler.includes('activeReports'), 'duplicate in-flight reports must share one generation task')
@@ -69,6 +69,9 @@ assert.equal(reportHandler.includes('cached: true'), false, 'the report API must
 assert.ok(reportHandler.includes('repairInvalidReportSections'), 'local structural report repair is missing')
 assert.ok(reportHandler.includes('validationIssues'), 'sanitized report validation diagnostics are missing')
 assert.ok(reportHandler.includes('repairF1ReportEvidence'), 'grounded evidence repair is missing')
+assert.ok(reportHandler.includes('MAX_F1_REPORT_ATTEMPTS = 2'), 'bounded model repair attempt is missing')
+assert.ok(reportHandler.includes('buildF1ReportMessages(input, repairContext)'), 'validation-guided model repair is missing')
+assert.ok(reportHandler.includes('supportsJsonMode') && reportHandler.includes('supportsReasoningOptions'), 'OpenAI-compatible capability switches are missing')
 assert.ok(reportHandler.includes('buildDeterministicF1FallbackReport'), 'bounded evidence-only fallback is missing')
 assert.ok(reportHandler.includes("analysisMode: 'evidence_only'"), 'evidence-only fallback marker is missing')
 assert.ok(reportHandler.includes('if (!fallbackEligible) throw'), 'provider/network failures must not be disguised as completed analysis')
@@ -169,4 +172,4 @@ assert.ok(realtimeSmoke.includes('realtime-smoke=native-e2e-response-complete'),
 assert.equal(realtimeSmoke.includes('DOUBAO_EVENT.CHAT_TTS_TEXT'), false, 'native F1 smoke must not inject application-authored TTS')
 assert.equal(realtimeSmoke.includes('controlled-session-rotation-complete'), false, 'realtime smoke must not validate per-question Session rotation')
 
-console.log('deepseek-report-and-doubao-voice-architecture-audit=passed')
+console.log('model-neutral-report-and-doubao-voice-architecture-audit=passed')

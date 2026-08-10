@@ -349,6 +349,10 @@ const generatedFallback = await generateF1Report({
     assert.equal(body.reasoning_effort, 'low')
     assert.equal(body.max_tokens, 6_000)
     assert.equal('timeoutMs' in options, false, 'report requests must not have a generation deadline')
+    if (boundedAttempts === 2) {
+      assert.equal(body.messages.length, 4)
+      assert.match(body.messages.at(-1).content, /strict machine validator/)
+    }
     return {
       ok: true,
       status: 200,
@@ -356,7 +360,7 @@ const generatedFallback = await generateF1Report({
     }
   },
 })
-assert.equal(boundedAttempts, 1, 'a standard report must use one fast bounded attempt before evidence fallback')
+assert.equal(boundedAttempts, 2, 'an invalid standard report gets one bounded model-repair attempt before evidence fallback')
 assert.ok(validateServerReport(generatedFallback, input, { allowMaterializedEvidence: true }))
 assert.equal(generatedFallback.analysisMode, 'evidence_only')
 assert.equal(generatedFallback.questionReviews.length, input.answers.length)
@@ -366,6 +370,60 @@ assert.equal(reportTierForAnswerCount(6), 'basic')
 assert.equal(reportTierForAnswerCount(7), 'strong')
 assert.equal(reportTierForAnswerCount(9), 'strong')
 assert.equal(reportTierForAnswerCount(10), 'full')
+
+let portableModelAttempts = 0
+const portableModelReport = await generateF1Report({
+  apiKey: '',
+  endpoint: 'http://127.0.0.1:11434/v1/chat/completions',
+  model: 'local-openai-compatible-model',
+  input,
+  supportsJsonMode: false,
+  supportsReasoningOptions: false,
+  requestJson: async (_endpoint: string, options: any) => {
+    portableModelAttempts += 1
+    const body = JSON.parse(options.body)
+    assert.equal('Authorization' in options.headers, false)
+    assert.equal('response_format' in body, false)
+    assert.equal('thinking' in body, false)
+    assert.equal('reasoning_effort' in body, false)
+    assert.equal(body.model, 'local-openai-compatible-model')
+    return {
+      ok: true,
+      status: 200,
+      payload: { choices: [{ message: { content: JSON.stringify(catalogEvidenceReport) } }] },
+    }
+  },
+})
+assert.equal(portableModelAttempts, 1, 'a valid model-neutral report must not need a repair call')
+assert.equal(portableModelReport.analysisMode, 'model')
+
+let guidedRepairAttempts = 0
+const guidedRepairReport = await generateF1Report({
+  apiKey: 'test-only',
+  endpoint: 'https://provider.example/v1/chat/completions',
+  model: 'portable-report-model',
+  input,
+  requestJson: async (_endpoint: string, options: any) => {
+    guidedRepairAttempts += 1
+    const body = JSON.parse(options.body)
+    if (guidedRepairAttempts === 1) {
+      return {
+        ok: true,
+        status: 200,
+        payload: { choices: [{ message: { content: JSON.stringify({ schemaVersion: 2 }) } }] },
+      }
+    }
+    assert.equal(body.messages.length, 4)
+    assert.match(body.messages.at(-1).content, /Validation issues:/)
+    return {
+      ok: true,
+      status: 200,
+      payload: { choices: [{ message: { content: JSON.stringify(catalogEvidenceReport) } }] },
+    }
+  },
+})
+assert.equal(guidedRepairAttempts, 2, 'an invalid first draft must receive one validation-guided repair turn')
+assert.equal(guidedRepairReport.analysisMode, 'model')
 
 const fullInput = {
   ...input,
@@ -397,7 +455,7 @@ const generatedFullFallback = await generateF1Report({
     }
   },
 })
-assert.equal(fullAttempts, 1, 'a full report must use one high-quality AI call without rewriting the entire report')
+assert.equal(fullAttempts, 2, 'an invalid full report gets one high-quality repair attempt before fallback')
 assert.equal(generatedFullFallback.analysisMode, 'evidence_only')
 
 let strongAttempts = 0
@@ -420,7 +478,7 @@ await generateF1Report({
     }
   },
 })
-assert.equal(strongAttempts, 1)
+assert.equal(strongAttempts, 2)
 
 let structuralRepairAttempts = 0
 const structurallyRepaired = await generateF1Report({
@@ -437,7 +495,7 @@ const structurallyRepaired = await generateF1Report({
     }
   },
 })
-assert.equal(structuralRepairAttempts, 1)
+assert.equal(structuralRepairAttempts, 2)
 assert.equal(structurallyRepaired.analysisMode, 'model', 'a small schema defect should be repaired locally without discarding valid model analysis')
 assert.ok(structurallyRepaired.strengths.length >= 1)
 
@@ -463,7 +521,7 @@ await assert.rejects(() => generateF1Report({
     authFailureAttempts += 1
     return { ok: false, status: 401, payload: {} }
   },
-}), (error: any) => error?.code === 'DEEPSEEK_REPORT_SERVICE_ERROR')
+}), (error: any) => error?.code === 'REPORT_MODEL_SERVICE_ERROR')
 assert.equal(authFailureAttempts, 1, 'authentication failure must remain observable and must not be disguised as a completed analysis')
 
 console.log('f1-report-contract=passed')
