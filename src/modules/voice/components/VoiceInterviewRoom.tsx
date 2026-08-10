@@ -28,15 +28,14 @@ import {
   findB2ModelBoundaryViolation,
   findF1ModelBoundaryViolation,
   isExactRealtimeClosingLine,
+  isSafeF1RealtimeOfficerTurn,
   resolveRealtimeOfficerType,
   resolveRealtimeResumeOpeningLine,
   resolveRealtimeVoice,
 } from '../../practice/services/realtimeInterviewPrompt'
 import { resolveInterviewModePolicy } from '../../practice/services/interviewModePolicy'
 import {
-  approvedF1QuestionIds,
   createF1InterviewState,
-  isApprovedF1OfficerText,
   type F1InterviewState,
 } from '../../practice/services/f1InterviewController'
 import {
@@ -305,7 +304,7 @@ export default function VoiceInterviewRoom({
         setPhase('thinking')
         if (context.visaType === 'F1' || context.visaType === 'B2') {
           // The native end-to-end model now owns the next spoken turn. The app
-          // supplies the role, catalog, review factors, and fail-safe only.
+          // supplies the role policy, review factors, and fail-safe only.
         }
         break
       }
@@ -314,7 +313,7 @@ export default function VoiceInterviewRoom({
         if (context.visaType !== 'F1' && context.visaType !== 'B2') break
         const text = realtimeEventText(event)
         const approved = context.visaType === 'F1'
-          ? Boolean(text && isApprovedF1OfficerText(text))
+          ? Boolean(text && isSafeF1RealtimeOfficerTurn(text))
           : Boolean(text && isApprovedB2OfficerText(text))
         if (!approved) {
           setErrorMessage('The controlled interview blocked an unapproved officer question.')
@@ -534,7 +533,14 @@ export default function VoiceInterviewRoom({
               substantiveQuestionCount: substantiveQuestionCountRef.current,
               askedMainQuestionIds: context.visaType === 'B2'
                 ? approvedB2QuestionIds(messagesRef.current)
-                : approvedF1QuestionIds(messagesRef.current),
+                : [],
+              recentOfficerQuestions: context.visaType === 'F1'
+                ? messagesRef.current
+                    .filter(message => message.role === 'officer' && !isF1InterviewClosingLine(message.text))
+                    .map(message => message.text.trim())
+                    .filter(Boolean)
+                    .slice(-F1_INTERVIEW_MAX_TOTAL_QUESTIONS)
+                : undefined,
               resuming: resumable,
             }
           : undefined,

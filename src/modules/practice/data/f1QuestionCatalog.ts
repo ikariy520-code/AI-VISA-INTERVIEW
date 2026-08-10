@@ -45,8 +45,9 @@ export interface F1QuestionDefinition {
 }
 
 /**
- * Product-owned F1 framework. The language model may assess an answer, but it
- * must never invent, remove, renumber, or silently replace these 22 questions.
+ * Product-owned reference bank and legacy deterministic-controller data. The
+ * native realtime officer may author other questions when they are tied to an
+ * F-1 review factor; appearing in this bank never makes a question mandatory.
  */
 export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
   {
@@ -190,6 +191,7 @@ export const F1_QUESTION_CATALOG: readonly F1QuestionDefinition[] = [
   },
 ]
 
+/** Mandatory only for the legacy deterministic controller, not the native realtime policy. */
 export const F1_MANDATORY_QUESTION_IDS: readonly F1QuestionId[] = ['f1_19', 'f1_20', 'f1_21']
 
 const questionMap = new Map(F1_QUESTION_CATALOG.map(question => [question.id, question]))

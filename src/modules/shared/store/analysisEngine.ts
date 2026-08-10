@@ -19,8 +19,8 @@ import type {
   ContentAnalysis, ContentDimension,
   AnswerFeedback,
 } from '../../feedback/types.ts'
-import { identifyF1InterviewTurn } from '../../practice/services/f1InterviewController.ts'
 import { identifyB2InterviewTurn } from '../../practice/services/b2InterviewController.ts'
+import { F1_INTERVIEW_MAX_TOTAL_QUESTIONS } from '../../practice/data/f1InterviewStandard.ts'
 import { buildSafeInterviewContext } from '../../practice/services/realtimeInterviewPrompt.ts'
 import {
   sanitizeReportRequest,
@@ -471,13 +471,18 @@ function buildGroupedReportAnswers(
 
 export function buildF1ReportRequest(record: InterviewRecord) {
   if (record.visaType !== 'F1') return null
-  const answers = buildGroupedReportAnswers(
-    record.messages,
-    identifyF1InterviewTurn,
-    'Follow-up: ',
-    'F1_REPORT_UNKNOWN_QUESTION',
-    true,
-  )
+  // Realtime F-1 questions are model-authored and are not required to match the
+  // legacy 22-question bank. Give every substantive Q&A a stable turn ID so the
+  // strict report contract can review the exact question that was actually asked.
+  const answers: InterviewReportAnswer[] = extractQAPairs(record.messages)
+    .slice(0, F1_INTERVIEW_MAX_TOTAL_QUESTIONS)
+    .map((pair, offset) => ({
+      index: offset + 1,
+      questionId: `f1_${String(offset + 1).padStart(2, '0')}`,
+      question: pair.question.trim(),
+      answer: pair.answer.trim(),
+      timestamp: pair.timestamp,
+    }))
   return sanitizeReportRequest({
     visaType: 'F1',
     safeContext: buildSafeInterviewContext(record.userContext),

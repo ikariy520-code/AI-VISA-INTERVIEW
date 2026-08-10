@@ -41,10 +41,11 @@ const input = sanitizeReportRequest({
 
 assert.ok(input)
 assert.equal(input.criteriaVersion, F1_OFFICIAL_CRITERIA_VERSION)
-assert.equal(F1_OFFICIAL_CRITERIA.length, 6)
+assert.equal(F1_OFFICIAL_CRITERIA.length, 11)
 assert.deepEqual(SERVER_CRITERIA.map(rule => rule.id), [...F1_OFFICIAL_RULE_IDS])
 assert.equal(SERVER_CRITERIA_VERSION, F1_OFFICIAL_CRITERIA_VERSION)
 assert.ok(F1_OFFICIAL_CRITERIA.every(rule => rule.url.startsWith('https://travel.state.gov/') || rule.url.startsWith('https://fam.state.gov/')))
+assert.ok(F1_OFFICIAL_RULE_IDS.includes('FAM_MISREPRESENTATION_EVIDENCE_STANDARD'))
 
 const privateContext = JSON.stringify(input.safeContext)
 for (const secret of ['E12345678', 'N123456789', 'AA12345678', 'student@example.com', '13812345678', '6222021234567890123']) {
@@ -64,8 +65,8 @@ const validReport = {
   schemaVersion: 2,
   reportType: 'practice_readiness',
   criteriaVersion: F1_OFFICIAL_CRITERIA_VERSION,
-  overallScore: 82,
-  readiness: '准备较充分',
+  overallScore: 74,
+  readiness: '仍需补充',
   headline: '核心信息回答直接，资金细节仍需在下一轮补充验证。',
   summary: '本次评价只依据脱敏背景和四个实际回答。',
   dimensions: F1_REPORT_DIMENSION_IDS.map((id, index) => ({
@@ -98,11 +99,11 @@ const validReport = {
     questionId: answer.questionId,
     score: answer.answer === 'No.' ? 95 : 85,
     verdict: 'complete',
-    summary: answer.answer === 'No.' ? '这是一个可以由直接否定完整回答的是非题。' : '回答直接回应了问题。',
+    summary: answer.answer === 'No.' ? '支持资格：直接否定完整回应了该是非题。' : '支持资格：回答直接提供了本题所核对的事实。',
     answerEvidence: answer.answer,
     strengths: ['直接回答问题。'],
     improvements: [],
-    preparationDirection: '继续使用真实、简洁且与资料一致的回答。',
+    preparationDirection: '下一步核查：保持该事实与申请资料一致，无需主动扩展未问内容。',
   })),
   actionPlan: [
     { label: 'STEP 1', title: '核对资料', detail: '核对学校、专业、金额和资助人。' },
@@ -155,8 +156,8 @@ assert.deepEqual(validateServerReport(stringDimensionAction, input)?.dimensions[
 
 const missingDimensionRule = structuredClone(catalogEvidenceReport)
 missingDimensionRule.dimensions[0].officialRuleIds = []
-assert.deepEqual(validateF1StructuredReport(missingDimensionRule, input)?.dimensions[0].officialRuleIds, ['DOS_ACADEMIC_PREPARATION'])
-assert.deepEqual(validateServerReport(missingDimensionRule, input)?.dimensions[0].officialRuleIds, ['DOS_ACADEMIC_PREPARATION'])
+assert.deepEqual(validateF1StructuredReport(missingDimensionRule, input)?.dimensions[0].officialRuleIds, ['DOS_ACADEMIC_PREPARATION', 'FAM_MISREPRESENTATION_EVIDENCE_STANDARD'])
+assert.deepEqual(validateServerReport(missingDimensionRule, input)?.dimensions[0].officialRuleIds, ['DOS_ACADEMIC_PREPARATION', 'FAM_MISREPRESENTATION_EVIDENCE_STANDARD'])
 
 const fabricatedEvidence = structuredClone(validReport)
 fabricatedEvidence.dimensions[0].evidence[0].quote = 'A school never supplied by the user.'
@@ -248,10 +249,52 @@ const prediction = structuredClone(validReport)
 prediction.summary = '获签概率为 90%。'
 assert.equal(validateF1StructuredReport(prediction, input), null)
 
+const unclassifiedQuestion = structuredClone(validReport)
+unclassifiedQuestion.questionReviews[0].summary = '回答直接提供了学校名称。'
+assert.equal(validateF1StructuredReport(unclassifiedQuestion, input), null, 'every question must state its evidentiary effect')
+assert.equal(validateServerReport(unclassifiedQuestion, input), null)
+
+const mismatchedQuestionCalibration = structuredClone(validReport)
+mismatchedQuestionCalibration.questionReviews[0].score = 60
+assert.equal(validateF1StructuredReport(mismatchedQuestionCalibration, input), null, 'supporting evidence cannot use the insufficient-evidence score band')
+
+const missingDirectionPrefix = structuredClone(validReport)
+missingDirectionPrefix.questionReviews[0].preparationDirection = '核对学校名称。'
+assert.equal(validateServerReport(missingDirectionPrefix, input), null, 'next inquiry must be explicit')
+
+const inconsistentDimensionCalibration = structuredClone(validReport)
+inconsistentDimensionCalibration.dimensions[0].status = 'stable'
+inconsistentDimensionCalibration.dimensions[0].score = 60
+assert.equal(validateServerReport(inconsistentDimensionCalibration, input), null, 'stable dimensions require supporting evidence calibration')
+
+const overstatedReadiness = structuredClone(validReport)
+overstatedReadiness.overallScore = 88
+overstatedReadiness.readiness = '准备较充分'
+assert.equal(validateF1StructuredReport(overstatedReadiness, input), null, 'an unestablished core factor must cap readiness')
+
+const materialConcern = structuredClone(validReport)
+materialConcern.dimensions[0].status = 'priority'
+materialConcern.dimensions[0].score = 35
+materialConcern.overallScore = 55
+materialConcern.readiness = '建议重点准备'
+const materialConcernIssues: string[] = []
+assert.ok(validateServerReport(materialConcern, input, {
+  onIssue: (issue: string) => { materialConcernIssues.push(issue) },
+  allowMaterializedEvidence: true,
+}), `a concrete concern may use the priority band when overall readiness is calibrated: ${materialConcernIssues.join(',')}`)
+
+const accusatoryReport = structuredClone(validReport)
+accusatoryReport.dimensions[0].reasoning = '申请人在撒谎。'
+assert.equal(validateF1StructuredReport(accusatoryReport, input), null, 'the report must not turn a conflict into an accusation')
+
+const demeanorReport = structuredClone(validReport)
+demeanorReport.questionReviews[0].improvements = ['眼神回避说明回答不可信。']
+assert.equal(validateServerReport(demeanorReport, input), null, 'unavailable demeanor must not be treated as evidence')
+
 const messages = buildF1ReportMessages(input)
 assert.match(messages[0].content, /Never reward length/)
 assert.match(messages[0].content, /A direct yes\/no can fully answer/)
-assert.match(messages[0].content, /never approval\/refusal probability/)
+assert.match(messages[0].content, /predict approval\/refusal/)
 assert.match(messages[0].content, /answerEvidence must be the exact original answer text/)
 assert.match(messages[0].content, /actions must be a JSON array/)
 assert.match(messages[0].content, /must contain its own numeric score/)
@@ -259,6 +302,11 @@ assert.match(messages[0].content, /silently self-check/)
 assert.match(messages[0].content, /questionReviews contains exactly 4 items/)
 assert.match(messages[0].content, /still return that dimension/)
 assert.match(messages[0].content, /report draft is invalid, never that the applicant's answer is invalid/)
+assert.match(messages[0].content, /Officer reasoning path for every question review/)
+assert.match(messages[0].content, /Absence of evidence is not negative evidence/)
+assert.match(messages[0].content, /支持资格=/)
+assert.match(messages[0].content, /any core needs_evidence dimension requires overallScore<=74/)
+assert.match(messages[0].content, /Never label the applicant dishonest/)
 assert.match(messages[1].content, /"evidenceCatalog"/)
 assert.match(messages[1].content, /"answer:f1_01"/)
 
@@ -285,6 +333,8 @@ assert.equal(fallbackReport.dimensions.length, 6)
 assert.equal(fallbackReport.questionReviews.length, input.answers.length)
 assert.ok(fallbackReport.dimensions.every(item => item.evidence.length >= 1))
 assert.deepEqual(fallbackReport.questionReviews.map(item => item.answerEvidence), input.answers.map(item => item.answer))
+assert.ok(fallbackReport.questionReviews.every(item => item.summary.startsWith('尚未建立：')))
+assert.ok(fallbackReport.questionReviews.every(item => item.preparationDirection.startsWith('下一步核查：')))
 
 let boundedAttempts = 0
 const generatedFallback = await generateF1Report({

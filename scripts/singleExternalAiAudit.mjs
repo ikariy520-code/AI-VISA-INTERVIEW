@@ -92,10 +92,13 @@ for (const file of deepSeekModelFiles) {
 const reportContract = readFileSync(join(root, 'server/shared/f1ReportContract.mjs'), 'utf8')
 assert.ok(reportContract.includes('F1_OFFICIAL_CRITERIA'), 'official F-1 criteria are missing from the report contract')
 assert.ok(reportContract.includes('Never invent facts'), 'evidence-only report rule is missing')
-assert.ok(reportContract.includes('approval/refusal probability'), 'visa prediction guardrail is missing')
+assert.ok(reportContract.includes('predict approval/refusal'), 'visa prediction guardrail is missing')
 assert.ok(reportContract.includes('strict machine validator'), 'validation repair instruction is missing')
 assert.ok(reportContract.includes('evidenceCatalog'), 'exact evidence reference catalog is missing')
 assert.ok(reportContract.includes('still return that dimension'), 'missing-information report guidance is missing')
+assert.ok(reportContract.includes('Officer reasoning path for every question review'), 'officer-style reasoning path is missing')
+assert.ok(reportContract.includes('Absence of evidence is not negative evidence'), 'missing-versus-adverse evidence boundary is missing')
+assert.ok(reportContract.includes('FAM_MISREPRESENTATION_EVIDENCE_STANDARD'), 'misrepresentation evidence boundary is missing')
 
 const providerNeutralUiFiles = [
   'src/modules/feedback/index.tsx',
@@ -123,6 +126,13 @@ assert.ok(analysisEngine.includes('overallScore: null'), 'unavailable report mus
 assert.ok(analysisEngine.includes("structuredReport.analysisMode === 'evidence_only'"), 'evidence-only reports must suppress synthetic scores')
 assert.equal(analysisEngine.includes('...analyzeInterview(record)'), false, 'unavailable F1 report must not run the local scoring engine')
 assert.equal(analysisEngine.includes('AbortSignal.timeout'), false, 'browser report request must not have a fixed timeout')
+
+const f1OfficerPolicy = readFileSync(join(root, 'src/modules/practice/services/f1OfficerPolicy.ts'), 'utf8')
+assert.equal(/Doubao|豆包|DeepSeek|openspeech\.bytedance/i.test(f1OfficerPolicy), false, 'the F-1 officer policy must remain provider-neutral')
+assert.ok(f1OfficerPolicy.includes('REFERENCE QUESTION BANK (NON-BINDING)'), 'the F-1 reference bank must not become a hard whitelist')
+assert.ok(f1OfficerPolicy.includes('You may author or paraphrase any natural'), 'model-authored F-1 questions are not enabled')
+const realtimeInterviewPrompt = readFileSync(join(root, 'src/modules/practice/services/realtimeInterviewPrompt.ts'), 'utf8')
+assert.ok(realtimeInterviewPrompt.includes('buildF1OfficerPolicy({'), 'the realtime provider adapter must inject the shared F-1 officer policy')
 
 const realtimeFiles = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))
