@@ -77,7 +77,7 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
           thinking: { type: 'enabled' },
           reasoning_effort: 'high',
         } : {}),
-        max_tokens: 6_000,
+        max_tokens: 24_000,
         stream: false,
       }),
     })
@@ -100,7 +100,7 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
     validationIssues = validationIssues.length > 0 ? [...new Set(validationIssues)] : ['UNKNOWN_VALIDATION_FAILURE']
     repairHistory.push(validationIssues)
     repairContext = { issues: validationIssues, draft: parsed }
-    lastError = new Error(`Report model output did not pass the compact evidence contract: ${validationIssues.join(',')}`)
+    lastError = new Error(`Report model output did not pass the structured evidence contract: ${validationIssues.join(',')}`)
   } catch (error) {
     lastError = error
     if (error instanceof SyntaxError) {

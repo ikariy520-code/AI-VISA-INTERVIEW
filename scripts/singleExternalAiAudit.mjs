@@ -68,8 +68,8 @@ assert.equal(reportHandler.includes('REPORT_CACHE'), false, 'server-side complet
 assert.equal(reportHandler.includes('cached: true'), false, 'the report API must not return retained completed reports')
 assert.ok(reportHandler.includes('validationIssues'), 'sanitized report validation diagnostics are missing')
 assert.ok(reportHandler.includes('MAX_F1_REPORT_ATTEMPTS = 2'), 'bounded model repair attempt is missing')
-assert.ok(reportHandler.includes('buildF1AnalysisMessages(input, repairContext)'), 'validation-guided compact analysis repair is missing')
-assert.ok(reportHandler.includes('validateF1AnalysisPacket'), 'compact evidence packet validation is missing')
+assert.ok(reportHandler.includes('buildF1AnalysisMessages(input, repairContext)'), 'validation-guided structured analysis repair is missing')
+assert.ok(reportHandler.includes('validateF1AnalysisPacket'), 'structured evidence packet validation is missing')
 assert.ok(reportHandler.includes('composeF1ReportFromAnalysis'), 'application-owned final report composition is missing')
 assert.equal(reportHandler.includes('repairInvalidReportSections'), false, 'the model must not be asked to repair a large final-report schema')
 assert.equal(reportHandler.includes('repairF1ReportEvidence'), false, 'the production model path must use catalog ids instead of repairing generated quotes')
@@ -104,7 +104,7 @@ assert.ok(reportContract.includes('still return that dimension'), 'missing-infor
 assert.ok(reportContract.includes('Officer reasoning path for every question review'), 'officer-style reasoning path is missing')
 assert.ok(reportContract.includes('Absence of evidence is not negative evidence'), 'missing-versus-adverse evidence boundary is missing')
 assert.ok(reportContract.includes('FAM_MISREPRESENTATION_EVIDENCE_STANDARD'), 'misrepresentation evidence boundary is missing')
-assert.ok(reportContract.includes('analysisType":"f1_evidence_packet'), 'compact model judgment contract is missing')
+assert.ok(reportContract.includes('analysisType":"f1_evidence_packet'), 'structured model judgment contract is missing')
 assert.ok(reportContract.includes('application code—not you—will generate scores'), 'application-owned report composition boundary is missing')
 
 const providerNeutralUiFiles = [

@@ -148,6 +148,8 @@ const makeAnalysisPacket = (requestInput: any) => {
       finding: ['f1_19', 'f1_20'].includes(answer.questionId)
         ? '该回答直接回应了当前事实问题，但单独不足以建立离境意图。'
         : '该回答直接提供了当前问题所核对的事实。',
+      strengths: ['回答直接提供了问题要求核对的事实，并可与申请资料继续交叉核对。'],
+      improvements: [],
       nextInquiry: '核对该事实与申请材料及其他回答是否一致。',
     })),
     dimensions: F1_REPORT_DIMENSION_IDS.map(id => ({
@@ -165,15 +167,15 @@ const makeAnalysisPacket = (requestInput: any) => {
         : id === 'departure_intent'
           ? answerEvidenceId('f1_20')
           : answerEvidenceId('f1_01')],
-      nextAction: '根据本人真实材料补齐关键事实，并检查前后表述一致性。',
+      nextActions: ['根据本人真实材料补齐关键事实，并检查前后表述一致性。'],
     })),
   }
 }
 
 const validAnalysisPacket = makeAnalysisPacket(input)
-assert.ok(validateF1AnalysisPacket(validAnalysisPacket, input), 'compact model judgment packet should validate')
+assert.ok(validateF1AnalysisPacket(validAnalysisPacket, input), 'structured model judgment packet should validate')
 const composedReport = composeF1ReportFromAnalysis(validAnalysisPacket, input)
-assert.ok(composedReport, 'application code should compose a complete report from the compact packet')
+assert.ok(composedReport, 'application code should compose a complete report from the structured packet')
 assert.ok(validateServerReport(composedReport, input, { allowMaterializedEvidence: true }))
 assert.equal(composedReport.analysisMode, 'model')
 assert.equal(composedReport.questionReviews.length, input.answers.length)
@@ -182,11 +184,11 @@ assert.ok(JSON.stringify(validAnalysisPacket).length < JSON.stringify(composedRe
 
 const ungroundedAnalysisPacket = structuredClone(validAnalysisPacket)
 ungroundedAnalysisPacket.dimensions[0].evidenceIds = ['answer:f1_99']
-assert.equal(validateF1AnalysisPacket(ungroundedAnalysisPacket, input), null, 'the compact contract must reject invented evidence ids')
+assert.equal(validateF1AnalysisPacket(ungroundedAnalysisPacket, input), null, 'the structured contract must reject invented evidence ids')
 
 const missingQuestionAnalysisPacket = structuredClone(validAnalysisPacket)
 missingQuestionAnalysisPacket.questions.pop()
-assert.equal(validateF1AnalysisPacket(missingQuestionAnalysisPacket, input), null, 'the compact contract must cover every supplied answer')
+assert.equal(validateF1AnalysisPacket(missingQuestionAnalysisPacket, input), null, 'the structured contract must cover every supplied answer')
 
 const shallowAnalysisPacket = structuredClone(validAnalysisPacket)
 shallowAnalysisPacket.caseSynthesis = '信息不足。'
@@ -405,7 +407,9 @@ const serverMessages = buildServerReportMessages(input)
 assert.match(serverMessages[0].content, /silently self-check/)
 const compactMessages = buildF1AnalysisMessages(input)
 assert.match(compactMessages[0].content, /application code.+will generate scores/i)
-assert.match(compactMessages[0].content, /compact JSON object/i)
+assert.match(compactMessages[0].content, /structured JSON evidence-analysis object/i)
+assert.match(compactMessages[0].content, /do not shorten substantive analysis to conserve tokens/i)
+assert.match(compactMessages[0].content, /strengths must be non-empty/)
 assert.match(compactMessages[0].content, /Missing information is not negative evidence/)
 assert.match(compactMessages[0].content, /My parents.+fully answers who the sponsor is/)
 assert.match(compactMessages[1].content, /"evidenceCatalog"/)
@@ -453,11 +457,11 @@ const generatedFallback = await generateF1Report({
     const body = JSON.parse(options.body)
     assert.equal(body.thinking.type, 'disabled')
     assert.equal(body.reasoning_effort, 'low')
-    assert.equal(body.max_tokens, 2_500)
+    assert.equal(body.max_tokens, 8_000)
     assert.equal('timeoutMs' in options, false, 'report requests must not have a generation deadline')
     if (boundedAttempts === 2) {
       assert.equal(body.messages.length, 4)
-      assert.match(body.messages.at(-1).content, /compact evidence packet failed validation/)
+      assert.match(body.messages.at(-1).content, /structured evidence analysis failed validation/)
     }
     return {
       ok: true,
@@ -466,7 +470,7 @@ const generatedFallback = await generateF1Report({
     }
   },
 })
-assert.equal(boundedAttempts, 2, 'an invalid compact packet gets one bounded model-repair attempt before evidence fallback')
+assert.equal(boundedAttempts, 2, 'an invalid analysis packet gets one bounded model-repair attempt before evidence fallback')
 assert.ok(validateServerReport(generatedFallback, input, { allowMaterializedEvidence: true }))
 assert.equal(generatedFallback.analysisMode, 'evidence_only')
 assert.equal(generatedFallback.questionReviews.length, input.answers.length)
@@ -552,7 +556,7 @@ const generatedFullFallback = await generateF1Report({
     const body = JSON.parse(options.body)
     assert.equal(body.thinking.type, 'enabled')
     assert.equal(body.reasoning_effort, 'high')
-    assert.equal(body.max_tokens, 6_000)
+    assert.equal(body.max_tokens, 24_000)
     assert.equal('timeoutMs' in options, false)
     return {
       ok: true,
@@ -575,7 +579,7 @@ await generateF1Report({
     const body = JSON.parse(options.body)
     assert.equal(body.thinking.type, 'enabled')
     assert.equal(body.reasoning_effort, 'high')
-    assert.equal(body.max_tokens, 4_000)
+    assert.equal(body.max_tokens, 16_000)
     assert.equal('timeoutMs' in options, false)
     return {
       ok: true,

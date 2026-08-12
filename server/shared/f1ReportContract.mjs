@@ -541,7 +541,7 @@ export function validateF1AnalysisPacket(value, input, options = {}) {
   }
   if (!isRecord(value)) return null
   if (value.schemaVersion !== 1 || value.analysisType !== 'f1_evidence_packet') fail('ANALYSIS_IDENTITY')
-  const caseSynthesis = cleanText(value.caseSynthesis, 600)
+  const caseSynthesis = cleanText(value.caseSynthesis, 3_000)
   if (!caseSynthesis || isGenericAnalysisPlaceholder(caseSynthesis)) fail('ANALYSIS_CASE_SYNTHESIS')
   const prohibited = generatedAnalysisIssue(value)
   if (prohibited) fail(prohibited)
@@ -556,15 +556,19 @@ export function validateF1AnalysisPacket(value, input, options = {}) {
     }
     const factor = F1_REPORT_DIMENSION_IDS.includes(item.factor) ? item.factor : null
     const effect = ANALYSIS_QUESTION_EFFECTS.has(item.effect) ? item.effect : null
-    const finding = cleanText(item.finding, 260)
-    const nextInquiry = cleanText(item.nextInquiry, 260)
+    const finding = cleanText(item.finding, 1_500)
+    const strengths = cleanStringArray(item.strengths, 3, 1_000)
+    const improvements = cleanStringArray(item.improvements, 3, 1_000)
+    const nextInquiry = cleanText(item.nextInquiry, 1_500)
     if (item.questionId !== source.questionId) fail(`ANALYSIS_QUESTION_ORDER:${source.questionId}`)
     if (!factor) fail(`ANALYSIS_QUESTION_FACTOR:${source.questionId}`)
     if (!effect) fail(`ANALYSIS_QUESTION_EFFECT:${source.questionId}`)
     if (!finding || isGenericAnalysisPlaceholder(finding)) fail(`ANALYSIS_QUESTION_FINDING:${source.questionId}`)
+    if ((effect === 'supports' || effect === 'neutral') && strengths.length === 0) fail(`ANALYSIS_QUESTION_STRENGTHS:${source.questionId}`)
+    if ((effect === 'unestablished' || effect === 'concern') && improvements.length === 0) fail(`ANALYSIS_QUESTION_IMPROVEMENTS:${source.questionId}`)
     if (!nextInquiry || isGenericAnalysisPlaceholder(nextInquiry)) fail(`ANALYSIS_QUESTION_NEXT:${source.questionId}`)
     return factor && effect && finding && nextInquiry && item.questionId === source.questionId
-      ? { questionId: source.questionId, factor, effect, finding, nextInquiry }
+      ? { questionId: source.questionId, factor, effect, finding, strengths, improvements, nextInquiry }
       : null
   }).filter(Boolean)
 
@@ -577,21 +581,21 @@ export function validateF1AnalysisPacket(value, input, options = {}) {
       return null
     }
     const effect = ANALYSIS_DIMENSION_EFFECTS.has(item.effect) ? item.effect : null
-    const finding = cleanText(item.finding, 320)
-    const reasoning = cleanText(item.reasoning, 700)
-    const nextAction = cleanText(item.nextAction, 260)
-    const evidenceIds = cleanStringArray(item.evidenceIds, 3, 200)
+    const finding = cleanText(item.finding, 1_500)
+    const reasoning = cleanText(item.reasoning, 3_000)
+    const nextActions = cleanStringArray(item.nextActions, 3, 1_500)
+    const evidenceIds = cleanStringArray(item.evidenceIds, 5, 200)
     const concernType = ['none', 'contradiction', 'eligibility_fact'].includes(item.concernType) ? item.concernType : null
     const grounded = evidenceIds.length > 0 && evidenceIds.every(id => catalog.some(entry => entry.id === id))
     if (!effect) fail(`ANALYSIS_DIMENSION_EFFECT:${item.id}`)
     if (!finding || isGenericAnalysisPlaceholder(finding)) fail(`ANALYSIS_DIMENSION_FINDING:${item.id}`)
     if (!reasoning || isGenericAnalysisPlaceholder(reasoning)) fail(`ANALYSIS_DIMENSION_REASONING:${item.id}`)
-    if (!nextAction || isGenericAnalysisPlaceholder(nextAction)) fail(`ANALYSIS_DIMENSION_NEXT:${item.id}`)
+    if (nextActions.length === 0 || nextActions.some(isGenericAnalysisPlaceholder)) fail(`ANALYSIS_DIMENSION_NEXT:${item.id}`)
     if (!grounded) fail(`ANALYSIS_DIMENSION_EVIDENCE:${item.id}`)
     if (!concernType || (effect === 'concern') !== (concernType !== 'none')) fail(`ANALYSIS_DIMENSION_CONCERN_TYPE:${item.id}`)
     if (concernType === 'contradiction' && new Set(evidenceIds).size < 2) fail(`ANALYSIS_DIMENSION_CONTRADICTION_EVIDENCE:${item.id}`)
-    return effect && finding && reasoning && nextAction && grounded && concernType
-      ? { id: item.id, effect, finding, reasoning, nextAction, evidenceIds, concernType }
+    return effect && finding && reasoning && nextActions.length > 0 && grounded && concernType
+      ? { id: item.id, effect, finding, reasoning, nextActions, evidenceIds, concernType }
       : null
   }).filter(Boolean)
   if (new Set(dimensions.map(item => item.id)).size !== F1_REPORT_DIMENSION_IDS.length) fail('ANALYSIS_DIMENSION_SET')
@@ -631,7 +635,7 @@ export function composeF1ReportFromAnalysis(packet, input) {
       evidence,
       officialRuleIds: [...DIMENSION_DEFAULT_RULE_IDS[id]],
       reasoning: `证据作用：${calibration.effectLabel}。${assessment.reasoning}`,
-      actions: [assessment.nextAction],
+      actions: assessment.nextActions,
     }
   })
   let overallScore = Math.round(dimensions.reduce((total, dimension) => total + dimension.score * DIMENSION_WEIGHTS[dimension.id], 0))
@@ -665,7 +669,7 @@ export function composeF1ReportFromAnalysis(packet, input) {
     const evidence = dimensions.find(dimension => dimension.id === item.id).evidence[0]
     return {
       title: item.effect === 'concern' ? `澄清${DIMENSION_LABELS[item.id]}` : `补充${DIMENSION_LABELS[item.id]}`,
-      detail: item.nextAction,
+      detail: item.nextActions.join('；'),
       evidenceRefs: [evidenceReference(evidence)],
       officialRuleIds: [...DIMENSION_DEFAULT_RULE_IDS[item.id]],
     }
@@ -680,14 +684,8 @@ export function composeF1ReportFromAnalysis(packet, input) {
       verdict: calibration.verdict,
       summary: `${calibration.prefix}${assessment.finding}`,
       answerEvidence: source.answer,
-      strengths: assessment.effect === 'supports'
-        ? [`本题提供了与${DIMENSION_LABELS[assessment.factor]}相关的直接事实。`]
-        : assessment.effect === 'neutral'
-          ? ['本题已经直接回应，但对核心资格要件的证明作用有限。']
-          : [],
-      improvements: assessment.effect === 'unestablished' || assessment.effect === 'concern'
-        ? [assessment.finding]
-        : [],
+      strengths: assessment.strengths,
+      improvements: assessment.improvements,
       preparationDirection: `下一步核查：${assessment.nextInquiry}`,
     }
   })
@@ -695,7 +693,7 @@ export function composeF1ReportFromAnalysis(packet, input) {
   const actionPlan = actionCandidates.slice(0, 3).map((item, index) => ({
     label: `STEP ${index + 1}`,
     title: item.effect === 'concern' ? `先澄清${DIMENSION_LABELS[item.id]}` : item.effect === 'unestablished' ? `补齐${DIMENSION_LABELS[item.id]}` : `复核${DIMENSION_LABELS[item.id]}`,
-    detail: item.nextAction,
+    detail: item.nextActions.join('；'),
   }))
   const headline = anyPriority
     ? '本次回答已形成部分有效证据，但仍有实质疑点需要澄清。'
@@ -726,23 +724,23 @@ export function buildF1AnalysisMessages(input, repairContext = '') {
   const compactCriteria = F1_OFFICIAL_CRITERIA.map(({ id, rule, coachingBoundary }) => ({ id, rule, coachingBoundary }))
   const messages = [{
     role: 'system',
-    content: `You analyze one F-1 practice interview. Return one compact JSON object only. You provide evidence judgments; application code—not you—will generate scores, labels, official citations, evidence quotes, action plans, and page layout.
+    content: `You analyze one F-1 practice interview. Return one structured JSON evidence-analysis object only. You provide the detailed substantive analysis; application code—not you—will generate scores, labels, official citations, evidence quotes, and page layout.
 
 Use only supplied safeContext, answers, and evidenceCatalog. Never invent facts or quote text. Never predict approval/refusal. Never judge length, vocabulary, grammar, accent, confidence, nervousness, eye contact, or demeanor. Missing information is not negative evidence. Do not label fraud, lying, or misrepresentation. When supplied facts conflict, name only the exact provisional discrepancy and recommend a neutral clarification.
 
-For each answer, identify one primary factor and classify only its effect on the exact question asked:
+For each answer, identify one primary factor and classify only its effect on the exact question asked. Analyze every answer individually and substantively; do not omit detail to save tokens:
 - supports: responsive, consistent, and supplies a fact supporting the targeted qualification element.
 - neutral: responsive but neither materially supports nor undermines a qualification element.
 - unestablished: nonresponsive, vague, or missing a fact needed for that exact question; not a negative finding.
 - concern: supplied facts create a specific material contradiction or concrete eligibility concern. Do not speculate.
 A direct concise answer can be complete. "My parents" fully answers who the sponsor is even when the overall financial dimension still needs income or funding-reliability evidence.
 
-For each of the six dimensions, synthesize the whole supplied record as supports, unestablished, or concern. Select 1-3 exact evidenceIds. A concern requires concrete supplied evidence; otherwise use unestablished. The four core dimensions are study_authenticity, academic_plan, financial_capacity, and departure_intent. application_consistency compares exact supplied facts; overall_credibility means whole-record coherence and evidence sufficiency, never demeanor.
+For each of the six dimensions, synthesize the whole supplied record as supports, unestablished, or concern. Select up to 5 exact evidenceIds. Explain the evidence chain in detail: what the cited evidence establishes, how items corroborate or conflict, what remains unestablished, why that matters to the qualification element, and exactly what truthful information should be prepared next. A concern requires concrete supplied evidence; otherwise use unestablished. The four core dimensions are study_authenticity, academic_plan, financial_capacity, and departure_intent. application_consistency compares exact supplied facts; overall_credibility means whole-record coherence and evidence sufficiency, never demeanor.
 
 Required JSON:
-{"schemaVersion":1,"analysisType":"f1_evidence_packet","caseSynthesis":"concise Chinese synthesis connecting the strongest established evidence, the most important unresolved factor, and any exact material conflict without predicting outcome","questions":[{"questionId":"exact id","factor":"one dimension id","effect":"supports|neutral|unestablished|concern","finding":"concise Chinese judgment","nextInquiry":"one concise Chinese fact to verify or neutral follow-up"}],"dimensions":[{"id":"dimension id","effect":"supports|unestablished|concern","concernType":"none|contradiction|eligibility_fact","finding":"concise Chinese whole-record conclusion","reasoning":"concise Chinese explanation of how the cited evidence supports this conclusion or what exact evidence remains missing","evidenceIds":["exact catalog id"],"nextAction":"one concise Chinese preparation action"}]}
+{"schemaVersion":1,"analysisType":"f1_evidence_packet","caseSynthesis":"detailed Chinese whole-case synthesis connecting established evidence, unresolved qualification elements, and exact material conflicts without predicting outcome","questions":[{"questionId":"exact id","factor":"one dimension id","effect":"supports|neutral|unestablished|concern","finding":"detailed Chinese judgment explaining responsiveness, the facts supplied, consistency, and evidentiary effect","strengths":["specific thing this answer established or did well"],"improvements":["specific evidence gap, clarification, or truthful preparation need; empty when none"],"nextInquiry":"specific Chinese fact an officer would verify next or why no further inquiry is needed"}],"dimensions":[{"id":"dimension id","effect":"supports|unestablished|concern","concernType":"none|contradiction|eligibility_fact","finding":"detailed Chinese whole-record conclusion","reasoning":"detailed Chinese evidence chain explaining each cited item's role, corroboration or conflict, remaining gap, and qualification significance","evidenceIds":["exact catalog id"],"nextActions":["specific detailed Chinese preparation action"]}]}
 
-Return every question in input order and exactly these six unique dimension ids: ${JSON.stringify(F1_REPORT_DIMENSION_IDS)}. Set concernType="none" unless effect="concern". A contradiction concern requires at least two distinct evidenceIds showing the exact conflict; eligibility_fact identifies one concrete supplied fact that directly raises an eligibility issue. Keep findings, reasoning, and next fields factual and specific. Silently self-check ids, counts, evidence grounding, and prohibited claims before returning. Official criteria: ${JSON.stringify(compactCriteria)}`,
+Return every question in input order and exactly these six unique dimension ids: ${JSON.stringify(F1_REPORT_DIMENSION_IDS)}. Set concernType="none" unless effect="concern". A contradiction concern requires at least two distinct evidenceIds showing the exact conflict; eligibility_fact identifies one concrete supplied fact that directly raises an eligibility issue. Use detailed, concrete Chinese analysis throughout. Do not pad with generic coaching, but do not shorten substantive analysis to conserve tokens. For a supports or neutral answer, strengths must be non-empty and explain the exact responsive or evidentiary value. For unestablished or concern, improvements must be non-empty. Every dimension must contain 1-3 nextActions. Silently self-check ids, counts, evidence grounding, and prohibited claims before returning. Official criteria: ${JSON.stringify(compactCriteria)}`,
   }, { role: 'user', content: JSON.stringify({ safeContext: input.safeContext, answers: input.answers, evidenceCatalog }) }]
   const repair = typeof repairContext === 'string'
     ? { issues: repairContext ? [repairContext] : [], draft: null }
@@ -751,7 +749,7 @@ Return every question in input order and exactly these six unique dimension ids:
     if (repair.draft) messages.push({ role: 'assistant', content: JSON.stringify(repair.draft) })
     messages.push({
       role: 'user',
-      content: `The compact evidence packet failed validation. Return the entire corrected compact packet only. Issues: ${JSON.stringify(repair.issues)}. Preserve valid judgments, restore exact question order and six dimensions, use only exact evidenceIds, remove prohibited claims, and do not expand into a final report.`,
+      content: `The structured evidence analysis failed validation. Return the entire corrected detailed analysis packet only. Issues: ${JSON.stringify(repair.issues)}. Preserve valid detailed judgments, restore exact question order and six dimensions, use only exact evidenceIds, remove prohibited claims, and do not generate scores or page layout.`,
     })
   }
   return messages

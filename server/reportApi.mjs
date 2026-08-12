@@ -21,9 +21,9 @@ const REPORT_PATH = '/api/ai-report'
 const HEALTH_PATH = '/api/report-health'
 const DEFAULT_REPORT_BASE_URL = 'https://api.deepseek.com'
 const MAX_BODY_BYTES = 96_000
-const BASIC_OUTPUT_TOKENS = 2_500
-const STRONG_OUTPUT_TOKENS = 4_000
-const FULL_OUTPUT_TOKENS = 6_000
+const BASIC_OUTPUT_TOKENS = 8_000
+const STRONG_OUTPUT_TOKENS = 16_000
+const FULL_OUTPUT_TOKENS = 24_000
 const MAX_F1_REPORT_ATTEMPTS = 2
 const MAX_B2_REPORT_ATTEMPTS = 2
 const MAX_B2_OUTPUT_TOKENS = 10_000
@@ -134,7 +134,7 @@ function tierConfig(tier) {
       thinking: { type: 'enabled' },
       reasoningEffort: 'high',
       maxTokens: FULL_OUTPUT_TOKENS,
-      instruction: 'FULL DEPTH: check every supplied answer and cross-answer evidence chain, but return only the compact evidence packet.',
+      instruction: 'FULL DEPTH: analyze every supplied answer and every cross-answer evidence chain in detail. Do not shorten analysis to save tokens. Return the complete structured evidence analysis packet.',
     }
   }
   if (tier === 'strong') {
@@ -142,14 +142,14 @@ function tierConfig(tier) {
       thinking: { type: 'enabled' },
       reasoningEffort: 'high',
       maxTokens: STRONG_OUTPUT_TOKENS,
-      instruction: 'STRONG ANALYSIS: cross-check the supplied answers and profile, then return only the compact evidence packet.',
+      instruction: 'STRONG ANALYSIS: cross-check the supplied answers and profile in detail. Do not shorten analysis to save tokens. Return the complete structured evidence analysis packet.',
     }
   }
   return {
     thinking: { type: 'disabled' },
     reasoningEffort: 'low',
     maxTokens: BASIC_OUTPUT_TOKENS,
-    instruction: 'FAST BASIC ANALYSIS: assess each answered question directly and return only the compact evidence packet.',
+    instruction: 'BASIC ANALYSIS: assess every answered question carefully and return a detailed structured evidence analysis packet.',
   }
 }
 
