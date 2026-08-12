@@ -574,7 +574,7 @@ await generateF1Report({
     strongAttempts += 1
     const body = JSON.parse(options.body)
     assert.equal(body.thinking.type, 'enabled')
-    assert.equal(body.reasoning_effort, 'medium')
+    assert.equal(body.reasoning_effort, 'high')
     assert.equal(body.max_tokens, 4_000)
     assert.equal('timeoutMs' in options, false)
     return {

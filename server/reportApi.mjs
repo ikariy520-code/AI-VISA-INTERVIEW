@@ -140,7 +140,7 @@ function tierConfig(tier) {
   if (tier === 'strong') {
     return {
       thinking: { type: 'enabled' },
-      reasoningEffort: 'medium',
+      reasoningEffort: 'high',
       maxTokens: STRONG_OUTPUT_TOKENS,
       instruction: 'STRONG ANALYSIS: cross-check the supplied answers and profile, then return only the compact evidence packet.',
     }
