@@ -21,6 +21,7 @@ echo "=== Creating deployment package ==="
 tar czf "/tmp/$PACKAGE" \
   dist/ \
   server/ \
+  scripts/finalReportSmoke.mjs \
   scripts/orderAdmin.mjs \
   package.json \
   package-lock.json \

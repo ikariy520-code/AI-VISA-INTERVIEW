@@ -1,9 +1,10 @@
 import {
+  buildF1AnalysisMessages,
   buildDeterministicF1FallbackReport,
-  buildF1ReportMessages,
+  composeF1ReportFromAnalysis,
   getModelMessageContent,
-  repairF1ReportEvidence,
   sanitizeReportRequest as sanitizeF1ReportRequest,
+  validateF1AnalysisPacket,
   validateF1StructuredReport,
 } from './shared/f1ReportContract.mjs'
 import {
@@ -20,9 +21,9 @@ const REPORT_PATH = '/api/ai-report'
 const HEALTH_PATH = '/api/report-health'
 const DEFAULT_REPORT_BASE_URL = 'https://api.deepseek.com'
 const MAX_BODY_BYTES = 96_000
-const BASIC_OUTPUT_TOKENS = 6_000
-const STRONG_OUTPUT_TOKENS = 9_000
-const FULL_OUTPUT_TOKENS = 12_000
+const BASIC_OUTPUT_TOKENS = 2_500
+const STRONG_OUTPUT_TOKENS = 4_000
+const FULL_OUTPUT_TOKENS = 6_000
 const MAX_F1_REPORT_ATTEMPTS = 2
 const MAX_B2_REPORT_ATTEMPTS = 2
 const MAX_B2_OUTPUT_TOKENS = 10_000
@@ -133,7 +134,7 @@ function tierConfig(tier) {
       thinking: { type: 'enabled' },
       reasoningEffort: 'high',
       maxTokens: FULL_OUTPUT_TOKENS,
-      instruction: 'FULL DEPTH: perform the complete cross-answer analysis. Check all evidence chains and contradictions carefully while keeping every field concise.',
+      instruction: 'FULL DEPTH: check every supplied answer and cross-answer evidence chain, but return only the compact evidence packet.',
     }
   }
   if (tier === 'strong') {
@@ -141,46 +142,15 @@ function tierConfig(tier) {
       thinking: { type: 'enabled' },
       reasoningEffort: 'medium',
       maxTokens: STRONG_OUTPUT_TOKENS,
-      instruction: 'STRONG ANALYSIS: cross-check the supplied answers and profile, identify the strongest evidence and the most important preparation gaps, and keep the report concise.',
+      instruction: 'STRONG ANALYSIS: cross-check the supplied answers and profile, then return only the compact evidence packet.',
     }
   }
   return {
     thinking: { type: 'disabled' },
     reasoningEffort: 'low',
     maxTokens: BASIC_OUTPUT_TOKENS,
-    instruction: 'FAST BASIC ANALYSIS: assess each answered question directly, identify only the clearest strengths and gaps, and avoid unnecessary elaboration while completing the required JSON schema.',
+    instruction: 'FAST BASIC ANALYSIS: assess each answered question directly and return only the compact evidence packet.',
   }
-}
-
-function repairInvalidReportSections(draft, input, issues) {
-  const fallback = buildDeterministicF1FallbackReport(input)
-  const missingMostAnalysis = issues.some(issue => issue.startsWith('DIMENSION_'))
-    && issues.some(issue => issue.startsWith('QUESTION_REVIEW_'))
-    && issues.includes('HEADLINE')
-    && issues.includes('SUMMARY')
-  if (
-    !draft
-    || typeof draft !== 'object'
-    || Array.isArray(draft)
-    || issues.some(issue => issue.startsWith('FORBIDDEN_'))
-    || missingMostAnalysis
-  ) {
-    return { draft: fallback, evidenceOnly: true }
-  }
-  const repaired = JSON.parse(JSON.stringify(draft))
-  repaired.schemaVersion = 2
-  repaired.reportType = 'practice_readiness'
-  repaired.criteriaVersion = input.criteriaVersion
-  if (issues.includes('OVERALL_SCORE')) repaired.overallScore = fallback.overallScore
-  if (issues.includes('READINESS')) repaired.readiness = fallback.readiness
-  if (issues.includes('HEADLINE')) repaired.headline = fallback.headline
-  if (issues.includes('SUMMARY')) repaired.summary = fallback.summary
-  if (issues.includes('STRENGTHS')) repaired.strengths = fallback.strengths
-  if (issues.includes('PRIORITIES')) repaired.priorities = fallback.priorities
-  if (issues.includes('ACTION_PLAN')) repaired.actionPlan = fallback.actionPlan
-  if (issues.some(issue => issue.startsWith('DIMENSION_'))) repaired.dimensions = fallback.dimensions
-  if (issues.some(issue => issue.startsWith('QUESTION_REVIEW_'))) repaired.questionReviews = fallback.questionReviews
-  return { draft: repaired, evidenceOnly: false }
 }
 
 function postJsonWithoutDeadline(endpoint, { headers, body, signal }) {
@@ -249,7 +219,7 @@ export async function generateF1Report({
 
   for (let attempt = 0; attempt < MAX_F1_REPORT_ATTEMPTS; attempt += 1) {
     try {
-      const messages = buildF1ReportMessages(input, repairContext)
+      const messages = buildF1AnalysisMessages(input, repairContext)
       messages[0] = { ...messages[0], content: `${messages[0].content}\n\n${config.instruction}` }
       const upstream = await requestJson(endpoint, {
         headers: modelHeaders(apiKey),
@@ -272,44 +242,24 @@ export async function generateF1Report({
 
       const originalDraft = parseModelContent(upstream.payload)
       const validationIssues = []
-      const report = validateF1StructuredReport(originalDraft, input, {
+      const packet = validateF1AnalysisPacket(originalDraft, input, {
         onIssue: issue => { validationIssues.push(issue) },
       })
-      if (report) return report
-
-      const repairEvents = []
-      const evidenceRepairedDraft = repairF1ReportEvidence(originalDraft, input, {
-        onRepair: event => { repairEvents.push(event) },
-      })
-      const repairedIssues = []
-      const evidenceRepairedReport = validateF1StructuredReport(evidenceRepairedDraft, input, {
-        onIssue: issue => { repairedIssues.push(issue) },
-        allowMaterializedEvidence: true,
-      })
-      if (evidenceRepairedReport) {
-        console.warn(`[report] Corrected report evidence references without another model call: ${repairEvents.join(',')}`)
-        return evidenceRepairedReport
+      if (packet) {
+        const report = composeF1ReportFromAnalysis(packet, input)
+        if (report) return report
+        validationIssues.push('ANALYSIS_COMPOSITION_FAILED')
       }
 
-      const issues = repairedIssues.length > 0 ? [...new Set(repairedIssues)] : [...new Set(validationIssues)]
+      const issues = validationIssues.length > 0 ? [...new Set(validationIssues)] : ['ANALYSIS_VALIDATION_FAILED']
       lastError = Object.assign(new Error('REPORT_MODEL_VALIDATION_FAILED'), {
         code: 'REPORT_MODEL_VALIDATION_FAILED',
         validationIssues: issues,
       })
 
       if (attempt + 1 < MAX_F1_REPORT_ATTEMPTS) {
-        repairContext = { issues, draft: evidenceRepairedDraft }
+        repairContext = { issues, draft: originalDraft }
         continue
-      }
-
-      const structuralRepair = repairInvalidReportSections(evidenceRepairedDraft, input, issues)
-      const structurallyRepairedReport = validateF1StructuredReport(structuralRepair.draft, input, {
-        allowMaterializedEvidence: true,
-        analysisMode: structuralRepair.evidenceOnly ? 'evidence_only' : undefined,
-      })
-      if (structurallyRepairedReport) {
-        console.warn(`[report] Corrected invalid report sections after bounded model repair: ${issues.join(',')}`)
-        return structurallyRepairedReport
       }
       break
     } catch (error) {

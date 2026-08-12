@@ -1,10 +1,10 @@
 import dotenv from 'dotenv'
 import {
-  buildF1ReportMessages,
+  buildF1AnalysisMessages,
+  composeF1ReportFromAnalysis,
   getModelMessageContent,
-  repairF1ReportEvidence,
   sanitizeReportRequest,
-  validateF1StructuredReport,
+  validateF1AnalysisPacket,
 } from '../server/shared/f1ReportContract.mjs'
 
 dotenv.config({ path: '.env.local', quiet: true })
@@ -59,6 +59,7 @@ let lastError
 let repairContext = ''
 let validationIssues = []
 let attempts = 0
+const startedAt = Date.now()
 for (attempts = 1; attempts <= 2; attempts += 1) {
   try {
     const response = await fetch(endpoint, {
@@ -69,13 +70,13 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
       },
       body: JSON.stringify({
         model,
-        messages: buildF1ReportMessages(input, repairContext),
+        messages: buildF1AnalysisMessages(input, repairContext),
         ...(supportsJsonMode ? { response_format: { type: 'json_object' } } : {}),
         ...(supportsReasoningOptions ? {
           thinking: { type: 'enabled' },
           reasoning_effort: 'high',
         } : {}),
-        max_tokens: 32_000,
+        max_tokens: 6_000,
         stream: false,
       }),
     })
@@ -83,31 +84,21 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
     const payload = await response.json().catch(() => null)
     if (!response.ok) throw new Error(`Report model request failed with status ${response.status}`)
     const content = getModelMessageContent(payload)
-    if (!content) throw new Error('Report model returned no final-report content')
-    const originalDraft = JSON.parse(content)
+    if (!content) throw new Error('Report model returned no evidence-analysis content')
+    const originalDraft = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
     parsed = originalDraft
     validationIssues = []
-    report = validateF1StructuredReport(parsed, input, {
+    const packet = validateF1AnalysisPacket(parsed, input, {
       onIssue: issue => { validationIssues.push(issue) },
     })
-    if (report) break
-    const repairEvents = []
-    const evidenceRepairedDraft = repairF1ReportEvidence(parsed, input, {
-      onRepair: event => { repairEvents.push(event) },
-    })
-    if (repairEvents.length > 0) {
-      const repairedIssues = []
-      report = validateF1StructuredReport(evidenceRepairedDraft, input, {
-        onIssue: issue => { repairedIssues.push(issue) },
-        allowMaterializedEvidence: true,
-      })
+    if (packet) {
+      report = composeF1ReportFromAnalysis(packet, input)
       if (report) break
-      parsed = evidenceRepairedDraft
-      validationIssues = repairedIssues
+      validationIssues.push('ANALYSIS_COMPOSITION_FAILED')
     }
     validationIssues = validationIssues.length > 0 ? [...new Set(validationIssues)] : ['UNKNOWN_VALIDATION_FAILURE']
     repairContext = { issues: validationIssues, draft: parsed }
-    lastError = new Error(`Report model output did not pass the evidence contract: ${validationIssues.join(',')}`)
+    lastError = new Error(`Report model output did not pass the compact evidence contract: ${validationIssues.join(',')}`)
   } catch (error) {
     lastError = error
     if (error instanceof SyntaxError) repairContext = { issues: ['INVALID_JSON'], draft: null }
@@ -130,4 +121,4 @@ if (!report.questionReviews.every(review => review.preparationDirection.startsWi
   throw new Error('One or more question reviews did not state the next officer inquiry')
 }
 
-console.log(`model-neutral-final-report-smoke=passed provider=${provider} model=${model} attempts=${attempts} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)
+console.log(`model-neutral-final-report-smoke=passed provider=${provider} model=${model} attempts=${attempts} durationMs=${Date.now() - startedAt} packetBytes=${Buffer.byteLength(JSON.stringify(parsed))} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)

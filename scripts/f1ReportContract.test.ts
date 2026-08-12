@@ -16,9 +16,12 @@ import {
   F1_OFFICIAL_CRITERIA_VERSION as SERVER_CRITERIA_VERSION,
 } from '../server/shared/f1OfficialCriteria.mjs'
 import {
+  buildF1AnalysisMessages,
   buildDeterministicF1FallbackReport,
   buildF1ReportMessages as buildServerReportMessages,
+  composeF1ReportFromAnalysis,
   repairF1ReportEvidence,
+  validateF1AnalysisPacket,
   validateF1StructuredReport as validateServerReport,
 } from '../server/shared/f1ReportContract.mjs'
 import { generateF1Report, reportTierForAnswerCount } from '../server/reportApi.mjs'
@@ -121,6 +124,82 @@ const evidenceCatalog = buildF1EvidenceCatalog(input)
 assert.ok(evidenceCatalog.some(item => item.id === 'answer:f1_01' && item.quote === 'Example University.'))
 assert.ok(evidenceCatalog.some(item => item.id === 'profile:school' && item.quote === 'Example University'))
 assert.equal(JSON.stringify(evidenceCatalog).includes('N123456789'), false)
+
+const makeAnalysisPacket = (requestInput: any) => {
+  const firstQuestionId = requestInput.answers[0].questionId
+  const availableIds = new Set(buildF1EvidenceCatalog(requestInput).map(item => item.id))
+  const answerEvidenceId = (preferred: string) => availableIds.has(`answer:${preferred}`)
+    ? `answer:${preferred}`
+    : `answer:${firstQuestionId}`
+  const questionFactor = (questionId: string) => {
+    if (['f1_11', 'f1_12', 'f1_13'].includes(questionId)) return 'financial_capacity'
+    if (['f1_05', 'f1_06', 'f1_07', 'f1_08', 'f1_09', 'f1_10'].includes(questionId)) return 'academic_plan'
+    if (['f1_19', 'f1_20', 'f1_21', 'f1_22'].includes(questionId)) return 'departure_intent'
+    return 'study_authenticity'
+  }
+  return {
+    schemaVersion: 1,
+    analysisType: 'f1_evidence_packet',
+    caseSynthesis: '现有回答已建立学校、专业和资助人等可核对事实，但完整资金链、学习计划与完成学业后的离美意图仍需要结合真实材料继续建立。',
+    questions: requestInput.answers.map((answer: any) => ({
+      questionId: answer.questionId,
+      factor: questionFactor(answer.questionId),
+      effect: ['f1_19', 'f1_20'].includes(answer.questionId) ? 'neutral' : 'supports',
+      finding: ['f1_19', 'f1_20'].includes(answer.questionId)
+        ? '该回答直接回应了当前事实问题，但单独不足以建立离境意图。'
+        : '该回答直接提供了当前问题所核对的事实。',
+      nextInquiry: '核对该事实与申请材料及其他回答是否一致。',
+    })),
+    dimensions: F1_REPORT_DIMENSION_IDS.map(id => ({
+      id,
+      effect: ['application_consistency', 'overall_credibility'].includes(id) ? 'supports' : 'unestablished',
+      concernType: 'none',
+      finding: ['application_consistency', 'overall_credibility'].includes(id)
+        ? '现有回答中已出现可交叉核对且暂未冲突的事实。'
+        : '现有问答提供了部分信息，但尚不足以完整建立该项资格要素。',
+      reasoning: ['application_consistency', 'overall_credibility'].includes(id)
+        ? '所引用回答包含可与申请摘要相互核对的学校或资助信息，当前记录没有提供相反事实。'
+        : '所引用回答只覆盖该要素的一部分，当前记录尚未提供足以完成整条判断链的事实。',
+      evidenceIds: [id === 'financial_capacity'
+        ? answerEvidenceId('f1_12')
+        : id === 'departure_intent'
+          ? answerEvidenceId('f1_20')
+          : answerEvidenceId('f1_01')],
+      nextAction: '根据本人真实材料补齐关键事实，并检查前后表述一致性。',
+    })),
+  }
+}
+
+const validAnalysisPacket = makeAnalysisPacket(input)
+assert.ok(validateF1AnalysisPacket(validAnalysisPacket, input), 'compact model judgment packet should validate')
+const composedReport = composeF1ReportFromAnalysis(validAnalysisPacket, input)
+assert.ok(composedReport, 'application code should compose a complete report from the compact packet')
+assert.ok(validateServerReport(composedReport, input, { allowMaterializedEvidence: true }))
+assert.equal(composedReport.analysisMode, 'model')
+assert.equal(composedReport.questionReviews.length, input.answers.length)
+assert.equal(composedReport.dimensions.length, F1_REPORT_DIMENSION_IDS.length)
+assert.ok(JSON.stringify(validAnalysisPacket).length < JSON.stringify(composedReport).length * 0.7, 'model output should be materially smaller than the composed report')
+
+const ungroundedAnalysisPacket = structuredClone(validAnalysisPacket)
+ungroundedAnalysisPacket.dimensions[0].evidenceIds = ['answer:f1_99']
+assert.equal(validateF1AnalysisPacket(ungroundedAnalysisPacket, input), null, 'the compact contract must reject invented evidence ids')
+
+const missingQuestionAnalysisPacket = structuredClone(validAnalysisPacket)
+missingQuestionAnalysisPacket.questions.pop()
+assert.equal(validateF1AnalysisPacket(missingQuestionAnalysisPacket, input), null, 'the compact contract must cover every supplied answer')
+
+const shallowAnalysisPacket = structuredClone(validAnalysisPacket)
+shallowAnalysisPacket.caseSynthesis = '信息不足。'
+shallowAnalysisPacket.dimensions[0].reasoning = '建议补充。'
+assert.equal(validateF1AnalysisPacket(shallowAnalysisPacket, input), null, 'a weak model must not pass with generic placeholder analysis')
+
+const concernAnalysisPacket = structuredClone(validAnalysisPacket)
+concernAnalysisPacket.dimensions.find((item: any) => item.id === 'financial_capacity').effect = 'concern'
+concernAnalysisPacket.dimensions.find((item: any) => item.id === 'financial_capacity').concernType = 'eligibility_fact'
+const concernComposedReport = composeF1ReportFromAnalysis(concernAnalysisPacket, input)
+assert.ok(concernComposedReport)
+assert.equal(concernComposedReport.dimensions.find((item: any) => item.id === 'financial_capacity').status, 'priority')
+assert.ok(concernComposedReport.overallScore <= 59, 'a model concern must be calibrated by application-owned scoring guardrails')
 
 const catalogEvidenceReport: any = structuredClone(validReport)
 for (const dimension of catalogEvidenceReport.dimensions) dimension.evidence = [{ evidenceId: 'answer:f1_01' }]
@@ -318,6 +397,20 @@ assert.match(messages[1].content, /"answer:f1_01"/)
 
 const serverMessages = buildServerReportMessages(input)
 assert.match(serverMessages[0].content, /silently self-check/)
+const compactMessages = buildF1AnalysisMessages(input)
+assert.match(compactMessages[0].content, /application code.+will generate scores/i)
+assert.match(compactMessages[0].content, /compact JSON object/i)
+assert.match(compactMessages[0].content, /Missing information is not negative evidence/)
+assert.match(compactMessages[0].content, /My parents.+fully answers who the sponsor is/)
+assert.match(compactMessages[1].content, /"evidenceCatalog"/)
+const compactRepairMessages = buildF1AnalysisMessages(input, {
+  issues: ['ANALYSIS_DIMENSION_EVIDENCE:financial_capacity'],
+  draft: validAnalysisPacket,
+})
+assert.equal(compactRepairMessages.length, 4)
+assert.equal(compactRepairMessages[2].role, 'assistant')
+assert.match(compactRepairMessages[3].content, /failed validation/)
+assert.match(compactRepairMessages[3].content, /ANALYSIS_DIMENSION_EVIDENCE:financial_capacity/)
 const retryMessages = buildServerReportMessages(input, 'DIMENSION_EVIDENCE_UNGROUNDED:application_consistency')
 assert.equal(retryMessages.length, 3)
 assert.match(retryMessages[2].content, /strict machine validator/)
@@ -354,11 +447,11 @@ const generatedFallback = await generateF1Report({
     const body = JSON.parse(options.body)
     assert.equal(body.thinking.type, 'disabled')
     assert.equal(body.reasoning_effort, 'low')
-    assert.equal(body.max_tokens, 6_000)
+    assert.equal(body.max_tokens, 2_500)
     assert.equal('timeoutMs' in options, false, 'report requests must not have a generation deadline')
     if (boundedAttempts === 2) {
       assert.equal(body.messages.length, 4)
-      assert.match(body.messages.at(-1).content, /strict machine validator/)
+      assert.match(body.messages.at(-1).content, /compact evidence packet failed validation/)
     }
     return {
       ok: true,
@@ -367,7 +460,7 @@ const generatedFallback = await generateF1Report({
     }
   },
 })
-assert.equal(boundedAttempts, 2, 'an invalid standard report gets one bounded model-repair attempt before evidence fallback')
+assert.equal(boundedAttempts, 2, 'an invalid compact packet gets one bounded model-repair attempt before evidence fallback')
 assert.ok(validateServerReport(generatedFallback, input, { allowMaterializedEvidence: true }))
 assert.equal(generatedFallback.analysisMode, 'evidence_only')
 assert.equal(generatedFallback.questionReviews.length, input.answers.length)
@@ -397,7 +490,7 @@ const portableModelReport = await generateF1Report({
     return {
       ok: true,
       status: 200,
-      payload: { choices: [{ message: { content: JSON.stringify(catalogEvidenceReport) } }] },
+      payload: { choices: [{ message: { content: JSON.stringify(validAnalysisPacket) } }] },
     }
   },
 })
@@ -421,11 +514,11 @@ const guidedRepairReport = await generateF1Report({
       }
     }
     assert.equal(body.messages.length, 4)
-    assert.match(body.messages.at(-1).content, /Validation issues:/)
+    assert.match(body.messages.at(-1).content, /ANALYSIS_IDENTITY/)
     return {
       ok: true,
       status: 200,
-      payload: { choices: [{ message: { content: JSON.stringify(catalogEvidenceReport) } }] },
+      payload: { choices: [{ message: { content: JSON.stringify(validAnalysisPacket) } }] },
     }
   },
 })
@@ -453,7 +546,7 @@ const generatedFullFallback = await generateF1Report({
     const body = JSON.parse(options.body)
     assert.equal(body.thinking.type, 'enabled')
     assert.equal(body.reasoning_effort, 'high')
-    assert.equal(body.max_tokens, 12_000)
+    assert.equal(body.max_tokens, 6_000)
     assert.equal('timeoutMs' in options, false)
     return {
       ok: true,
@@ -462,7 +555,7 @@ const generatedFullFallback = await generateF1Report({
     }
   },
 })
-assert.equal(fullAttempts, 2, 'an invalid full report gets one high-quality repair attempt before fallback')
+assert.equal(fullAttempts, 2, 'an invalid full-interview packet gets one repair attempt before fallback')
 assert.equal(generatedFullFallback.analysisMode, 'evidence_only')
 
 let strongAttempts = 0
@@ -476,7 +569,7 @@ await generateF1Report({
     const body = JSON.parse(options.body)
     assert.equal(body.thinking.type, 'enabled')
     assert.equal(body.reasoning_effort, 'medium')
-    assert.equal(body.max_tokens, 9_000)
+    assert.equal(body.max_tokens, 4_000)
     assert.equal('timeoutMs' in options, false)
     return {
       ok: true,
@@ -487,24 +580,25 @@ await generateF1Report({
 })
 assert.equal(strongAttempts, 2)
 
-let structuralRepairAttempts = 0
-const structurallyRepaired = await generateF1Report({
+let applicationCompositionAttempts = 0
+const applicationComposed = await generateF1Report({
   apiKey: 'test-only',
   endpoint: 'https://api.deepseek.com/chat/completions',
   model: 'deepseek-v4-pro',
   input,
   requestJson: async () => {
-    structuralRepairAttempts += 1
+    applicationCompositionAttempts += 1
     return {
       ok: true,
       status: 200,
-      payload: { choices: [{ message: { content: JSON.stringify({ ...catalogEvidenceReport, strengths: [] }) } }] },
+      payload: { choices: [{ message: { content: JSON.stringify(validAnalysisPacket) } }] },
     }
   },
 })
-assert.equal(structuralRepairAttempts, 2)
-assert.equal(structurallyRepaired.analysisMode, 'model', 'a small schema defect should be repaired locally without discarding valid model analysis')
-assert.ok(structurallyRepaired.strengths.length >= 1)
+assert.equal(applicationCompositionAttempts, 1)
+assert.equal(applicationComposed.analysisMode, 'model')
+assert.ok(applicationComposed.strengths.length >= 1, 'application code must add report sections the model never generated')
+assert.equal(applicationComposed.actionPlan.length, 3)
 
 const forbiddenWordsInAnswerInput = {
   ...input,
