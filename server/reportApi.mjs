@@ -146,10 +146,10 @@ function tierConfig(tier) {
     }
   }
   return {
-    thinking: { type: 'disabled' },
-    reasoningEffort: 'low',
+    thinking: { type: 'enabled' },
+    reasoningEffort: 'high',
     maxTokens: BASIC_OUTPUT_TOKENS,
-    instruction: 'BASIC ANALYSIS: assess every answered question carefully and return a detailed structured evidence analysis packet.',
+    instruction: 'BASIC-EVIDENCE ANALYSIS: the record is shorter, but analyze every supplied answer with full care and return a detailed structured evidence analysis packet. Do not infer facts that were not discussed.',
   }
 }
 

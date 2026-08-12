@@ -458,8 +458,8 @@ const generatedFallback = await generateF1Report({
   requestJson: async (_endpoint: string, options: any) => {
     boundedAttempts += 1
     const body = JSON.parse(options.body)
-    assert.equal(body.thinking.type, 'disabled')
-    assert.equal(body.reasoning_effort, 'low')
+    assert.equal(body.thinking.type, 'enabled')
+    assert.equal(body.reasoning_effort, 'high')
     assert.equal(body.max_tokens, 8_000)
     assert.equal('timeoutMs' in options, false, 'report requests must not have a generation deadline')
     if (boundedAttempts === 2) {
