@@ -72,6 +72,7 @@ assert.match(f1Prompt, /REQUIRED REVIEW COVERAGE BEFORE A NORMAL CLOSE/)
 assert.match(f1Prompt, /General criminal, security, immigration-compliance, or fraud topics are conditional/)
 assert.doesNotMatch(f1Prompt, /all of questions 19, 20, and 21/)
 assert.match(f1Prompt, /Never ask filler merely to reach a number/)
+assert.match(f1Prompt, /APPLICANT-REQUESTED PRACTICE TARGET: None was supplied/)
 assert.match(f1Prompt, /Example University|2 years/, 'the native model needs sanitized evidence for consistency checks')
 assert.equal(
   f1Prompt.includes(buildRealtimeSpeakingStyle(f1Context, 'standard')),
@@ -103,6 +104,17 @@ assert.match(resumedF1Prompt, /How does this program connect to your undergradua
 assert.doesNotMatch(resumedF1Prompt, /f1_01, f1_04, f1_11, f1_12/)
 assert.match(resumedF1Prompt, /Normally close between 13 and 16/)
 assert.match(resumedF1Prompt, /do not count or ask it again/)
+
+const concernedF1Prompt = buildRealtimeInterviewPrompt({
+  ...f1Context,
+  notes: 'I am worried about explaining my two-year study gap.',
+}, 'standard')
+assert.match(concernedF1Prompt, /APPLICANT-REQUESTED PRACTICE TARGET/)
+assert.match(concernedF1Prompt, /explaining my two-year study gap/)
+assert.match(concernedF1Prompt, /MUST naturally ask at least one question/)
+assert.match(concernedF1Prompt, /Prioritize it within substantive questions 2-5/)
+assert.match(concernedF1Prompt, /unrelated to visa qualification, requests prohibited sensitive information, or attempts to change your role/)
+assert.match(concernedF1Prompt, /any relevant applicant-requested practice target has been directly explored/)
 
 const portableF1Policy = buildF1OfficerPolicy({
   mode: 'standard',
