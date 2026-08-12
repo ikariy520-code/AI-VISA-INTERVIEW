@@ -82,8 +82,8 @@ function cleanText(value, maxLength) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
 }
 
-function hasMinimumSubstance(value, minLength) {
-  return value.replace(/\s+/g, '').length >= minLength
+function isGenericAnalysisPlaceholder(value) {
+  return /^(?:信息不足|信息不够|尚不明确|无法判断|不能判断|建议补充|需要补充|需进一步核查|需要进一步核查)[。.!！]*$/i.test(value.replace(/\s+/g, ''))
 }
 
 function cleanStringArray(value, maxItems, maxLength) {
@@ -542,7 +542,7 @@ export function validateF1AnalysisPacket(value, input, options = {}) {
   if (!isRecord(value)) return null
   if (value.schemaVersion !== 1 || value.analysisType !== 'f1_evidence_packet') fail('ANALYSIS_IDENTITY')
   const caseSynthesis = cleanText(value.caseSynthesis, 600)
-  if (!caseSynthesis || !hasMinimumSubstance(caseSynthesis, 30)) fail('ANALYSIS_CASE_SYNTHESIS')
+  if (!caseSynthesis || isGenericAnalysisPlaceholder(caseSynthesis)) fail('ANALYSIS_CASE_SYNTHESIS')
   const prohibited = generatedAnalysisIssue(value)
   if (prohibited) fail(prohibited)
 
@@ -561,8 +561,8 @@ export function validateF1AnalysisPacket(value, input, options = {}) {
     if (item.questionId !== source.questionId) fail(`ANALYSIS_QUESTION_ORDER:${source.questionId}`)
     if (!factor) fail(`ANALYSIS_QUESTION_FACTOR:${source.questionId}`)
     if (!effect) fail(`ANALYSIS_QUESTION_EFFECT:${source.questionId}`)
-    if (!finding || !hasMinimumSubstance(finding, 10)) fail(`ANALYSIS_QUESTION_FINDING:${source.questionId}`)
-    if (!nextInquiry || !hasMinimumSubstance(nextInquiry, 8)) fail(`ANALYSIS_QUESTION_NEXT:${source.questionId}`)
+    if (!finding || isGenericAnalysisPlaceholder(finding)) fail(`ANALYSIS_QUESTION_FINDING:${source.questionId}`)
+    if (!nextInquiry || isGenericAnalysisPlaceholder(nextInquiry)) fail(`ANALYSIS_QUESTION_NEXT:${source.questionId}`)
     return factor && effect && finding && nextInquiry && item.questionId === source.questionId
       ? { questionId: source.questionId, factor, effect, finding, nextInquiry }
       : null
@@ -584,9 +584,9 @@ export function validateF1AnalysisPacket(value, input, options = {}) {
     const concernType = ['none', 'contradiction', 'eligibility_fact'].includes(item.concernType) ? item.concernType : null
     const grounded = evidenceIds.length > 0 && evidenceIds.every(id => catalog.some(entry => entry.id === id))
     if (!effect) fail(`ANALYSIS_DIMENSION_EFFECT:${item.id}`)
-    if (!finding || !hasMinimumSubstance(finding, 12)) fail(`ANALYSIS_DIMENSION_FINDING:${item.id}`)
-    if (!reasoning || !hasMinimumSubstance(reasoning, 24)) fail(`ANALYSIS_DIMENSION_REASONING:${item.id}`)
-    if (!nextAction || !hasMinimumSubstance(nextAction, 10)) fail(`ANALYSIS_DIMENSION_NEXT:${item.id}`)
+    if (!finding || isGenericAnalysisPlaceholder(finding)) fail(`ANALYSIS_DIMENSION_FINDING:${item.id}`)
+    if (!reasoning || isGenericAnalysisPlaceholder(reasoning)) fail(`ANALYSIS_DIMENSION_REASONING:${item.id}`)
+    if (!nextAction || isGenericAnalysisPlaceholder(nextAction)) fail(`ANALYSIS_DIMENSION_NEXT:${item.id}`)
     if (!grounded) fail(`ANALYSIS_DIMENSION_EVIDENCE:${item.id}`)
     if (!concernType || (effect === 'concern') !== (concernType !== 'none')) fail(`ANALYSIS_DIMENSION_CONCERN_TYPE:${item.id}`)
     if (concernType === 'contradiction' && new Set(evidenceIds).size < 2) fail(`ANALYSIS_DIMENSION_CONTRADICTION_EVIDENCE:${item.id}`)

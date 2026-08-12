@@ -193,6 +193,12 @@ shallowAnalysisPacket.caseSynthesis = '信息不足。'
 shallowAnalysisPacket.dimensions[0].reasoning = '建议补充。'
 assert.equal(validateF1AnalysisPacket(shallowAnalysisPacket, input), null, 'a weak model must not pass with generic placeholder analysis')
 
+const conciseAnalysisPacket = structuredClone(validAnalysisPacket)
+conciseAnalysisPacket.questions[2].finding = '直接否认。'
+conciseAnalysisPacket.dimensions[0].finding = '暂未冲突。'
+conciseAnalysisPacket.dimensions[0].reasoning = '现有回答一致。'
+assert.ok(validateF1AnalysisPacket(conciseAnalysisPacket, input), 'concise substantive judgments must not be rejected for length')
+
 const concernAnalysisPacket = structuredClone(validAnalysisPacket)
 concernAnalysisPacket.dimensions.find((item: any) => item.id === 'financial_capacity').effect = 'concern'
 concernAnalysisPacket.dimensions.find((item: any) => item.id === 'financial_capacity').concernType = 'eligibility_fact'

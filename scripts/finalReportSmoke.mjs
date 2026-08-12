@@ -59,6 +59,7 @@ let lastError
 let repairContext = ''
 let validationIssues = []
 let attempts = 0
+const repairHistory = []
 const startedAt = Date.now()
 for (attempts = 1; attempts <= 2; attempts += 1) {
   try {
@@ -97,11 +98,15 @@ for (attempts = 1; attempts <= 2; attempts += 1) {
       validationIssues.push('ANALYSIS_COMPOSITION_FAILED')
     }
     validationIssues = validationIssues.length > 0 ? [...new Set(validationIssues)] : ['UNKNOWN_VALIDATION_FAILURE']
+    repairHistory.push(validationIssues)
     repairContext = { issues: validationIssues, draft: parsed }
     lastError = new Error(`Report model output did not pass the compact evidence contract: ${validationIssues.join(',')}`)
   } catch (error) {
     lastError = error
-    if (error instanceof SyntaxError) repairContext = { issues: ['INVALID_JSON'], draft: null }
+    if (error instanceof SyntaxError) {
+      repairHistory.push(['INVALID_JSON'])
+      repairContext = { issues: ['INVALID_JSON'], draft: null }
+    }
   }
 }
 
@@ -121,4 +126,8 @@ if (!report.questionReviews.every(review => review.preparationDirection.startsWi
   throw new Error('One or more question reviews did not state the next officer inquiry')
 }
 
-console.log(`model-neutral-final-report-smoke=passed provider=${provider} model=${model} attempts=${attempts} durationMs=${Date.now() - startedAt} packetBytes=${Buffer.byteLength(JSON.stringify(parsed))} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)
+console.log(`model-neutral-final-report-smoke=passed provider=${provider} model=${model} attempts=${attempts} durationMs=${Date.now() - startedAt} packetBytes=${Buffer.byteLength(JSON.stringify(parsed))} dimensions=${report.dimensions.length} questions=${report.questionReviews.length} repairIssues=${JSON.stringify(repairHistory)}`)
+console.log(`model-neutral-final-report-quality=${JSON.stringify({
+  summary: report.summary,
+  dimensions: report.dimensions.map(item => ({ id: item.id, status: item.status, score: item.score, summary: item.summary })),
+})}`)
