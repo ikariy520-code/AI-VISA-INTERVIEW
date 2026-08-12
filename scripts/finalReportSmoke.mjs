@@ -125,6 +125,14 @@ for (const review of report.questionReviews) {
 if (!report.questionReviews.every(review => review.preparationDirection.startsWith('下一步核查：'))) {
   throw new Error('One or more question reviews did not state the next officer inquiry')
 }
+const academicPlan = report.dimensions.find(item => item.id === 'academic_plan')
+const financialCapacity = report.dimensions.find(item => item.id === 'financial_capacity')
+if (academicPlan?.status !== 'needs_evidence') {
+  throw new Error('Smoke fixture must not establish academic preparation from school and major names alone')
+}
+if (financialCapacity?.status !== 'needs_evidence') {
+  throw new Error('Smoke fixture must not establish the complete funding chain from sponsor and annual budget alone')
+}
 
 console.log(`model-neutral-final-report-smoke=passed provider=${provider} model=${model} attempts=${attempts} durationMs=${Date.now() - startedAt} packetBytes=${Buffer.byteLength(JSON.stringify(parsed))} dimensions=${report.dimensions.length} questions=${report.questionReviews.length} repairIssues=${JSON.stringify(repairHistory)}`)
 console.log(`model-neutral-final-report-quality=${JSON.stringify({

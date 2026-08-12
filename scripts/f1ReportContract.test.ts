@@ -412,6 +412,9 @@ assert.match(compactMessages[0].content, /do not shorten substantive analysis to
 assert.match(compactMessages[0].content, /strengths must be non-empty/)
 assert.match(compactMessages[0].content, /Missing information is not negative evidence/)
 assert.match(compactMessages[0].content, /My parents.+fully answers who the sponsor is/)
+assert.match(compactMessages[0].content, /Merely naming a school and major is not enough/)
+assert.match(compactMessages[0].content, /Sponsor identity or a budget figure alone is not enough/)
+assert.match(compactMessages[0].content, /major core dimensions unestablished is itself unestablished/)
 assert.match(compactMessages[1].content, /"evidenceCatalog"/)
 const compactRepairMessages = buildF1AnalysisMessages(input, {
   issues: ['ANALYSIS_DIMENSION_EVIDENCE:financial_capacity'],
