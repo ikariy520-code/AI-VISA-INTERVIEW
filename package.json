@@ -1,14 +1,20 @@
 {
   "name": "ai-visa-interview",
+  "description": "Local-first AI visa interview practice with pluggable realtime voice and report models.",
+  "author": "AI Visa Interview contributors",
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "main": "desktop/main.mjs",
   "scripts": {
-    "test": "npm run test:order && npm run test:officers && npm run test:f1-controller && npm run test:b2-controller && npm run test:realtime-turn && npm run test:interview-policy && npm run test:report-depth && npm run test:report-turn-grouping && npm run test:f1-report && npm run test:b2-report && npm run test:architecture",
+    "test": "npm run test:order && npm run test:officers && npm run test:f1-controller && npm run test:b2-controller && npm run test:realtime-turn && npm run test:realtime-providers && npm run test:interview-policy && npm run test:report-depth && npm run test:report-turn-grouping && npm run test:f1-report && npm run test:b2-report && npm run test:architecture",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "start": "node server/index.mjs",
+    "desktop:run": "npm run build && electron .",
+    "desktop:dist": "npm run build && electron-builder --win dir",
+    "desktop:installer": "npm run build && electron-builder --win nsis",
     "deploy": "bash scripts/deploy.sh",
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
     "smoke:deepseek": "node scripts/deepseekConnectivitySmoke.mjs",
@@ -23,6 +29,7 @@
     "test:f1-controller": "node --experimental-strip-types scripts/f1InterviewController.test.ts",
     "test:b2-controller": "node --experimental-strip-types scripts/b2InterviewController.test.ts",
     "test:realtime-turn": "node --experimental-strip-types scripts/realtimeTurnGuard.test.ts",
+    "test:realtime-providers": "node scripts/realtimeProviderSession.test.mjs",
     "test:interview-policy": "node --experimental-strip-types scripts/realtimeInterviewPolicy.test.ts",
     "test:report-depth": "node --experimental-strip-types scripts/reportDepth.test.ts",
     "test:report-turn-grouping": "node --experimental-strip-types scripts/reportTurnGrouping.test.ts",
@@ -32,12 +39,11 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
-    "electron-store": "^10.1.0",
     "framer-motion": "^11.15.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.4.0",
-    "react-router-dom": "^6.28.0",
+    "react-router-dom": "7.18.2",
     "ws": "^8.21.0"
   },
   "devDependencies": {
@@ -45,13 +51,60 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
+    "postcss": "8.5.26",
     "tailwindcss": "^3.4.16",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
-    "concurrently": "^9.2.1",
-    "electron": "^39.2.6",
-    "electron-builder": "^26.0.12",
-    "wait-on": "^8.0.3"
+    "electron": "43.4.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.aivisainterview.desktop",
+    "productName": "AI Visa Interview",
+    "electronVersion": "43.4.0",
+    "asar": true,
+    "files": [
+      "desktop/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "dist"
+      },
+      {
+        "from": "server",
+        "to": "server"
+      },
+      {
+        "from": "node_modules/dotenv",
+        "to": "node_modules/dotenv"
+      },
+      {
+        "from": "node_modules/ws",
+        "to": "node_modules/ws"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "AI-Visa-Interview-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AI Visa Interview"
+    }
   }
 }

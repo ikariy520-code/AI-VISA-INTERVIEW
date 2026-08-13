@@ -26,8 +26,10 @@ dotenv.config({
   path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env',
 })
 
-const PORT = Number(process.env.PORT) || 3000
+const requestedPort = Number(process.env.PORT)
+const PORT = Number.isInteger(requestedPort) && requestedPort >= 0 ? requestedPort : 3000
 const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0')
+const LOCAL_DESKTOP_MODE = process.env.LOCAL_DESKTOP_MODE === 'true'
 const DIST_DIR = join(fileURLToPath(import.meta.url), '..', '..', 'dist')
 
 const DOUBAO_APP_ID = process.env.DOUBAO_APP_ID || ''
@@ -205,15 +207,17 @@ async function main() {
       const pathname = req.url?.split('?')[0] ?? ''
       res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
 
-      const authHandled = await orderAuth.handleRequest(req, res, pathname)
-      if (authHandled) return
+      if (!LOCAL_DESKTOP_MODE) {
+        const authHandled = await orderAuth.handleRequest(req, res, pathname)
+        if (authHandled) return
+      }
 
       // ── API routes ──
-      if (pathname.startsWith('/api/') && !orderAuth.isAuthorized(req)) {
+      if (!LOCAL_DESKTOP_MODE && pathname.startsWith('/api/') && !orderAuth.isAuthorized(req)) {
         return orderAuth.unauthorized(res)
       }
 
-      if (pathname === '/api/ai-report') {
+      if (!LOCAL_DESKTOP_MODE && pathname === '/api/ai-report') {
         const reportAccess = orderAuth.reportAccess(req, req.headers['x-interview-attempt'])
         if (!reportAccess.allowed) return orderAuth.unauthorized(res, reportAccess)
       }
@@ -249,13 +253,14 @@ async function main() {
   })
 
   // ── WebSocket proxy ──
+  const desktopAccess = () => ({ allowed: true, role: 'admin', orderNumber: 'local-desktop' })
   const wsProxy = VOICE_PROVIDER === 'doubao' ? createWSProxy(server, {
     appId: DOUBAO_APP_ID,
     accessKey: DOUBAO_ACCESS_KEY,
     upstreamUrl: UPSTREAM_URL,
     maxConnections: WS_MAX_CONNECTIONS,
-    realtimeAccess: orderAuth.realtimeAccess,
-    reserveInterview: orderAuth.reserveInterview,
+    realtimeAccess: LOCAL_DESKTOP_MODE ? desktopAccess : orderAuth.realtimeAccess,
+    reserveInterview: LOCAL_DESKTOP_MODE ? desktopAccess : orderAuth.reserveInterview,
   }) : { close() {} }
 
   // ── graceful shutdown ──
@@ -276,13 +281,18 @@ async function main() {
 
   // ── listen ──
   server.listen(PORT, HOST, () => {
-    console.log(`[server] AI Visa Interview running at http://${HOST}:${PORT}`)
+    const address = server.address()
+    const activePort = typeof address === 'object' && address ? address.port : PORT
+    console.log(`[server] AI Visa Interview running at http://${HOST}:${activePort}`)
     console.log(`[server] Static files: ${DIST_DIR}`)
-    console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
-    console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
+    console.log(`[server] WebSocket   : ws://${HOST}:${activePort}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
+    console.log(`[server] Health      : http://${HOST}:${activePort}/api/realtime-health`)
     console.log(`[server] AI report   : ${reportHandler.configured ? `${reportHandler.provider} ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
-    console.log(`[server] Order gate  : ${orderAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
+    console.log(`[server] Order gate  : ${LOCAL_DESKTOP_MODE ? 'disabled for local desktop' : orderAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
     console.log(`[server] Orders      : ${orderAuth.orderCount} customer orders from ${orderAuth.ordersFile}; usage at ${orderAuth.usageFile}`)
+    const readyMessage = { type: 'server-ready', port: activePort }
+    process.send?.(readyMessage)
+    process.parentPort?.postMessage?.(readyMessage)
   })
 }
 

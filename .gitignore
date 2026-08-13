@@ -1,6 +1,7 @@
 node_modules
 dist
 .next
+release/
 
 .env
 .env.local

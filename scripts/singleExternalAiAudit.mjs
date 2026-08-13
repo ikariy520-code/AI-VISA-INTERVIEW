@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const root = process.cwd()
-const scanTargets = ['src', 'local', 'server', 'vite.config.ts']
+const scanTargets = ['src', 'local', 'server', 'desktop', 'vite.config.ts']
 const files = []
 
 function collect(path) {
@@ -42,7 +42,7 @@ const openAiProviderFiles = files
   .filter(item => item.content.includes('api.openai.com'))
 assert.deepEqual(
   openAiProviderFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
-  ['server/realtimeSessionApi.mjs'],
+  ['desktop/configStore.mjs', 'server/realtimeSessionApi.mjs', 'src/components/DesktopSetupGate.tsx'],
   'OpenAI credentials and endpoints must remain in the trusted realtime session handler',
 )
 const geminiProviderFiles = files
@@ -61,7 +61,7 @@ const providerFiles = files
   .filter(item => item.content.includes('api.deepseek.com') || item.content.includes('/chat/completions'))
 assert.deepEqual(
   providerFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
-  ['server/reportApi.mjs'],
+  ['desktop/configStore.mjs', 'server/reportApi.mjs', 'src/components/DesktopSetupGate.tsx'],
   'default report provider access must remain in the shared server-side report handler',
 )
 

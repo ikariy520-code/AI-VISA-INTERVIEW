@@ -19,6 +19,7 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
   private closed = false
   private muted = false
   private outputText = ''
+  private outputAudioActive = false
 
   constructor(private readonly options: RealtimeVoiceClientOptions) {}
 
@@ -100,7 +101,6 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
     this.audio = audio
     peer.ontrack = event => {
       audio.srcObject = event.streams[0]
-      this.options.onEvent({ type: 'response.output_audio.started' })
     }
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -150,9 +150,18 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
       this.options.onEvent({ type: 'conversation.item.input_audio_transcription.completed', text: event.transcript })
       return
     }
+    if (type === 'response.output_audio.delta' && !this.outputAudioActive) {
+      this.outputAudioActive = true
+      this.options.onEvent({ type: 'response.output_audio.started' })
+      return
+    }
     if (type === 'response.output_audio_transcript.delta' || type === 'response.output_text.delta') {
       const delta = typeof event.delta === 'string' ? event.delta : ''
       if (delta) {
+        if (!this.outputAudioActive) {
+          this.outputAudioActive = true
+          this.options.onEvent({ type: 'response.output_audio.started' })
+        }
         this.outputText += delta
         this.options.onEvent({ type: 'response.output_text.delta', delta })
       }
@@ -167,6 +176,7 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
       return
     }
     if (type === 'response.output_audio.done') {
+      this.outputAudioActive = false
       this.options.onEvent({ type: 'response.output_audio.done' })
       return
     }
@@ -175,6 +185,7 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
       return
     }
     if (type === 'response.cancelled' || type === 'response.canceled') {
+      this.outputAudioActive = false
       this.options.onEvent({ type: 'response.canceled' })
       return
     }

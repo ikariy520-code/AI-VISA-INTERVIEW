@@ -15,14 +15,15 @@ interface Props {
 type GateState = 'checking' | 'locked' | 'authenticated'
 
 export default function OrderGate({ children }: Props) {
-  const [state, setState] = useState<GateState>(import.meta.env.DEV ? 'authenticated' : 'checking')
-  const [access, setAccess] = useState<OrderAccess | null>(import.meta.env.DEV ? DEV_ORDER_ACCESS : null)
+  const localAccess = import.meta.env.DEV || Boolean(window.desktopBridge)
+  const [state, setState] = useState<GateState>(localAccess ? 'authenticated' : 'checking')
+  const [access, setAccess] = useState<OrderAccess | null>(localAccess ? DEV_ORDER_ACCESS : null)
   const [orderNumber, setOrderNumber] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const refreshAccess = useCallback(async () => {
-    if (import.meta.env.DEV) return DEV_ORDER_ACCESS
+    if (localAccess) return DEV_ORDER_ACCESS
     const response = await fetch('/api/auth/status', {
       cache: 'no-store',
       credentials: 'same-origin',
@@ -35,10 +36,10 @@ export default function OrderGate({ children }: Props) {
     if (!nextAccess) throw new Error('使用权益数据无效。')
     setAccess(nextAccess)
     return nextAccess
-  }, [])
+  }, [localAccess])
 
   useEffect(() => {
-    if (import.meta.env.DEV) return
+    if (localAccess) return
     const controller = new AbortController()
     let disposed = false
     const timeout = window.setTimeout(() => controller.abort(), 8_000)
@@ -84,7 +85,7 @@ export default function OrderGate({ children }: Props) {
       window.clearTimeout(timeout)
       controller.abort()
     }
-  }, [])
+  }, [localAccess])
 
   const submitOrder = async (event: FormEvent) => {
     event.preventDefault()

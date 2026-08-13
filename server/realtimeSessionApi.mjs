@@ -113,7 +113,7 @@ export function createRealtimeSessionHandler(options = {}) {
           provider,
           token: token.name,
           model: geminiModel,
-          voice: normalizeGeminiVoice(body.voice, geminiVoice),
+          voice: geminiVoice,
           endpoint: GEMINI_LIVE_URL,
           silenceDurationMs: safeSilence(body.endOfTurnSilenceMs),
         })
@@ -124,7 +124,7 @@ export function createRealtimeSessionHandler(options = {}) {
           writeJson(res, 503, { error: 'REALTIME_NOT_CONFIGURED', message: '请配置 OpenAI API Key。' })
           return true
         }
-        const voice = normalizeOpenAIVoice(body.voice, openaiVoice)
+        const voice = openaiVoice
         const session = {
           session: {
             type: 'realtime',
@@ -135,10 +135,8 @@ export function createRealtimeSessionHandler(options = {}) {
               input: {
                 transcription: { model: 'gpt-4o-mini-transcribe', language: 'en' },
                 turn_detection: {
-                  type: 'server_vad',
-                  threshold: 0.45,
-                  prefix_padding_ms: 300,
-                  silence_duration_ms: safeSilence(body.endOfTurnSilenceMs),
+                  type: 'semantic_vad',
+                  eagerness: 'low',
                   create_response: true,
                   interrupt_response: true,
                 },

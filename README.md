@@ -1,5 +1,16 @@
 # AI Visa Interview
 
+## Windows 本地桌面版
+
+项目现已提供 Windows 本地桌面架构：用户安装后首次填写一个实时语音模型和一个报告模型的凭据，即可双击使用，不需要部署云服务器。第一版实时语音支持豆包、Gemini Live 和 OpenAI Realtime；豆包配置页分别填写 `App ID` 与 `Access Token / Access Key`。详细构建、配置和安全说明见 [`docs/WINDOWS_DESKTOP.md`](docs/WINDOWS_DESKTOP.md)。
+
+```powershell
+npm install
+npm test
+npm run desktop:run
+npm run desktop:dist
+```
+
 这是一个面向 F1 / B2 的 AI 模拟面签项目。两类签证都把“实时面签”和“最终报告”明确拆开：
 
 - 当前由豆包端到端实时语音负责连续听取、理解、决定下一问并直接生成语音；本地程序不把模型回答替换成逐题脚本。
