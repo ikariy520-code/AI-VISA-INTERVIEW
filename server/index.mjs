@@ -18,6 +18,7 @@ import dotenv from 'dotenv'
 import { createWSProxy } from './wsProxy.mjs'
 import { createOrderAuth } from './orderAuth.mjs'
 import { createReportHandler } from './reportApi.mjs'
+import { createRealtimeSessionHandler } from './realtimeSessionApi.mjs'
 
 // ── config ───────────────────────────────────────────────
 
@@ -33,6 +34,13 @@ const DOUBAO_APP_ID = process.env.DOUBAO_APP_ID || ''
 const DOUBAO_ACCESS_KEY = process.env.DOUBAO_ACCESS_KEY || ''
 const UPSTREAM_URL = process.env.DOUBAO_REALTIME_URL || undefined
 const WS_MAX_CONNECTIONS = Number(process.env.WS_MAX_CONNECTIONS) || 30
+const VOICE_PROVIDER = String(process.env.VOICE_PROVIDER || 'doubao').trim().toLowerCase()
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ''
+const GEMINI_LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-3.1-flash-live-preview'
+const GEMINI_LIVE_VOICE = process.env.GEMINI_LIVE_VOICE || 'Kore'
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1'
+const OPENAI_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin'
 
 const ADMIN_ORDER_NUMBERS = process.env.ADMIN_ORDER_NUMBERS || process.env.INVITE_CODES || ''
 const ORDER_SESSION_SECRET = process.env.ORDER_SESSION_SECRET || process.env.INVITE_SESSION_SECRET || ''
@@ -131,18 +139,24 @@ async function serveIndexFallback(res) {
 
 // ── health endpoint ──────────────────────────────────────
 
-function handleHealth(_req, res) {
-  const ok = Boolean(DOUBAO_APP_ID && DOUBAO_ACCESS_KEY)
+function handleHealth(_req, res, realtimeSessionHandler) {
+  const ok = realtimeSessionHandler.configured
   res.statusCode = ok ? 200 : 503
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
   res.end(
     JSON.stringify({
       ok,
-      provider: 'realtime-voice',
+      provider: VOICE_PROVIDER,
       ...(ok ? {} : {
         code: 'REALTIME_NOT_CONFIGURED',
-        message: 'Realtime voice App ID or Access Token is not configured.',
+        message: VOICE_PROVIDER === 'doubao'
+          ? '请配置豆包 App ID 和 Access Token。'
+          : VOICE_PROVIDER === 'gemini'
+            ? '请配置 Gemini API Key。'
+            : VOICE_PROVIDER === 'openai'
+              ? '请配置 OpenAI API Key。'
+              : 'VOICE_PROVIDER 必须是 doubao、gemini 或 openai。',
       }),
     }),
   )
@@ -174,6 +188,17 @@ async function main() {
     supportsJsonMode: REPORT_SUPPORTS_JSON_MODE,
     supportsReasoningOptions: REPORT_SUPPORTS_REASONING_OPTIONS,
   })
+  const realtimeSessionHandler = createRealtimeSessionHandler({
+    provider: VOICE_PROVIDER,
+    doubaoAppId: DOUBAO_APP_ID,
+    doubaoAccessKey: DOUBAO_ACCESS_KEY,
+    geminiApiKey: GEMINI_API_KEY,
+    geminiModel: GEMINI_LIVE_MODEL,
+    geminiVoice: GEMINI_LIVE_VOICE,
+    openaiApiKey: OPENAI_API_KEY,
+    openaiModel: OPENAI_REALTIME_MODEL,
+    openaiVoice: OPENAI_REALTIME_VOICE,
+  })
 
   const server = createServer(async (req, res) => {
     try {
@@ -194,9 +219,10 @@ async function main() {
       }
 
       if (pathname === '/api/realtime-health' && (req.method === 'GET' || req.method === 'HEAD')) {
-        return handleHealth(req, res)
+        return handleHealth(req, res, realtimeSessionHandler)
       }
 
+      if (await realtimeSessionHandler(req, res)) return
       if (await reportHandler(req, res)) return
 
       // ── Static files + SPA fallback ──
@@ -223,14 +249,14 @@ async function main() {
   })
 
   // ── WebSocket proxy ──
-  const wsProxy = createWSProxy(server, {
+  const wsProxy = VOICE_PROVIDER === 'doubao' ? createWSProxy(server, {
     appId: DOUBAO_APP_ID,
     accessKey: DOUBAO_ACCESS_KEY,
     upstreamUrl: UPSTREAM_URL,
     maxConnections: WS_MAX_CONNECTIONS,
     realtimeAccess: orderAuth.realtimeAccess,
     reserveInterview: orderAuth.reserveInterview,
-  })
+  }) : { close() {} }
 
   // ── graceful shutdown ──
   function shutdown() {

@@ -23,7 +23,6 @@ const globallyForbidden = [
   ['ARK_TEXT_MODEL', 'legacy Ark text model'],
   ['ark.cn-beijing.volces.com/api/v3/chat/completions', 'legacy Ark text endpoint'],
   ['/api/feedback-report', 'legacy feedback route'],
-  ['api.openai.com', 'OpenAI API'],
   ['volc.bigasr', 'standalone ASR resource'],
   ['seed-tts-2.0', 'standalone TTS resource'],
 ]
@@ -35,6 +34,25 @@ for (const file of files) {
   }
   assert.equal(/sk-[a-zA-Z0-9_-]{16,}/.test(content), false, `API key-like secret found in ${relative(root, file)}`)
 }
+
+// Long-lived credentials and provider URLs remain in trusted server/desktop
+// processes. Browser modules may only call same-origin session/report routes.
+const openAiProviderFiles = files
+  .map(file => ({ file, content: readFileSync(file, 'utf8') }))
+  .filter(item => item.content.includes('api.openai.com'))
+assert.deepEqual(
+  openAiProviderFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
+  ['server/realtimeSessionApi.mjs'],
+  'OpenAI credentials and endpoints must remain in the trusted realtime session handler',
+)
+const geminiProviderFiles = files
+  .map(file => ({ file, content: readFileSync(file, 'utf8') }))
+  .filter(item => item.content.includes('generativelanguage.googleapis.com'))
+assert.deepEqual(
+  geminiProviderFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
+  ['server/realtimeSessionApi.mjs'],
+  'Gemini credentials and endpoints must remain in the trusted realtime session handler',
+)
 
 // DeepSeek credentials and provider URLs stay in the server-only report handler.
 // The browser and Vite bridge call the same-origin /api/ai-report route.
@@ -176,4 +194,4 @@ assert.ok(realtimeSmoke.includes('realtime-smoke=native-e2e-response-complete'),
 assert.equal(realtimeSmoke.includes('DOUBAO_EVENT.CHAT_TTS_TEXT'), false, 'native F1 smoke must not inject application-authored TTS')
 assert.equal(realtimeSmoke.includes('controlled-session-rotation-complete'), false, 'realtime smoke must not validate per-question Session rotation')
 
-console.log('model-neutral-report-and-doubao-voice-architecture-audit=passed')
+console.log('model-neutral-report-and-multi-provider-voice-architecture-audit=passed')

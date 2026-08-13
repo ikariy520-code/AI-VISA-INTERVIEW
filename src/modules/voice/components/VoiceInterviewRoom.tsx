@@ -50,11 +50,14 @@ import {
   isApprovedB2OfficerText,
   type B2InterviewState,
 } from '../../practice/services/b2InterviewController'
+import { createRealtimeClient } from '../services/createRealtimeClient'
 import {
-  DoubaoRealtimeClient,
+  isRealtimeVoiceProviderId,
   realtimeEventText,
-  type DoubaoRealtimeEvent,
-} from '../services/doubaoRealtime'
+  type RealtimeVoiceClient,
+  type RealtimeVoiceEvent,
+  type RealtimeVoiceProviderId,
+} from '../services/realtimeProvider'
 import RealtimeVoiceOrb from './RealtimeVoiceOrb'
 import { useOrderAccess } from '../../../shared/orderAccess'
 import type { LiveInterviewProgress } from '../../shared/store/interviewRecovery'
@@ -86,7 +89,7 @@ type Phase =
   | 'error'
 
 let messageSequence = 0
-const nextMessageId = () => `doubao-message-${++messageSequence}-${Date.now()}`
+const nextMessageId = () => `realtime-message-${++messageSequence}-${Date.now()}`
 const formatElapsed = (seconds: number) => {
   const minutes = Math.floor(seconds / 60)
   const remainder = seconds % 60
@@ -143,7 +146,8 @@ export default function VoiceInterviewRoom({
   const [elapsed, setElapsed] = useState(() => initialProgress?.elapsedSeconds ?? 0)
   const [officerName] = useState(() => getRandomOfficerName())
 
-  const clientRef = useRef<DoubaoRealtimeClient | null>(null)
+  const clientRef = useRef<RealtimeVoiceClient | null>(null)
+  const providerRef = useRef<RealtimeVoiceProviderId>('doubao')
   const captionsScrollRef = useRef<HTMLElement>(null)
   const captionScrollFrameRef = useRef<number | null>(null)
   const lastCaptionToggleRef = useRef(0)
@@ -234,7 +238,7 @@ export default function VoiceInterviewRoom({
     }
   }, [onComplete])
 
-  const handleRealtimeEvent = useCallback((event: DoubaoRealtimeEvent) => {
+  const handleRealtimeEvent = useCallback((event: RealtimeVoiceEvent) => {
     switch (event.type) {
       case 'conversation.item.input_audio_transcription.started': {
         if ((context.visaType === 'F1' || context.visaType === 'B2') && !awaitingAnswerRef.current) break
@@ -524,7 +528,7 @@ export default function VoiceInterviewRoom({
     mutedRef.current = resumeClosing
     setIsMuted(resumeClosing)
 
-    const client = new DoubaoRealtimeClient({
+    const client = createRealtimeClient(providerRef.current, {
       instructions: buildRealtimeInterviewPrompt(
         context,
         realtimeOfficerType,
@@ -589,6 +593,13 @@ export default function VoiceInterviewRoom({
     const controller = new AbortController()
     fetch('/api/realtime-health', { cache: 'no-store', signal: controller.signal })
       .then(async response => {
+        if (response.ok) {
+          const health = await response.json().catch(() => null) as { provider?: unknown } | null
+          if (!isRealtimeVoiceProviderId(health?.provider)) {
+            throw new Error('实时语音服务返回了不支持的模型类型。')
+          }
+          providerRef.current = health.provider
+        }
         if (!response.ok) {
           const payload = await response.json().catch(() => null) as { message?: unknown } | null
           throw new Error(typeof payload?.message === 'string'
@@ -891,7 +902,7 @@ export default function VoiceInterviewRoom({
   )
 }
 
-function providerErrorMessage(event: DoubaoRealtimeEvent) {
+function providerErrorMessage(event: RealtimeVoiceEvent) {
   const nested = typeof event.error === 'object' && event.error
     ? event.error as Record<string, unknown>
     : null

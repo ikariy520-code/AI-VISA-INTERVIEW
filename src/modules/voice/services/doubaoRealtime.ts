@@ -10,30 +10,14 @@ import {
   type DoubaoServerFrame,
   type DoubaoUsageTokens,
 } from './doubaoRealtimeProtocol.ts'
+import type {
+  RealtimeVoiceClient,
+  RealtimeVoiceClientOptions,
+  RealtimeVoiceEvent,
+} from './realtimeProvider.ts'
 
-export type RealtimeConnectionState = 'idle' | 'connecting' | 'connected' | 'closed'
-
-export interface DoubaoRealtimeEvent {
-  type: string
-  [key: string]: unknown
-}
-
-export interface DoubaoRealtimeClientOptions {
-  instructions: string
-  openingLine: string
-  attemptId: string
-  voice: string
-  speakingStyle?: string
-  endOfTurnSilenceMs?: number
-  speechRate?: number
-  /** Speak only application-approved questions; discard model-authored dialogue. */
-  controlledQuestions?: boolean
-  validateControlledText?: (text: string) => boolean
-  onEvent: (event: DoubaoRealtimeEvent) => void
-  onConnectionState: (state: RealtimeConnectionState) => void
-  onError: (message: string) => void
-  onInputLevel?: (level: number) => void
-}
+export type DoubaoRealtimeEvent = RealtimeVoiceEvent
+export type DoubaoRealtimeClientOptions = RealtimeVoiceClientOptions
 
 const INPUT_SAMPLE_RATE = 16_000
 const OUTPUT_SAMPLE_RATE = 24_000
@@ -312,7 +296,7 @@ interface EventWaiter {
   predicate?: (frame: DoubaoServerFrame) => boolean
 }
 
-export class DoubaoRealtimeClient {
+export class DoubaoRealtimeClient implements RealtimeVoiceClient {
   private readonly options: DoubaoRealtimeClientOptions
   private readonly capture = new MicrophoneCapture()
   private readonly player = new PcmStreamPlayer()
@@ -1037,14 +1021,6 @@ export class DoubaoRealtimeClient {
     }
     this.socket = null
   }
-}
-
-export function realtimeEventText(event: DoubaoRealtimeEvent) {
-  for (const key of ['text', 'delta', 'transcript', 'content']) {
-    const value = event[key]
-    if (typeof value === 'string') return value
-  }
-  return ''
 }
 
 function ttsType(frame: DoubaoServerFrame) {
