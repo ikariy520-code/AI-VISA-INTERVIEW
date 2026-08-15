@@ -99,6 +99,8 @@ VITE_DEV_PORT=5173
 npm run dev
 npm test
 npm run build
+npm run test:providers:offline
+npm run check:provider-network
 npm run smoke:realtime
 npm run smoke:deepseek
 npm run smoke:report
@@ -110,8 +112,12 @@ npm run smoke:report
 - `test:f1-report`：验证隐私脱敏、证据真实性、官方依据、四类证据作用、分数校准、简短回答、禁用获签预测以及无专有推理参数的兼容模型路径。
 - `test:b2-report`：验证 B2 摘要脱敏、回答证据、官方依据和禁用获签预测。
 - `test:architecture`：确保浏览器只访问同源报告接口，实时语音与最终报告职责分离，报告模型不能绕过证据合同和校验器。
+- `test:providers:offline`：无需任何 Key，验证 Gemini/OpenAI 临时会话合同，以及两家实时事件、音频、字幕、打断和结束映射。
+- `check:provider-network`：无需 Key 和 token，只检查三家官方域名的 DNS/TLS 可达性；成功不代表鉴权或真实语音已通过。
 - `smoke:deepseek`：用极小请求检查 DeepSeek 密钥、模型和网络连接。
 - `smoke:report`：使用非真实个人资料调用当前配置的报告模型，验证最终报告能够被严格数据合同接收。
+
+测试分级、发布状态和真实账号验收清单见 [`docs/PROVIDER_TESTING.md`](docs/PROVIDER_TESTING.md)。
 
 ## 团队协作
 

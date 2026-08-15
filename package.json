@@ -17,6 +17,7 @@
     "desktop:installer": "npm run build && electron-builder --win nsis",
     "deploy": "bash scripts/deploy.sh",
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
+    "check:provider-network": "node scripts/providerNetworkCheck.mjs",
     "smoke:deepseek": "node scripts/deepseekConnectivitySmoke.mjs",
     "smoke:report": "node scripts/finalReportSmoke.mjs",
     "order:add": "node scripts/orderAdmin.mjs add",
