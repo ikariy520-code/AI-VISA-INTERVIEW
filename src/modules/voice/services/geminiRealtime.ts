@@ -6,6 +6,11 @@ import {
   realtimeMediaError,
 } from './realtimeAudio'
 import type { RealtimeVoiceClient, RealtimeVoiceClientOptions } from './realtimeProvider'
+import {
+  emptyGeminiEventState,
+  mapGeminiServerMessage,
+  type GeminiEventState,
+} from './realtimeProviderEvents'
 
 const CONNECT_TIMEOUT_MS = 15_000
 
@@ -23,8 +28,7 @@ export class GeminiRealtimeClient implements RealtimeVoiceClient {
   private socket: WebSocket | null = null
   private closed = false
   private muted = false
-  private outputText = ''
-  private inputText = ''
+  private eventState: GeminiEventState = emptyGeminiEventState()
 
   constructor(private readonly options: RealtimeVoiceClientOptions) {}
 
@@ -168,43 +172,17 @@ export class GeminiRealtimeClient implements RealtimeVoiceClient {
   }
 
   private handleMessage(message: Record<string, unknown>) {
-    const content = message.serverContent as Record<string, unknown> | undefined
-    if (!content) return
-    if (content.interrupted) {
-      this.player.stopQueued()
-      this.options.onEvent({ type: 'response.canceled' })
-    }
-    const input = content.inputTranscription as { text?: unknown } | undefined
-    if (typeof input?.text === 'string' && input.text) {
-      if (!this.inputText) this.options.onEvent({ type: 'conversation.item.input_audio_transcription.started' })
-      this.inputText += input.text
-      this.options.onEvent({ type: 'conversation.item.input_audio_transcription.result', text: this.inputText })
-    }
-    const output = content.outputTranscription as { text?: unknown } | undefined
-    if (typeof output?.text === 'string' && output.text) {
-      this.outputText += output.text
-      this.options.onEvent({ type: 'response.output_text.delta', delta: output.text })
-    }
-    const modelTurn = content.modelTurn as { parts?: Array<Record<string, unknown>> } | undefined
-    for (const part of modelTurn?.parts ?? []) {
-      const inlineData = part.inlineData as { data?: unknown } | undefined
-      if (typeof inlineData?.data === 'string') {
-        this.options.onEvent({ type: 'response.output_audio.started' })
-        void this.player.enqueue(base64ToBytes(inlineData.data))
-      }
-    }
-    if (content.turnComplete) {
-      if (this.inputText) {
-        this.options.onEvent({ type: 'conversation.item.input_audio_transcription.completed', text: this.inputText })
-        this.inputText = ''
-      }
-      if (this.outputText) {
-        this.options.onEvent({ type: 'response.output_text.done', text: this.outputText })
-        this.outputText = ''
-      }
-      void this.player.waitUntilIdle().then(() => {
+    const mapped = mapGeminiServerMessage(message, this.eventState)
+    this.eventState = mapped.state
+    if (mapped.stopAudio) this.player.stopQueued()
+    for (const event of mapped.events) this.options.onEvent(event)
+    const queuedAudio = mapped.audioBase64.map(data => this.player.enqueue(base64ToBytes(data)))
+    if (mapped.turnComplete) {
+      void Promise.all(queuedAudio).then(() => this.player.waitUntilIdle()).then(() => {
         this.options.onEvent({ type: 'response.output_audio.done' })
         this.options.onEvent({ type: 'response.done' })
+      }).catch(error => {
+        this.options.onError(realtimeMediaError(error))
       })
     }
   }

@@ -7,7 +7,7 @@
   "type": "module",
   "main": "desktop/main.mjs",
   "scripts": {
-    "test": "npm run test:order && npm run test:officers && npm run test:f1-controller && npm run test:b2-controller && npm run test:realtime-turn && npm run test:realtime-providers && npm run test:interview-policy && npm run test:report-depth && npm run test:report-turn-grouping && npm run test:f1-report && npm run test:b2-report && npm run test:architecture",
+    "test": "npm run test:order && npm run test:officers && npm run test:f1-controller && npm run test:b2-controller && npm run test:realtime-turn && npm run test:providers:offline && npm run test:interview-policy && npm run test:report-depth && npm run test:report-turn-grouping && npm run test:f1-report && npm run test:b2-report && npm run test:architecture",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -30,6 +30,8 @@
     "test:b2-controller": "node --experimental-strip-types scripts/b2InterviewController.test.ts",
     "test:realtime-turn": "node --experimental-strip-types scripts/realtimeTurnGuard.test.ts",
     "test:realtime-providers": "node scripts/realtimeProviderSession.test.mjs",
+    "test:realtime-events": "node --experimental-strip-types scripts/realtimeProviderEvents.test.ts",
+    "test:providers:offline": "npm run test:realtime-providers && npm run test:realtime-events",
     "test:interview-policy": "node --experimental-strip-types scripts/realtimeInterviewPolicy.test.ts",
     "test:report-depth": "node --experimental-strip-types scripts/reportDepth.test.ts",
     "test:report-turn-grouping": "node --experimental-strip-types scripts/reportTurnGrouping.test.ts",

@@ -1,5 +1,10 @@
 import { realtimeMediaError } from './realtimeAudio'
 import type { RealtimeVoiceClient, RealtimeVoiceClientOptions } from './realtimeProvider'
+import {
+  emptyOpenAIEventState,
+  mapOpenAIRealtimeEvent,
+  type OpenAIEventState,
+} from './realtimeProviderEvents'
 
 interface OpenAIRealtimeSession {
   token: string
@@ -18,8 +23,7 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
   private levelFrame: number | null = null
   private closed = false
   private muted = false
-  private outputText = ''
-  private outputAudioActive = false
+  private eventState: OpenAIEventState = emptyOpenAIEventState()
 
   constructor(private readonly options: RealtimeVoiceClientOptions) {}
 
@@ -137,66 +141,9 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
   }
 
   private handleEvent(event: Record<string, unknown>) {
-    const type = String(event.type || '')
-    if (type === 'input_audio_buffer.speech_started') {
-      this.options.onEvent({ type: 'conversation.item.input_audio_transcription.started' })
-      return
-    }
-    if (type === 'conversation.item.input_audio_transcription.delta') {
-      this.options.onEvent({ type: 'conversation.item.input_audio_transcription.delta', delta: event.delta })
-      return
-    }
-    if (type === 'conversation.item.input_audio_transcription.completed') {
-      this.options.onEvent({ type: 'conversation.item.input_audio_transcription.completed', text: event.transcript })
-      return
-    }
-    if (type === 'response.output_audio.delta' && !this.outputAudioActive) {
-      this.outputAudioActive = true
-      this.options.onEvent({ type: 'response.output_audio.started' })
-      return
-    }
-    if (type === 'response.output_audio_transcript.delta' || type === 'response.output_text.delta') {
-      const delta = typeof event.delta === 'string' ? event.delta : ''
-      if (delta) {
-        if (!this.outputAudioActive) {
-          this.outputAudioActive = true
-          this.options.onEvent({ type: 'response.output_audio.started' })
-        }
-        this.outputText += delta
-        this.options.onEvent({ type: 'response.output_text.delta', delta })
-      }
-      return
-    }
-    if (type === 'response.output_audio_transcript.done' || type === 'response.output_text.done') {
-      const text = typeof event.transcript === 'string'
-        ? event.transcript
-        : typeof event.text === 'string' ? event.text : this.outputText
-      this.options.onEvent({ type: 'response.output_text.done', text })
-      this.outputText = ''
-      return
-    }
-    if (type === 'response.output_audio.done') {
-      this.outputAudioActive = false
-      this.options.onEvent({ type: 'response.output_audio.done' })
-      return
-    }
-    if (type === 'response.done') {
-      this.options.onEvent({ type: 'response.done' })
-      return
-    }
-    if (type === 'response.cancelled' || type === 'response.canceled') {
-      this.outputAudioActive = false
-      this.options.onEvent({ type: 'response.canceled' })
-      return
-    }
-    if (type === 'error') {
-      const error = event.error as { message?: unknown; code?: unknown } | undefined
-      this.options.onEvent({
-        type: 'error',
-        code: error?.code,
-        message: typeof error?.message === 'string' ? error.message : 'OpenAI Realtime 会话发生错误。',
-      })
-    }
+    const mapped = mapOpenAIRealtimeEvent(event, this.eventState)
+    this.eventState = mapped.state
+    for (const mappedEvent of mapped.events) this.options.onEvent(mappedEvent)
   }
 
   private startLevelMeter(stream: MediaStream) {
