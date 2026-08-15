@@ -1,5 +1,7 @@
 # AI Visa Interview
 
+本项目采用双授权模式：社区版本按 [`AGPL-3.0-only`](LICENSE) 开放源代码；需要闭源集成、白标分发或其他超出 AGPL 条件的使用方式，可申请[单独商业授权](COMMERCIAL_LICENSE.md)。AGPL 允许商业使用，但使用者必须遵守其源码提供等条件。
+
 ## Windows 本地桌面版
 
 项目现已提供 Windows 本地桌面架构：用户安装后首次填写一个实时语音模型和一个报告模型的凭据，即可双击使用，不需要部署云服务器。第一版实时语音支持豆包、Gemini Live 和 OpenAI Realtime；豆包配置页分别填写 `App ID` 与 `Access Token / Access Key`。详细构建、配置和安全说明见 [`docs/WINDOWS_DESKTOP.md`](docs/WINDOWS_DESKTOP.md)。
@@ -122,6 +124,8 @@ npm run smoke:report
 ## 团队协作
 
 两个人共同开发时通过 Git 拉取、提交和推送代码同步，不需要先购买服务器。服务器只在对外测试或正式上线时需要。
+
+参与贡献前请阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md) 与 [`CLA.md`](CLA.md)。项目代码许可证不授予商标权，详见 [`TRADEMARKS.md`](TRADEMARKS.md)；依赖许可证清单见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 ## 订单号与面签次数
 

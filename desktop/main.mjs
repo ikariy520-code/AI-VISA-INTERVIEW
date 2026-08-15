@@ -6,6 +6,18 @@ let mainWindow = null
 let serverChild = null
 let activeOrigin = ''
 let restarting = Promise.resolve()
+const SOURCE_URL = 'https://github.com/ikariy520-code/future'
+
+function legalFilePath(name) {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'legal', name)
+    : join(app.getAppPath(), name)
+}
+
+async function openLegalFile(name) {
+  const error = await shell.openPath(legalFilePath(name))
+  if (error) dialog.showErrorBox('无法打开法律文件', error)
+}
 
 function serverEntryPath() {
   return app.isPackaged
@@ -94,6 +106,16 @@ function buildMenu() {
       submenu: [
         { role: 'reload', label: '重新加载' },
         { role: 'togglefullscreen', label: '全屏' },
+      ],
+    },
+    {
+      label: '帮助',
+      submenu: [
+        { label: '查看源代码', click: () => void shell.openExternal(SOURCE_URL) },
+        { label: '版权声明', click: () => void openLegalFile('NOTICE') },
+        { label: '开源许可证', click: () => void openLegalFile('LICENSE') },
+        { label: '商业授权说明', click: () => void openLegalFile('COMMERCIAL_LICENSE.md') },
+        { label: '第三方许可证', click: () => void openLegalFile('THIRD_PARTY_NOTICES.md') },
       ],
     },
   ]

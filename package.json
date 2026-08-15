@@ -2,6 +2,12 @@
   "name": "ai-visa-interview",
   "description": "Local-first AI visa interview practice with pluggable realtime voice and report models.",
   "author": "AI Visa Interview contributors",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ikariy520-code/future.git"
+  },
+  "homepage": "https://github.com/ikariy520-code/future#readme",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -18,6 +24,8 @@
     "deploy": "bash scripts/deploy.sh",
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
     "check:provider-network": "node scripts/providerNetworkCheck.mjs",
+    "licenses:check": "node scripts/thirdPartyNotices.mjs --check",
+    "licenses:generate": "node scripts/thirdPartyNotices.mjs --check --write",
     "smoke:deepseek": "node scripts/deepseekConnectivitySmoke.mjs",
     "smoke:report": "node scripts/finalReportSmoke.mjs",
     "order:add": "node scripts/orderAdmin.mjs add",
@@ -68,7 +76,11 @@
     "asar": true,
     "files": [
       "desktop/**",
-      "package.json"
+      "package.json",
+      "LICENSE",
+      "NOTICE",
+      "COMMERCIAL_LICENSE.md",
+      "THIRD_PARTY_NOTICES.md"
     ],
     "extraResources": [
       {
@@ -86,6 +98,22 @@
       {
         "from": "node_modules/ws",
         "to": "node_modules/ws"
+      },
+      {
+        "from": "LICENSE",
+        "to": "legal/LICENSE"
+      },
+      {
+        "from": "NOTICE",
+        "to": "legal/NOTICE"
+      },
+      {
+        "from": "COMMERCIAL_LICENSE.md",
+        "to": "legal/COMMERCIAL_LICENSE.md"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "legal/THIRD_PARTY_NOTICES.md"
       }
     ],
     "directories": {
