@@ -34,6 +34,7 @@
     "deploy": "bash scripts/deploy.sh",
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
     "check:provider-network": "node scripts/providerNetworkCheck.mjs",
+    "security:scan-history": "node scripts/fullHistorySecretScan.mjs",
     "licenses:check": "node scripts/thirdPartyNotices.mjs --check",
     "licenses:generate": "node scripts/thirdPartyNotices.mjs --check --write",
     "smoke:deepseek": "node scripts/deepseekConnectivitySmoke.mjs",

@@ -93,6 +93,7 @@ for (const requiredReleaseFile of [
   '.github/workflows/secret-scan.yml',
   '.github/workflows/release.yml',
   '.github/PULL_REQUEST_TEMPLATE.md',
+  'scripts/fullHistorySecretScan.mjs',
 ]) {
   assert.equal(existsSync(join(root, requiredReleaseFile)), true, `open-source release file is missing: ${requiredReleaseFile}`)
 }
