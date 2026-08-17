@@ -29,8 +29,8 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "desktop:run": "npm run build && electron .",
-    "desktop:dist": "npm run build && electron-builder --win dir",
-    "desktop:installer": "npm run build && electron-builder --win nsis",
+    "desktop:dist": "npm run build && node scripts/buildDesktop.mjs dir",
+    "desktop:installer": "npm run build && node scripts/buildDesktop.mjs nsis",
     "deploy": "bash scripts/deploy.sh",
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
     "check:provider-network": "node scripts/providerNetworkCheck.mjs",
@@ -79,7 +79,6 @@
     "appId": "com.aivisainterview.desktop",
     "productName": "AI Visa Interview",
     "electronVersion": "43.4.0",
-    "electronDist": "node_modules/electron/dist",
     "asar": true,
     "files": [
       "desktop/**",
