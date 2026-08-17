@@ -1,4 +1,5 @@
 import type { OfficerType, OfficerTypeConfig, ResolvedOfficerType } from '../types'
+import { secureRandomUnit } from '../../../shared/secureRandom.ts'
 
 // ========================================
 // 面签官配置
@@ -95,7 +96,7 @@ export function isOfficerType(value: unknown): value is OfficerType {
   return typeof value === 'string' && officerTypes.some(officer => officer.id === value)
 }
 
-export function resolveOfficerType(type: OfficerType, randomValue = Math.random()): ResolvedOfficerType {
+export function resolveOfficerType(type: OfficerType, randomValue = secureRandomUnit()): ResolvedOfficerType {
   if (type !== 'random') return type
   const normalized = Number.isFinite(randomValue) ? Math.min(Math.max(randomValue, 0), 0.999999999) : 0
   return RANDOM_OFFICER_POOL[Math.floor(normalized * RANDOM_OFFICER_POOL.length)]

@@ -3,6 +3,7 @@ import type { ChatMessage, UserContext } from '../../practice/types'
 import type { F1InterviewState } from '../../practice/services/f1InterviewController'
 import type { B2InterviewState } from '../../practice/services/b2InterviewController'
 import type { OfficerType } from '../../voice/types'
+import { createSecureId } from '../../../shared/secureRandom.ts'
 
 const ACTIVE_INTERVIEW_KEY = 'visa_active_interview_v1'
 const FEEDBACK_SESSION_KEY = 'visa_feedback_session_v1'
@@ -59,9 +60,7 @@ function isFresh(updatedAt: unknown) {
 
 export async function createInterviewAttempt(officerType: OfficerType, userContext: UserContext) {
   clearInterviewRecovery()
-  const attemptId = typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  const attemptId = createSecureId()
   const recovery: ActiveInterviewRecovery = {
     attemptId,
     officerType,

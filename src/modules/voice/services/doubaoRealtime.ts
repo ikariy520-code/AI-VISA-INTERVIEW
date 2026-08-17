@@ -15,6 +15,7 @@ import type {
   RealtimeVoiceClientOptions,
   RealtimeVoiceEvent,
 } from './realtimeProvider.ts'
+import { createSecureId } from '../../../shared/secureRandom.ts'
 
 export type DoubaoRealtimeEvent = RealtimeVoiceEvent
 export type DoubaoRealtimeClientOptions = RealtimeVoiceClientOptions
@@ -98,12 +99,6 @@ export function buildDoubaoStartSessionPayload(
       },
     },
   }
-}
-
-function createSessionId() {
-  return typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function downsampleToPcm16(input: Float32Array, inputRate: number) {
@@ -353,7 +348,7 @@ export class DoubaoRealtimeClient implements RealtimeVoiceClient {
     this.nativeTextBuffer = ''
     this.nativeTextDonePending = false
     this.nativeAudioStarted = false
-    this.sessionId = createSessionId()
+    this.sessionId = createSecureId()
     this.options.onConnectionState('connecting')
 
     try {
