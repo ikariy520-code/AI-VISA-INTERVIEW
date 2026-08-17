@@ -159,6 +159,21 @@ function handleHealth(_req, res, realtimeSessionHandler) {
   )
 }
 
+function handleAppHealth(req, res, realtimeSessionHandler, reportHandler) {
+  res.statusCode = 200
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  if (req.method === 'HEAD') return res.end()
+  res.end(JSON.stringify({
+    ok: true,
+    service: 'ai-visa-interview-local',
+    uptimeSeconds: Math.round(process.uptime()),
+    voice: { provider: VOICE_PROVIDER, configured: realtimeSessionHandler.configured },
+    report: { provider: reportHandler.provider, configured: reportHandler.configured },
+  }))
+}
+
 // ── main ─────────────────────────────────────────────────
 
 async function main() {
@@ -196,6 +211,9 @@ async function main() {
       res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
 
       // ── API routes ──
+      if (pathname === '/api/app-health' && (req.method === 'GET' || req.method === 'HEAD')) {
+        return handleAppHealth(req, res, realtimeSessionHandler, reportHandler)
+      }
       if (pathname === '/api/realtime-health' && (req.method === 'GET' || req.method === 'HEAD')) {
         return handleHealth(req, res, realtimeSessionHandler)
       }
@@ -258,6 +276,7 @@ async function main() {
     console.log(`[server] Static files: ${DIST_DIR}`)
     console.log(`[server] WebSocket   : ws://${HOST}:${activePort}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
     console.log(`[server] Health      : http://${HOST}:${activePort}/api/realtime-health`)
+    console.log(`[server] App health  : http://${HOST}:${activePort}/api/app-health`)
     console.log(`[server] AI report   : ${reportHandler.configured ? `${reportHandler.provider} ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
     const readyMessage = { type: 'server-ready', port: activePort }
     process.send?.(readyMessage)

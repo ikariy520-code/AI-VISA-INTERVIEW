@@ -6,6 +6,7 @@ const GEMINI_LIVE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.ge
 const OPENAI_TOKEN_URL = 'https://api.openai.com/v1/realtime/client_secrets'
 const OPENAI_LIVE_URL = 'https://api.openai.com/v1/realtime/calls'
 const MAX_BODY_BYTES = 64_000
+const UPSTREAM_TIMEOUT_MS = 15_000
 
 function writeJson(res, status, body) {
   res.statusCode = status
@@ -36,7 +37,10 @@ function safeSilence(value) {
 }
 
 async function upstreamJson(url, init) {
-  const response = await fetch(url, init)
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  })
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const message = payload?.error?.message || payload?.message || `Provider returned HTTP ${response.status}`
@@ -163,10 +167,15 @@ export function createRealtimeSessionHandler(options = {}) {
       writeJson(res, 400, { error: 'SESSION_NOT_REQUIRED', message: '豆包实时语音使用本地安全代理，不创建浏览器令牌。' })
       return true
     } catch (error) {
-      const status = Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 ? error.status : 502
+      const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError'
+      const status = Number.isInteger(error?.status) && error.status >= 400 && error.status < 500
+        ? error.status
+        : timedOut ? 504 : 502
       writeJson(res, status, {
-        error: 'REALTIME_SESSION_FAILED',
-        message: error instanceof Error ? error.message : '创建实时语音会话失败。',
+        error: timedOut ? 'REALTIME_SESSION_TIMEOUT' : 'REALTIME_SESSION_FAILED',
+        message: timedOut
+          ? '连接实时语音服务超时，请检查网络、代理或防火墙。'
+          : error instanceof Error ? error.message : '创建实时语音会话失败。',
       })
       return true
     }

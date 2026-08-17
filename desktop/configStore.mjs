@@ -54,6 +54,21 @@ function validReportBaseUrl(value, fallback) {
   }
 }
 
+function validRealtimeEndpoint(value) {
+  const candidate = text(value, 1_024)
+  if (!candidate) return ''
+  try {
+    const url = new URL(candidate)
+    const loopback = ['127.0.0.1', 'localhost', '::1'].includes(url.hostname.replace(/^\[|\]$/g, ''))
+    if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && loopback)) {
+      throw new Error('INVALID_REALTIME_PROTOCOL')
+    }
+    return url.toString()
+  } catch {
+    throw new Error('豆包实时语音地址无效；远程接口请填写 WSS 地址，本机接口可使用 WS。')
+  }
+}
+
 function decrypt(value) {
   if (typeof value !== 'string' || !value) return ''
   try {
@@ -87,7 +102,7 @@ function normalizeStoredConfig(raw = {}) {
       voice: text(voice.voice, 80) || (provider === 'doubao'
         ? 'zh_female_vv_jupiter_bigtts'
         : provider === 'gemini' ? 'Kore' : 'marin'),
-      doubaoEndpoint: text(voice.doubaoEndpoint, 1_024),
+      doubaoEndpoint: validRealtimeEndpoint(voice.doubaoEndpoint),
     },
     report: {
       provider: reportKind,
@@ -205,7 +220,7 @@ export async function saveDesktopConfig(input = {}) {
       voice: text(voice.voice, 80) || (provider === 'doubao'
         ? 'zh_female_vv_jupiter_bigtts'
         : provider === 'gemini' ? 'Kore' : 'marin'),
-      doubaoEndpoint: text(voice.doubaoEndpoint, 1_024),
+      doubaoEndpoint: validRealtimeEndpoint(voice.doubaoEndpoint),
     },
     report: {
       provider: reportKind,

@@ -13,6 +13,8 @@ interface OpenAIRealtimeSession {
   endpoint: string
 }
 
+const CONNECT_TIMEOUT_MS = 15_000
+
 export class OpenAIRealtimeClient implements RealtimeVoiceClient {
   private peer: RTCPeerConnection | null = null
   private channel: RTCDataChannel | null = null
@@ -81,6 +83,7 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
     const response = await fetch('/api/realtime/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS),
       body: JSON.stringify({
         provider: 'openai',
         attemptId: this.options.attemptId,
@@ -116,7 +119,7 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
     channel.onmessage = event => this.handleEvent(JSON.parse(String(event.data)) as Record<string, unknown>)
 
     const ready = new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error('OpenAI Realtime 数据通道连接超时。')), 15_000)
+      const timeout = window.setTimeout(() => reject(new Error('OpenAI Realtime 数据通道连接超时。')), CONNECT_TIMEOUT_MS)
       channel.onopen = () => {
         window.clearTimeout(timeout)
         resolve()
@@ -133,6 +136,7 @@ export class OpenAIRealtimeClient implements RealtimeVoiceClient {
       method: 'POST',
       headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/sdp' },
       body: offer.sdp,
+      signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS),
     })
     const answerSdp = await response.text()
     if (!response.ok) throw new Error(`OpenAI Realtime 拒绝连接（HTTP ${response.status}）。`)

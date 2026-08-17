@@ -80,6 +80,7 @@ export class GeminiRealtimeClient implements RealtimeVoiceClient {
     const response = await fetch('/api/realtime/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS),
       body: JSON.stringify({
         provider: 'gemini',
         attemptId: this.options.attemptId,

@@ -41,14 +41,32 @@ export interface RealtimeProviderHealth {
 }
 
 export async function getRealtimeProviderHealth(signal?: AbortSignal): Promise<RealtimeProviderHealth> {
-  const response = await fetch('/api/realtime-health', { cache: 'no-store', signal })
-  const payload = await response.json().catch(() => null) as Partial<RealtimeProviderHealth> | null
-  if (!response.ok || !payload?.ok || !isRealtimeVoiceProviderId(payload.provider)) {
-    throw new Error(typeof payload?.message === 'string'
-      ? payload.message
-      : '实时语音模型尚未正确配置。')
+  const controller = new AbortController()
+  const abortFromCaller = () => controller.abort(signal?.reason)
+  if (signal?.aborted) abortFromCaller()
+  else signal?.addEventListener('abort', abortFromCaller, { once: true })
+  const timeout = window.setTimeout(() => {
+    controller.abort(new DOMException('实时语音服务检查超时。', 'TimeoutError'))
+  }, 8_000)
+
+  try {
+    const response = await fetch('/api/realtime-health', { cache: 'no-store', signal: controller.signal })
+    const payload = await response.json().catch(() => null) as Partial<RealtimeProviderHealth> | null
+    if (!response.ok || !payload?.ok || !isRealtimeVoiceProviderId(payload.provider)) {
+      throw new Error(typeof payload?.message === 'string'
+        ? payload.message
+        : '实时语音模型尚未正确配置。')
+    }
+    return payload as RealtimeProviderHealth
+  } catch (error) {
+    if (!signal?.aborted && controller.signal.aborted) {
+      throw new Error('连接本地服务超时，请确认应用服务已启动，或检查防火墙设置。')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
+    signal?.removeEventListener('abort', abortFromCaller)
   }
-  return payload as RealtimeProviderHealth
 }
 
 export function isRealtimeVoiceProviderId(value: unknown): value is RealtimeVoiceProviderId {

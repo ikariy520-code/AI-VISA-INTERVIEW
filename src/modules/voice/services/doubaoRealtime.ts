@@ -359,7 +359,10 @@ export class DoubaoRealtimeClient implements RealtimeVoiceClient {
     try {
       await this.player.prepare()
 
-      const health = await fetch('/api/realtime-health', { cache: 'no-store' })
+      const health = await fetch('/api/realtime-health', {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(8_000),
+      })
       if (!health.ok) {
         const payload = await health.json().catch(() => null) as { message?: unknown } | null
         throw new Error(typeof payload?.message === 'string'

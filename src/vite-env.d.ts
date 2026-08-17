@@ -40,11 +40,26 @@ interface DesktopConfigInput {
   }
 }
 
+interface DesktopNetworkCheckResult {
+  checkedAt: string
+  ok: boolean
+  results: Array<{
+    id: string
+    provider: string
+    label: string
+    host: string
+    reachable: boolean
+    latencyMs: number
+    message: string
+  }>
+}
+
 interface DesktopBridge {
   platform: string
   getConfig: () => Promise<DesktopPublicConfig>
   saveConfig: (config: DesktopConfigInput) => Promise<DesktopPublicConfig>
   resetConfig: () => Promise<boolean>
+  testNetwork: (config: Pick<DesktopConfigInput, 'voice' | 'report'>) => Promise<DesktopNetworkCheckResult>
   onOpenSettings: (callback: () => void) => () => void
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react'
-import { HiCheck, HiOutlineAdjustmentsHorizontal, HiOutlineArrowPath, HiOutlineLockClosed } from 'react-icons/hi2'
+import { HiCheck, HiOutlineAdjustmentsHorizontal, HiOutlineArrowPath, HiOutlineLockClosed, HiOutlineSignal } from 'react-icons/hi2'
 
 interface Props {
   children: ReactNode
@@ -58,6 +58,8 @@ function SetupPanel({ config, onSaved, onCancel }: {
   const [report, setReport] = useState(config.report)
   const [secrets, setSecrets] = useState<DesktopConfigInput['secrets']>({})
   const [saving, setSaving] = useState(false)
+  const [checkingNetwork, setCheckingNetwork] = useState(false)
+  const [networkCheck, setNetworkCheck] = useState<DesktopNetworkCheckResult | null>(null)
   const [error, setError] = useState('')
 
   const reset = async () => {
@@ -80,11 +82,13 @@ function SetupPanel({ config, onSaved, onCancel }: {
 
   const chooseVoiceProvider = (provider: DesktopVoiceProvider) => {
     const defaults = VOICE_DEFAULTS[provider]
+    setNetworkCheck(null)
     setVoice(current => ({ ...current, provider, model: defaults.model, voice: defaults.voice }))
   }
 
   const chooseReportProvider = (provider: DesktopReportProvider) => {
     const defaults = REPORT_DEFAULTS[provider]
+    setNetworkCheck(null)
     setReport(current => ({
       ...current,
       provider,
@@ -110,6 +114,20 @@ function SetupPanel({ config, onSaved, onCancel }: {
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '配置保存失败，请检查填写内容。')
       setSaving(false)
+    }
+  }
+
+  const checkNetwork = async () => {
+    if (!window.desktopBridge || checkingNetwork || saving) return
+    setCheckingNetwork(true)
+    setError('')
+    setNetworkCheck(null)
+    try {
+      setNetworkCheck(await window.desktopBridge.testNetwork({ voice, report }))
+    } catch (networkError) {
+      setError(networkError instanceof Error ? networkError.message : '网络检查失败。')
+    } finally {
+      setCheckingNetwork(false)
     }
   }
 
@@ -219,8 +237,9 @@ function SetupPanel({ config, onSaved, onCancel }: {
                   <Field
                     label="自定义服务地址（可选）"
                     value={voice.doubaoEndpoint}
-                    onChange={event => setVoice(current => ({ ...current, doubaoEndpoint: event.target.value }))}
+                    onChange={event => { setNetworkCheck(null); setVoice(current => ({ ...current, doubaoEndpoint: event.target.value })) }}
                     placeholder="留空使用官方地址"
+                    hint="远程地址必须使用 WSS；仅本机接口可使用 WS。"
                   />
                 )}
               </div>
@@ -270,7 +289,7 @@ function SetupPanel({ config, onSaved, onCancel }: {
               <Field
                 label="API Base URL"
                 value={report.apiBaseUrl}
-                onChange={event => setReport(current => ({ ...current, apiBaseUrl: event.target.value }))}
+                onChange={event => { setNetworkCheck(null); setReport(current => ({ ...current, apiBaseUrl: event.target.value })) }}
                 hint="兼容接口需支持 OpenAI Chat Completions 格式；本机 HTTP 仅允许 localhost。"
               />
               {report.provider === 'custom' && (
@@ -289,9 +308,41 @@ function SetupPanel({ config, onSaved, onCancel }: {
           </section>
         </div>
 
+        {networkCheck && (
+          <section className={`mt-6 rounded-[20px] border px-5 py-4 ${networkCheck.ok ? 'border-emerald-200/80 bg-[#f1faf6]' : 'border-amber-200/80 bg-[#fff9ee]'}`} aria-live="polite">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className={`text-[14px] font-semibold ${networkCheck.ok ? 'text-[#147a58]' : 'text-[#8a5818]'}`}>
+                  {networkCheck.ok ? '当前网络可以访问两套模型服务' : '至少有一项网络不可达'}
+                </p>
+                <p className="mt-1 text-[11px] text-[#6e6e73]">这里只检查域名、端口与 TLS，不会发送 API Key，也不验证模型权限或余额。</p>
+              </div>
+              <HiOutlineSignal className={`h-5 w-5 shrink-0 ${networkCheck.ok ? 'text-[#158f65]' : 'text-[#c47a16]'}`} />
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {networkCheck.results.map(result => (
+                <div key={result.id} className="rounded-[14px] border border-black/[0.06] bg-white/80 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[12px] font-semibold text-[#353539]">{result.label}</span>
+                    <span className={`text-[11px] font-semibold ${result.reachable ? 'text-[#147a58]' : 'text-[#b45331]'}`}>
+                      {result.reachable ? `${result.latencyMs} ms` : '未连通'}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-[11px] text-[#77777c]">{result.host}</p>
+                  <p className="mt-1 text-[11px] leading-5 text-[#69696e]">{result.message}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         <footer className="mt-6 flex flex-col items-center justify-between gap-4 rounded-[20px] border border-black/[0.07] bg-white px-6 py-5 sm:flex-row">
           <div className="min-h-5 text-[13px] text-[#c9342f]" aria-live="polite">{error}</div>
           <div className="flex w-full gap-3 sm:w-auto">
+            <button type="button" onClick={checkNetwork} disabled={saving || checkingNetwork} className="flex flex-1 items-center justify-center gap-2 rounded-[14px] border border-black/[0.12] px-4 py-3 text-[13px] font-semibold text-[#424245] transition hover:bg-[#f5f5f7] disabled:opacity-50 sm:flex-none">
+              {checkingNetwork ? <HiOutlineArrowPath className="h-4 w-4 animate-spin" /> : <HiOutlineSignal className="h-4 w-4" />}
+              {checkingNetwork ? '检查中' : '检查网络'}
+            </button>
             {config.isConfigured && (
               <button type="button" onClick={reset} disabled={saving} className="rounded-[14px] px-3 py-3 text-[13px] font-semibold text-[#c9342f] transition hover:bg-[#fff0ef] disabled:opacity-50">
                 清除密钥

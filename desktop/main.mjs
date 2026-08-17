@@ -1,11 +1,15 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain, shell, utilityProcess } from 'electron'
 import { join } from 'node:path'
 import { getDesktopConfig, getDesktopRuntimeEnv, removeDesktopConfig, saveDesktopConfig } from './configStore.mjs'
+import { testDesktopNetwork } from './networkDiagnostics.mjs'
 
 let mainWindow = null
 let serverChild = null
 let activeOrigin = ''
 let restarting = Promise.resolve()
+let isQuitting = false
+let serverRecoveryAttempts = 0
+let lastServerReadyAt = 0
 const SOURCE_URL = 'https://github.com/ikariy520-code/future'
 
 function legalFilePath(name) {
@@ -32,43 +36,128 @@ function stopServer() {
   serverChild = null
 }
 
+function redactServerOutput(value, runtimeEnv) {
+  let output = String(value || '')
+  for (const secret of [
+    runtimeEnv.DOUBAO_APP_ID,
+    runtimeEnv.DOUBAO_ACCESS_KEY,
+    runtimeEnv.GEMINI_API_KEY,
+    runtimeEnv.OPENAI_API_KEY,
+    runtimeEnv.REPORT_API_KEY,
+  ]) {
+    if (typeof secret === 'string' && secret.length >= 6) output = output.replaceAll(secret, '[REDACTED]')
+  }
+  return output.replace(/[\r\n]+/g, ' ').trim()
+}
+
+async function verifyLocalServer(origin) {
+  let lastError = null
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const response = await fetch(`${origin}/api/app-health`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2_500),
+      })
+      const payload = await response.json().catch(() => null)
+      if (response.ok && payload?.ok === true) return payload
+      lastError = new Error(`本地服务健康检查失败（HTTP ${response.status}）。`)
+    } catch (error) {
+      lastError = error
+    }
+    await new Promise(resolve => setTimeout(resolve, 120 * (attempt + 1)))
+  }
+  throw lastError instanceof Error ? lastError : new Error('本地服务健康检查失败。')
+}
+
+function recoverUnexpectedServerExit(code) {
+  if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return
+  const stableForMs = Date.now() - lastServerReadyAt
+  if (stableForMs > 60_000) serverRecoveryAttempts = 0
+  if (serverRecoveryAttempts >= 2) {
+    dialog.showErrorBox(
+      'AI 面签本地服务已停止',
+      `本地服务连续异常退出（${code ?? 'unknown'}）。请重新启动应用；若问题持续，请在 GitHub Issues 中附上发生步骤。`,
+    )
+    return
+  }
+  serverRecoveryAttempts += 1
+  setTimeout(() => {
+    void restartServerAndReload().catch(error => {
+      dialog.showErrorBox('AI 面签本地服务恢复失败', error instanceof Error ? error.message : String(error))
+    })
+  }, 600)
+}
+
 async function startServer() {
   stopServer()
+  activeOrigin = ''
   const runtimeEnv = await getDesktopRuntimeEnv()
   return await new Promise((resolve, reject) => {
+    let settled = false
+    let ready = false
+    let recentOutput = ''
     const child = utilityProcess.fork(serverEntryPath(), [], {
       cwd: app.isPackaged ? process.resourcesPath : app.getAppPath(),
       env: {
         ...process.env,
         ...runtimeEnv,
       },
-      stdio: app.isPackaged ? 'ignore' : 'pipe',
+      stdio: 'pipe',
       serviceName: 'AI Visa Interview local server',
     })
     serverChild = child
-    if (!app.isPackaged && process.env.DESKTOP_RELAY_SERVER_LOGS === '1') {
-      child.stdout?.on('data', chunk => console.log(`[desktop-server] ${String(chunk).trimEnd()}`))
-      child.stderr?.on('data', chunk => console.error(`[desktop-server] ${String(chunk).trimEnd()}`))
+
+    const captureOutput = (chunk, error = false) => {
+      const safe = redactServerOutput(chunk, runtimeEnv)
+      if (!safe) return
+      recentOutput = `${recentOutput} ${safe}`.slice(-2_000)
+      if (!app.isPackaged && process.env.DESKTOP_RELAY_SERVER_LOGS === '1') {
+        const relay = error ? console.error : console.log
+        relay(`[desktop-server] ${safe}`)
+      }
+    }
+    child.stdout?.on('data', chunk => captureOutput(chunk))
+    child.stderr?.on('data', chunk => captureOutput(chunk, true))
+
+    const fail = (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      if (serverChild === child) serverChild = null
+      const detail = recentOutput ? `\n\n诊断信息：${recentOutput}` : ''
+      reject(new Error(`${error instanceof Error ? error.message : String(error)}${detail}`))
     }
 
     const timeout = setTimeout(() => {
       child.kill('SIGTERM')
-      reject(new Error('本地服务启动超时。'))
+      fail(new Error('本地服务启动超时。请检查安全软件是否阻止了本机回环连接。'))
     }, 20_000)
 
     child.once('exit', code => {
       const wasActiveChild = serverChild === child
       if (wasActiveChild) serverChild = null
-      if (wasActiveChild && !activeOrigin) {
-        clearTimeout(timeout)
-        reject(new Error(`本地服务异常退出（${code ?? 'unknown'}）。`))
+      if (!ready) return fail(new Error(`本地服务异常退出（${code ?? 'unknown'}）。`))
+      if (wasActiveChild) {
+        activeOrigin = ''
+        recoverUnexpectedServerExit(code)
       }
     })
-    child.on('message', message => {
-      if (!message || message.type !== 'server-ready' || !Number.isInteger(message.port)) return
-      clearTimeout(timeout)
-      activeOrigin = `http://127.0.0.1:${message.port}`
-      resolve(activeOrigin)
+    child.on('message', async message => {
+      if (!message || message.type !== 'server-ready' || !Number.isInteger(message.port) || message.port < 1 || message.port > 65_535) return
+      const origin = `http://127.0.0.1:${message.port}`
+      try {
+        await verifyLocalServer(origin)
+        if (settled) return
+        settled = true
+        ready = true
+        clearTimeout(timeout)
+        activeOrigin = origin
+        lastServerReadyAt = Date.now()
+        resolve(activeOrigin)
+      } catch (error) {
+        child.kill('SIGTERM')
+        fail(error)
+      }
     })
   })
 }
@@ -77,12 +166,8 @@ function restartServerAndReload() {
   restarting = restarting
     .catch(() => undefined)
     .then(async () => {
-      activeOrigin = ''
       const origin = await startServer()
       if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(origin)
-    })
-    .catch(error => {
-      dialog.showErrorBox('AI 面签本地服务启动失败', error instanceof Error ? error.message : String(error))
     })
   return restarting
 }
@@ -182,25 +267,42 @@ ipcMain.handle('desktop:get-config', event => {
 ipcMain.handle('desktop:save-config', async (_event, input) => {
   assertTrustedSender(_event)
   const config = await saveDesktopConfig(input)
-  setTimeout(() => void restartServerAndReload(), 100)
+  await restartServerAndReload()
   return config
 })
 ipcMain.handle('desktop:reset-config', async event => {
   assertTrustedSender(event)
   await removeDesktopConfig()
-  setTimeout(() => void restartServerAndReload(), 100)
+  await restartServerAndReload()
   return true
 })
+ipcMain.handle('desktop:test-network', async (event, input) => {
+  assertTrustedSender(event)
+  return testDesktopNetwork(input)
+})
 
-app.on('before-quit', stopServer)
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+app.on('before-quit', () => {
+  isQuitting = true
+  stopServer()
+})
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 app.on('activate', () => {
   if (!mainWindow && activeOrigin) createWindow(activeOrigin)
 })
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+})
 
-app.whenReady().then(async () => {
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else app.whenReady().then(async () => {
   app.setAppUserModelId('com.aivisainterview.desktop')
   buildMenu()
   try {

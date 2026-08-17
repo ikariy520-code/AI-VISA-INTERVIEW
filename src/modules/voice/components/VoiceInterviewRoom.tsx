@@ -52,7 +52,7 @@ import {
 } from '../../practice/services/b2InterviewController'
 import { createRealtimeClient } from '../services/createRealtimeClient'
 import {
-  isRealtimeVoiceProviderId,
+  getRealtimeProviderHealth,
   realtimeEventText,
   type RealtimeVoiceClient,
   type RealtimeVoiceEvent,
@@ -581,21 +581,9 @@ export default function VoiceInterviewRoom({
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch('/api/realtime-health', { cache: 'no-store', signal: controller.signal })
-      .then(async response => {
-        if (response.ok) {
-          const health = await response.json().catch(() => null) as { provider?: unknown } | null
-          if (!isRealtimeVoiceProviderId(health?.provider)) {
-            throw new Error('实时语音服务返回了不支持的模型类型。')
-          }
-          providerRef.current = health.provider
-        }
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null) as { message?: unknown } | null
-          throw new Error(typeof payload?.message === 'string'
-            ? payload.message
-            : '实时语音服务的 API Key 尚未配置。')
-        }
+    getRealtimeProviderHealth(controller.signal)
+      .then(health => {
+        providerRef.current = health.provider
         setPhase('ready')
       })
       .catch(error => {

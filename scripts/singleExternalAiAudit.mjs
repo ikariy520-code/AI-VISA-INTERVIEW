@@ -38,13 +38,14 @@ for (const file of files) {
 }
 
 // Long-lived credentials and provider URLs remain in trusted server/desktop
-// processes. Browser modules may only call same-origin session/report routes.
+// processes. The desktop-only diagnostic may name public hosts but never receives
+// keys. Browser modules may only call same-origin session/report routes.
 const openAiProviderFiles = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))
   .filter(item => item.content.includes('api.openai.com'))
 assert.deepEqual(
   openAiProviderFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
-  ['desktop/configStore.mjs', 'server/realtimeSessionApi.mjs', 'src/components/DesktopSetupGate.tsx'],
+  ['desktop/configStore.mjs', 'desktop/networkDiagnostics.mjs', 'server/realtimeSessionApi.mjs', 'src/components/DesktopSetupGate.tsx'],
   'OpenAI credentials and endpoints must remain in the trusted realtime session handler',
 )
 const geminiProviderFiles = files
@@ -52,7 +53,7 @@ const geminiProviderFiles = files
   .filter(item => item.content.includes('generativelanguage.googleapis.com'))
 assert.deepEqual(
   geminiProviderFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
-  ['server/realtimeSessionApi.mjs'],
+  ['desktop/networkDiagnostics.mjs', 'server/realtimeSessionApi.mjs'],
   'Gemini credentials and endpoints must remain in the trusted realtime session handler',
 )
 
@@ -74,6 +75,14 @@ assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false, 'legacy
 assert.equal(existsSync(join(root, 'server/orderAuth.mjs')), false, 'retired order gate server must be removed')
 assert.equal(existsSync(join(root, 'src/components/OrderGate.tsx')), false, 'retired order gate UI must be removed')
 assert.equal(existsSync(join(root, 'src/shared/orderAccess.tsx')), false, 'retired order entitlement context must be removed')
+
+const desktopMain = readFileSync(join(root, 'desktop/main.mjs'), 'utf8')
+const serverMain = readFileSync(join(root, 'server/index.mjs'), 'utf8')
+const desktopDiagnostics = readFileSync(join(root, 'desktop/networkDiagnostics.mjs'), 'utf8')
+assert.ok(desktopMain.includes('requestSingleInstanceLock'), 'desktop app must prevent duplicate local server instances')
+assert.ok(desktopMain.includes('verifyLocalServer'), 'desktop app must verify the child server before loading the UI')
+assert.ok(serverMain.includes('/api/app-health'), 'local server process health endpoint is missing')
+assert.equal(/API_KEY|ACCESS_KEY|accessKey|apiKey/.test(desktopDiagnostics), false, 'network diagnostics must never receive or inspect provider credentials')
 
 const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
 assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   getConfig: () => ipcRenderer.invoke('desktop:get-config'),
   saveConfig: config => ipcRenderer.invoke('desktop:save-config', config),
   resetConfig: () => ipcRenderer.invoke('desktop:reset-config'),
+  testNetwork: config => ipcRenderer.invoke('desktop:test-network', config),
   onOpenSettings: callback => {
     if (typeof callback !== 'function') return () => {}
     const listener = () => callback()
