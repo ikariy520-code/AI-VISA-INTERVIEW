@@ -10,7 +10,7 @@ let restarting = Promise.resolve()
 let isQuitting = false
 let serverRecoveryAttempts = 0
 let lastServerReadyAt = 0
-const SOURCE_URL = 'https://github.com/ikariy520-code/future'
+const SOURCE_URL = 'https://github.com/ikariy520-code/ai-visa-interview'
 
 function legalFilePath(name) {
   return app.isPackaged

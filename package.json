@@ -1,13 +1,23 @@
 {
   "name": "ai-visa-interview",
   "description": "Local-first AI visa interview practice with pluggable realtime voice and report models.",
-  "author": "AI Visa Interview contributors",
+  "author": "ikariy520-code and LZC20040216-OSS",
+  "contributors": [
+    "ikariy520-code",
+    "LZC20040216-OSS"
+  ],
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ikariy520-code/future.git"
+    "url": "git+https://github.com/ikariy520-code/ai-visa-interview.git"
   },
-  "homepage": "https://github.com/ikariy520-code/future#readme",
+  "homepage": "https://github.com/ikariy520-code/ai-visa-interview#readme",
+  "bugs": {
+    "url": "https://github.com/ikariy520-code/ai-visa-interview/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "private": true,
   "version": "1.0.0",
   "type": "module",

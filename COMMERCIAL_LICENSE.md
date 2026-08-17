@@ -16,9 +16,9 @@ A separate written commercial license is available for organizations that need r
 - white-label distribution;
 - commercial support, deployment, or custom development.
 
-This file is an explanation of availability, not a commercial license grant. Commercial rights exist only after both parties sign a separate agreement.
+This file is an explanation of availability, not a commercial license grant. Commercial rights exist only after the customer and the properly authorized project rights holder or representative sign a separate agreement. The public author list does not by itself appoint either core author to license the other author's independently owned contribution.
 
-To discuss commercial licensing, use the repository owner's contact details on GitHub or open a licensing enquiry at <https://github.com/ikariy520-code/future/issues>. Do not include API keys, personal application records, or other secrets in an issue.
+To discuss commercial licensing, use the repository owner's contact details on GitHub or open a licensing enquiry at <https://github.com/ikariy520-code/ai-visa-interview/issues>. Do not include API keys, personal application records, or other secrets in an issue.
 
 ## Third-party software and provider services
 
