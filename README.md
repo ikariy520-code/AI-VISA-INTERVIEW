@@ -180,6 +180,8 @@ docs/      使用、供应商验收和部署说明
 
 欢迎改进模型适配、面签真实性、报告证据质量、隐私、可访问性和 Windows 稳定性。提交前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [CLA.md](CLA.md)。
 
+版本变化见 [CHANGELOG.md](CHANGELOG.md)；漏洞请按 [SECURITY.md](SECURITY.md) 私密报告。
+
 ## 许可证
 
 社区版本使用 [GNU AGPL v3 only](LICENSE)。AGPL 允许商业使用，但必须遵守其源码提供等条件。需要闭源集成、白标分发或其他不适用 AGPL 的方式，可另行洽谈[商业授权](COMMERCIAL_LICENSE.md)。第三方依赖仍受各自许可证约束，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。项目名称与标识不随代码许可证自动授权，见 [TRADEMARKS.md](TRADEMARKS.md)。

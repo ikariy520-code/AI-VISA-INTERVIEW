@@ -84,6 +84,26 @@ assert.ok(desktopMain.includes('verifyLocalServer'), 'desktop app must verify th
 assert.ok(serverMain.includes('/api/app-health'), 'local server process health endpoint is missing')
 assert.equal(/API_KEY|ACCESS_KEY|accessKey|apiKey/.test(desktopDiagnostics), false, 'network diagnostics must never receive or inspect provider credentials')
 
+for (const requiredReleaseFile of [
+  'AUTHORS.md',
+  'CHANGELOG.md',
+  'CODE_OF_CONDUCT.md',
+  'SECURITY.md',
+  '.github/workflows/ci.yml',
+  '.github/workflows/secret-scan.yml',
+  '.github/workflows/release.yml',
+  '.github/PULL_REQUEST_TEMPLATE.md',
+]) {
+  assert.equal(existsSync(join(root, requiredReleaseFile)), true, `open-source release file is missing: ${requiredReleaseFile}`)
+}
+
+const packageMetadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+assert.equal(packageMetadata.repository?.url, 'git+https://github.com/ikariy520-code/ai-visa-interview.git', 'package repository URL is stale')
+assert.deepEqual(packageMetadata.contributors, ['ikariy520-code', 'LZC20040216-OSS'], 'both core authors must remain credited')
+const deploymentScript = readFileSync(join(root, 'scripts/deploy.sh'), 'utf8')
+assert.ok(deploymentScript.includes('DEPLOY_HOST'), 'deployment target must be explicitly configured')
+assert.equal(/\b\d{1,3}(?:\.\d{1,3}){3}\b/.test(deploymentScript), false, 'deployment script must not contain a fixed server IP')
+
 const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
 assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')
 assert.ok(reportHandler.includes("? 'evidence-only' : provider"), 'model and evidence-only report modes must remain distinguishable')

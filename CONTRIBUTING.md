@@ -2,6 +2,8 @@
 
 Contributions that improve provider portability, interview realism, evidence quality, privacy, accessibility, documentation, or Windows reliability are welcome.
 
+Participation is also subject to [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Security vulnerabilities and suspected credential exposure must follow [`SECURITY.md`](SECURITY.md), not a public Issue.
+
 ## Before opening a pull request
 
 1. Do not commit `.env` files, API keys, order numbers, real interview recordings, visa documents, or personally identifying application data.

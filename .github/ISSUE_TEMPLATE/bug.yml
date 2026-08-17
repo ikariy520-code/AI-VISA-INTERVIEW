@@ -1,0 +1,66 @@
+name: Bug report
+description: 报告可以稳定复现的程序问题；不要提交密钥或真实签证资料。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈。请使用合成或脱敏信息复现，绝不要粘贴 API Key、临时 token、护照号、申请编号、录音或完整问答。
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 出现位置
+      options:
+        - Windows 桌面版
+        - 网页版 / 本地开发
+        - 实时语音面签
+        - 反馈报告 / PDF
+        - 安装、构建或部署
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      placeholder: v1.0.0 或 git commit
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: 相关模型供应商
+      options:
+        - 无关
+        - 豆包
+        - Gemini
+        - OpenAI
+        - DeepSeek
+        - 其他 OpenAI-compatible 接口
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从打开应用开始，逐步说明做了什么、看到了什么。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 已脱敏的错误信息
+      description: 删除所有凭据、token、申请资料和完整对话后再粘贴。
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我确认本 Issue 不包含 API Key、token、真实身份信息、签证材料、录音或完整问答。
+          required: true
+

@@ -1,0 +1,62 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.12.0
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run licenses:check
+      - name: Verify tag matches package version
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version v$version."
+          }
+      - run: npm run desktop:installer
+      - name: Verify installer contents and create checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath release -Filter 'AI-Visa-Interview-Setup-*-x64.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer was not generated.' }
+          foreach ($name in @('LICENSE', 'NOTICE', 'COMMERCIAL_LICENSE.md', 'THIRD_PARTY_NOTICES.md')) {
+            $path = Join-Path 'release/win-unpacked/resources/legal' $name
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing packaged legal file: $name" }
+          }
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash *$($installer.Name)" | Set-Content -LiteralPath release/SHA256SUMS.txt -Encoding ascii
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ai-visa-interview-windows-${{ github.ref_name }}
+          path: |
+            release/AI-Visa-Interview-Setup-*-x64.exe
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem -LiteralPath release -Filter 'AI-Visa-Interview-Setup-*-x64.exe' | Select-Object -First 1
+          gh release create $env:GITHUB_REF_NAME $installer.FullName release/SHA256SUMS.txt --verify-tag --generate-notes --title "AI Visa Interview $env:GITHUB_REF_NAME"
+
