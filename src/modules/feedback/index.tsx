@@ -24,6 +24,26 @@ export default function FeedbackPage() {
   const report = useMemo(() => session ? buildFeedbackReport(session) : showSample ? sampleFeedbackReport : null, [session, showSample])
   const isB2 = Boolean(session && /\bB[\s-]?2\b/i.test(session.title))
 
+  const saveAsPdf = () => {
+    if (!report) return
+    const originalTitle = document.title
+    const reportName = report.title.replace(/[\\/:*?"<>|]+/g, '-').trim() || '美国签证模拟面签'
+    const reportDate = report.date.replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-|-$/g, '')
+    document.title = `${reportName}-反馈报告${reportDate ? `-${reportDate}` : ''}`
+
+    let restored = false
+    const restoreTitle = () => {
+      if (restored) return
+      restored = true
+      document.title = originalTitle
+      window.removeEventListener('afterprint', restoreTitle)
+    }
+
+    window.addEventListener('afterprint', restoreTitle)
+    window.print()
+    window.setTimeout(restoreTitle, 30_000)
+  }
+
   if (!report) {
     return (
       <div className="app-page">
@@ -52,7 +72,7 @@ export default function FeedbackPage() {
             <p className="text-[13px] font-semibold text-[#1d1d1f]">面签反馈报告</p>
             <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#86868b]">Review · Improve · Repeat</p>
           </div>
-          <button onClick={() => window.print()} className="app-icon-button" aria-label="保存为 PDF">
+          <button onClick={saveAsPdf} className="app-icon-button" aria-label="保存为 PDF">
             <HiOutlineDocumentArrowDown className="h-[18px] w-[18px]" />
           </button>
         </div>
@@ -71,7 +91,7 @@ export default function FeedbackPage() {
               <p className="mt-1 text-[12px] leading-5 text-[#347861]">本站不长期保存报告；脱敏背景和面签转写仅用于按 {isB2 ? 'B-2' : 'F-1'} 官方依据与证据规则完成本次分析。当前标签页内刷新后仍可恢复，关闭标签页后将无法找回，请离开前保存。</p>
             </div>
           </div>
-          <button onClick={() => window.print()} className="app-button-secondary mt-3 w-full bg-white sm:mt-0 sm:w-auto">
+          <button onClick={saveAsPdf} className="app-button-secondary mt-3 w-full bg-white sm:mt-0 sm:w-auto">
             <HiOutlineDocumentArrowDown className="h-4 w-4" /> 保存为 PDF
           </button>
         </motion.div>}
@@ -79,7 +99,7 @@ export default function FeedbackPage() {
         <FeedbackReportView report={report} />
 
         <div className="print:hidden mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
-          <button onClick={() => window.print()} className="app-button-primary"><HiOutlineDocumentArrowDown className="h-4 w-4" /> 保存为 PDF</button>
+          <button onClick={saveAsPdf} className="app-button-primary"><HiOutlineDocumentArrowDown className="h-4 w-4" /> 保存为 PDF</button>
           <button onClick={() => { clearInterviewRecovery(); navigate('/practice', { replace: true }) }} className="app-button-secondary">
             <HiOutlineArrowPath className="h-4 w-4" /> 再练一次
           </button>
