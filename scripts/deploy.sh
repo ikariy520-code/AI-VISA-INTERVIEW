@@ -22,7 +22,6 @@ tar czf "/tmp/$PACKAGE" \
   dist/ \
   server/ \
   scripts/finalReportSmoke.mjs \
-  scripts/orderAdmin.mjs \
   package.json \
   package-lock.json \
   ecosystem.config.cjs
@@ -35,16 +34,9 @@ ssh $SSH_OPTS "$SERVER" << ENDSSH
   set -e
 
   # Create remote dir if first deploy
-  mkdir -p $REMOTE_DIR/logs $REMOTE_DIR/data
+  mkdir -p $REMOTE_DIR/logs
 
   cd $REMOTE_DIR
-
-  # Remove the retired invite-code implementation before unpacking the order build.
-  rm -f \
-    server/inviteAuth.mjs \
-    server/inviteCodes.json \
-    scripts/inviteAdmin.mjs \
-    scripts/inviteAuth.test.mjs
 
   # Extract
   tar xzf "/tmp/$PACKAGE" --overwrite

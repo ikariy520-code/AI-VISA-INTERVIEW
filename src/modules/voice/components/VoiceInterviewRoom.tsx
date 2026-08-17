@@ -59,7 +59,6 @@ import {
   type RealtimeVoiceProviderId,
 } from '../services/realtimeProvider'
 import RealtimeVoiceOrb from './RealtimeVoiceOrb'
-import { useOrderAccess } from '../../../shared/orderAccess'
 import type { LiveInterviewProgress } from '../../shared/store/interviewRecovery'
 import { consumeControlledAnswer } from '../services/controlledTurnGuard'
 
@@ -134,9 +133,6 @@ export default function VoiceInterviewRoom({
   const officerConfig = officerTypes.find(officer => officer.id === officerType)
     ?? officerTypes.find(officer => officer.id === 'standard')!
   const realtimeOfficerType = useMemo(() => resolveRealtimeOfficerType(officerType), [officerType])
-  const { access, refreshAccess } = useOrderAccess()
-  const hasQuota = access.unlimited || Number(access.remainingUses) > 0
-
   const [phase, setPhase] = useState<Phase>('checking')
   const [messages, setMessages] = useState<RealtimeChatMessage[]>(() => initialProgress?.messages ?? [])
   const [errorMessage, setErrorMessage] = useState('')
@@ -480,11 +476,6 @@ export default function VoiceInterviewRoom({
 
   const startInterview = useCallback(async (resume = false) => {
     const resumable = resume && attemptStartedRef.current
-    if (!hasQuota && !resumable) {
-      setErrorMessage('该订单号的面签次数已经用完。')
-      setPhase('error')
-      return
-    }
     clientRef.current?.destroy()
     setErrorMessage('')
     setMicLevel(0)
@@ -564,7 +555,6 @@ export default function VoiceInterviewRoom({
         if (state === 'connected') {
           connectedRef.current = true
           attemptStartedRef.current = true
-          void refreshAccess().catch(() => undefined)
         }
         if (state === 'closed') {
           connectedRef.current = false
@@ -587,7 +577,7 @@ export default function VoiceInterviewRoom({
       clientRef.current = null
       setPhase('error')
     }
-  }, [attemptId, context, handleRealtimeEvent, hasQuota, officerConfig.voiceProfile.gender, realtimeOfficerType, refreshAccess])
+  }, [attemptId, context, handleRealtimeEvent, officerConfig.voiceProfile.gender, realtimeOfficerType])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -696,7 +686,7 @@ export default function VoiceInterviewRoom({
   const status = phaseStatus(phase)
   const isConnected = ['listening', 'thinking', 'speaking', 'muted'].includes(phase)
   const hasResumableProgress = attemptStartedRef.current
-  const canStart = (hasQuota || hasResumableProgress) && (phase === 'ready' || phase === 'error' || phase === 'ended')
+  const canStart = phase === 'ready' || phase === 'error' || phase === 'ended'
 
   return (
     <div className="live-room app-card relative mx-auto flex h-[calc(100dvh-112px)] max-w-3xl flex-col overflow-hidden">
@@ -743,11 +733,6 @@ export default function VoiceInterviewRoom({
         </h1>
         <p className="text-[12px] text-[#86868b]">
           {officerConfig.label} · AI Realtime
-        </p>
-        <p className={`mt-1 text-[11px] font-semibold ${hasQuota ? 'text-[#158f65]' : 'text-[#c9342f]'}`}>
-          {access.unlimited
-            ? '管理员 · 无限次面签'
-            : `订单权益 · 剩余 ${access.remainingUses}/${access.totalUses} 次`}
         </p>
         <button
           type="button"
@@ -843,7 +828,7 @@ export default function VoiceInterviewRoom({
                 <p className="text-[12px] leading-5 text-[#a22d29]">{errorMessage}</p>
               </div>
               <div className="mt-3 flex gap-2">
-                <button type="button" onClick={() => void startInterview(hasResumableProgress)} disabled={!hasQuota && !hasResumableProgress} className="rounded-full bg-[#c9342f] px-4 py-1.5 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" onClick={() => void startInterview(hasResumableProgress)} className="rounded-full bg-[#c9342f] px-4 py-1.5 text-[12px] font-semibold text-white">
                   重新连接
                 </button>
                 <button type="button" onClick={() => setErrorMessage('')} className="rounded-full bg-white px-4 py-1.5 text-[12px] font-semibold text-[#6e6e73]">
@@ -858,12 +843,12 @@ export default function VoiceInterviewRoom({
       <footer className="shrink-0 px-4 pb-6 pt-2 sm:px-5">
         <div className="mx-auto flex max-w-lg flex-col items-center gap-3">
           <p className={`text-[13px] font-medium ${phase === 'speaking' ? 'text-[#7c3aed]' : phase === 'listening' ? 'text-[#0071e3]' : 'text-[#86868b]'}`}>
-            {!isConnected && !hasQuota ? '订单次数已用完，仍可查看本次报告。' : phaseHint(phase)}
+            {phaseHint(phase)}
           </p>
 
           <motion.button
             type="button"
-            disabled={!isConnected && !hasQuota && !hasResumableProgress || phase === 'checking' || phase === 'connecting' || phase === 'thinking' || phase === 'speaking' || phase === 'ending'}
+            disabled={phase === 'checking' || phase === 'connecting' || phase === 'thinking' || phase === 'speaking' || phase === 'ending'}
             onClick={isConnected ? toggleMute : () => void startInterview(hasResumableProgress)}
             whileTap={{ scale: 0.94 }}
             className={`relative flex h-[76px] w-[76px] items-center justify-center rounded-full shadow-xl transition-all ${

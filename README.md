@@ -126,27 +126,3 @@ npm run smoke:report
 两个人共同开发时通过 Git 拉取、提交和推送代码同步，不需要先购买服务器。服务器只在对外测试或正式上线时需要。
 
 参与贡献前请阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md) 与 [`CLA.md`](CLA.md)。项目代码许可证不授予商标权，详见 [`TRADEMARKS.md`](TRADEMARKS.md)；依赖许可证清单见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
-
-## 订单号与面签次数
-
-- 网站首页、签证类型、面签官选择和背景填写可以自由浏览；只有进入实时面签时才验证订单号。
-- `ADMIN_ORDER_NUMBERS` 配置不限次数的管理员身份。生产环境继续保留现有两个管理员值，但不要把真实值提交到仓库或作为商品订单发放。
-- 客户订单只以 SHA-256 哈希写入 `data/orders.json`，订单次数与面签预留写入 `data/order-usage.json`。两个文件都位于不会被部署覆盖的 `data/` 目录。
-- 实时语音连接成功时只为本次 `attempt_id` 预留一次权益，不扣减次数；报告页确认本次完成后才扣减 1 次。
-- 同一次面签重连、报告页刷新和完成确认重试均使用相同 `attempt_id`，不会重复扣减。
-- 报告正文只在当前浏览器会话中保留；服务端生成并返回后不写磁盘、不写数据库，也不保留报告缓存。
-
-```bash
-# 添加一个客户订单；默认 1 次，可通过 --uses 调整
-npm run order:add -- --order DY202607230001 --uses 3 --channel douyin
-
-# 查看订单次数与预留状态
-npm run order:status
-
-# 退款或异常订单停用 / 恢复
-npm run order:disable -- --id O-XXXXXXXXXXXX
-npm run order:enable -- --id O-XXXXXXXXXXXX
-
-# 管理员人工重置指定订单的次数与预留
-npm run order:reset -- --id O-XXXXXXXXXXXX
-```

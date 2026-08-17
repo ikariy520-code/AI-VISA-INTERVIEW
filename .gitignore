@@ -28,6 +28,6 @@ pnpm-debug.log*
 # server logs
 logs/
 
-# private invite exports and persistent production usage
+# private local exports and runtime data
 private/
 data/

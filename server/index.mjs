@@ -16,7 +16,6 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 
 import { createWSProxy } from './wsProxy.mjs'
-import { createOrderAuth } from './orderAuth.mjs'
 import { createReportHandler } from './reportApi.mjs'
 import { createRealtimeSessionHandler } from './realtimeSessionApi.mjs'
 
@@ -29,7 +28,6 @@ dotenv.config({
 const requestedPort = Number(process.env.PORT)
 const PORT = Number.isInteger(requestedPort) && requestedPort >= 0 ? requestedPort : 3000
 const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0')
-const LOCAL_DESKTOP_MODE = process.env.LOCAL_DESKTOP_MODE === 'true'
 const DIST_DIR = join(fileURLToPath(import.meta.url), '..', '..', 'dist')
 
 const DOUBAO_APP_ID = process.env.DOUBAO_APP_ID || ''
@@ -43,9 +41,6 @@ const GEMINI_LIVE_VOICE = process.env.GEMINI_LIVE_VOICE || 'Kore'
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
 const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1'
 const OPENAI_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin'
-
-const ADMIN_ORDER_NUMBERS = process.env.ADMIN_ORDER_NUMBERS || process.env.INVITE_CODES || ''
-const ORDER_SESSION_SECRET = process.env.ORDER_SESSION_SECRET || process.env.INVITE_SESSION_SECRET || ''
 
 const REPORT_PROVIDER = process.env.REPORT_PROVIDER || 'deepseek'
 const REPORT_API_KEY = process.env.REPORT_API_KEY || process.env.DEEPSEEK_API_KEY || ''
@@ -175,13 +170,6 @@ async function main() {
     process.exit(1)
   }
 
-  const orderAuth = createOrderAuth({
-    adminOrderNumbers: ADMIN_ORDER_NUMBERS,
-    sessionSecret: ORDER_SESSION_SECRET,
-    secureCookies: process.env.NODE_ENV === 'production',
-    ordersFile: process.env.ORDER_NUMBERS_FILE || 'data/orders.json',
-    usageFile: process.env.ORDER_USAGE_FILE || 'data/order-usage.json',
-  })
   const reportHandler = createReportHandler({
     apiKey: REPORT_API_KEY,
     model: REPORT_MODEL,
@@ -207,21 +195,7 @@ async function main() {
       const pathname = req.url?.split('?')[0] ?? ''
       res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
 
-      if (!LOCAL_DESKTOP_MODE) {
-        const authHandled = await orderAuth.handleRequest(req, res, pathname)
-        if (authHandled) return
-      }
-
       // ── API routes ──
-      if (!LOCAL_DESKTOP_MODE && pathname.startsWith('/api/') && !orderAuth.isAuthorized(req)) {
-        return orderAuth.unauthorized(res)
-      }
-
-      if (!LOCAL_DESKTOP_MODE && pathname === '/api/ai-report') {
-        const reportAccess = orderAuth.reportAccess(req, req.headers['x-interview-attempt'])
-        if (!reportAccess.allowed) return orderAuth.unauthorized(res, reportAccess)
-      }
-
       if (pathname === '/api/realtime-health' && (req.method === 'GET' || req.method === 'HEAD')) {
         return handleHealth(req, res, realtimeSessionHandler)
       }
@@ -253,14 +227,11 @@ async function main() {
   })
 
   // ── WebSocket proxy ──
-  const desktopAccess = () => ({ allowed: true, role: 'admin', orderNumber: 'local-desktop' })
   const wsProxy = VOICE_PROVIDER === 'doubao' ? createWSProxy(server, {
     appId: DOUBAO_APP_ID,
     accessKey: DOUBAO_ACCESS_KEY,
     upstreamUrl: UPSTREAM_URL,
     maxConnections: WS_MAX_CONNECTIONS,
-    realtimeAccess: LOCAL_DESKTOP_MODE ? desktopAccess : orderAuth.realtimeAccess,
-    reserveInterview: LOCAL_DESKTOP_MODE ? desktopAccess : orderAuth.reserveInterview,
   }) : { close() {} }
 
   // ── graceful shutdown ──
@@ -288,8 +259,6 @@ async function main() {
     console.log(`[server] WebSocket   : ws://${HOST}:${activePort}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
     console.log(`[server] Health      : http://${HOST}:${activePort}/api/realtime-health`)
     console.log(`[server] AI report   : ${reportHandler.configured ? `${reportHandler.provider} ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
-    console.log(`[server] Order gate  : ${LOCAL_DESKTOP_MODE ? 'disabled for local desktop' : orderAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
-    console.log(`[server] Orders      : ${orderAuth.orderCount} customer orders from ${orderAuth.ordersFile}; usage at ${orderAuth.usageFile}`)
     const readyMessage = { type: 'server-ready', port: activePort }
     process.send?.(readyMessage)
     process.parentPort?.postMessage?.(readyMessage)

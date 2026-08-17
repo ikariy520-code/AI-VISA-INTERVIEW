@@ -58,20 +58,6 @@ function isFresh(updatedAt: unknown) {
 }
 
 export async function createInterviewAttempt(officerType: OfficerType, userContext: UserContext) {
-  const previous = loadInterviewRecovery()
-  if (previous && !previous.completed) {
-    try {
-      await fetch('/api/auth/release', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attemptId: previous.attemptId }),
-        keepalive: true,
-      })
-    } catch {
-      // Releasing is best-effort; the server also expires abandoned reservations.
-    }
-  }
   clearInterviewRecovery()
   const attemptId = typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()

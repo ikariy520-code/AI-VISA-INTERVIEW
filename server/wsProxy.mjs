@@ -43,13 +43,6 @@ export function createWSProxy(httpServer, options) {
   const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS
   const maxSessionMs = options.maxSessionMs ?? DEFAULT_MAX_SESSION_MS
   const secrets = [appId, accessKey]
-  const realtimeAccess = typeof options.realtimeAccess === 'function'
-    ? options.realtimeAccess
-    : request => ({ allowed: Boolean(options.isAuthorized?.(request)) })
-  const reserveInterview = typeof options.reserveInterview === 'function'
-    ? options.reserveInterview
-    : request => realtimeAccess(request)
-
   let resolvedUpstreamUrl = upstreamUrl
   try {
     const parsed = new URL(upstreamUrl)
@@ -79,29 +72,18 @@ export function createWSProxy(httpServer, options) {
       return
     }
 
-    const access = realtimeAccess(request, requestUrl.searchParams.get('attempt') || '')
-    if (!access.allowed) {
-      const statusCode = access.statusCode === 403 ? 403 : 401
-      const statusText = statusCode === 403 ? 'Forbidden' : 'Unauthorized'
-      socket.write(`HTTP/1.1 ${statusCode} ${statusText}\r\nConnection: close\r\n\r\n`)
-      socket.destroy()
-      return
-    }
-
     browserServer.handleUpgrade(request, socket, head, (browserSocket) => {
       browserServer.emit('connection', browserSocket, request)
     })
   }
 
-  browserServer.on('connection', (browserSocket, request) => {
+  browserServer.on('connection', (browserSocket) => {
     if (activeConnections >= maxConnections) {
       browserSocket.close(1013, 'server busy - please try again later')
       return
     }
     activeConnections += 1
     const connectionStartedAt = Date.now()
-    const requestUrl = new URL(request.url || '/', 'http://127.0.0.1')
-    const attemptId = requestUrl.searchParams.get('attempt') || ''
     let countedConnection = true
     const releaseConnection = () => {
       if (!countedConnection) return
@@ -163,28 +145,7 @@ export function createWSProxy(httpServer, options) {
     }
 
     upstreamSocket.on('open', () => {
-      const access = reserveInterview(request, attemptId)
-      if (!access.allowed) {
-        sendJson(browserSocket, {
-          type: 'local.error',
-          code: access.code || 'ORDER_QUOTA_EXHAUSTED',
-          message: access.message || '该订单号的面签次数已经用完。',
-        })
-        browserSocket.close(1008, 'order quota unavailable')
-        closeUpstream(upstreamSocket)
-        return
-      }
-      sendJson(browserSocket, {
-        type: 'local.connected',
-        access: {
-          role: access.role,
-          unlimited: access.unlimited,
-          totalUses: access.totalUses,
-          usedUses: access.usedUses,
-          remainingUses: access.remainingUses,
-          availableUses: access.availableUses,
-        },
-      })
+      sendJson(browserSocket, { type: 'local.connected' })
 
       browserSocket.on('pong', () => { browserAlive = true })
       upstreamSocket.on('pong', () => { upstreamAlive = true })

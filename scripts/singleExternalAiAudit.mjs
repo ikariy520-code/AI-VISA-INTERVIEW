@@ -25,6 +25,8 @@ const globallyForbidden = [
   ['/api/feedback-report', 'legacy feedback route'],
   ['volc.bigasr', 'standalone ASR resource'],
   ['seed-tts-2.0', 'standalone TTS resource'],
+  ['/api/auth/', 'retired order or invite gate route'],
+  ['ADMIN_ORDER_NUMBERS', 'retired commercial order gate configuration'],
 ]
 
 for (const file of files) {
@@ -69,6 +71,9 @@ assert.equal(existsSync(join(root, 'server/reportApi.mjs')), true, 'production m
 assert.equal(existsSync(join(root, 'local/deepseekReportBridge.ts')), true, 'local DeepSeek report bridge is missing')
 assert.equal(existsSync(join(root, 'server/deepseekFeedback.mjs')), false, 'legacy DeepSeek report implementation must be removed')
 assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false, 'legacy Ark report bridge must be removed')
+assert.equal(existsSync(join(root, 'server/orderAuth.mjs')), false, 'retired order gate server must be removed')
+assert.equal(existsSync(join(root, 'src/components/OrderGate.tsx')), false, 'retired order gate UI must be removed')
+assert.equal(existsSync(join(root, 'src/shared/orderAccess.tsx')), false, 'retired order entitlement context must be removed')
 
 const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
 assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')

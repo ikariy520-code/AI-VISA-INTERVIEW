@@ -61,7 +61,7 @@ npm run desktop:installer
 - OpenAI：本机服务用长期 API Key 签发 ephemeral client secret，渲染器用 WebRTC 连接 Realtime API。
 - 报告：渲染器只请求同源 `/api/ai-report`；长期 API Key 由本机服务调用 OpenAI-compatible 接口。
 
-应用只监听 `127.0.0.1`，使用随机端口，不对局域网提供服务。桌面版自动关闭网站订单校验，线上部署逻辑不变。
+应用只监听 `127.0.0.1`，使用随机端口，不对局域网提供服务。项目不包含邀请码、订单码或次数扣减系统。
 
 ## 验证边界
 
