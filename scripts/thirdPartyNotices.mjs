@@ -54,6 +54,7 @@ const lines = [
   '',
 ]
 const generatedNotices = lines.join('\n')
+const normalizeLineEndings = value => value.replace(/\r\n/g, '\n')
 
 if (process.argv.includes('--write')) {
   writeFileSync(resolve(root, 'THIRD_PARTY_NOTICES.md'), generatedNotices, 'utf8')
@@ -61,7 +62,7 @@ if (process.argv.includes('--write')) {
 }
 
 const noticesAreCurrent = existsSync(resolve(root, 'THIRD_PARTY_NOTICES.md'))
-  && readFileSync(resolve(root, 'THIRD_PARTY_NOTICES.md'), 'utf8') === generatedNotices
+  && normalizeLineEndings(readFileSync(resolve(root, 'THIRD_PARTY_NOTICES.md'), 'utf8')) === generatedNotices
 
 if (project.license !== 'AGPL-3.0-only') console.error('package.json must declare AGPL-3.0-only.')
 if (missingLegalFiles.length) console.error(`Missing legal files: ${missingLegalFiles.join(', ')}`)
