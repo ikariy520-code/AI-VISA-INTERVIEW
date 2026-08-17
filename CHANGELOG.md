@@ -2,6 +2,13 @@
 
 本项目使用语义化版本号记录公开版本。测试阶段的重要行为变化会在这里说明。
 
+## [1.0.1] - 2026-08-17
+
+- 使用 Web Crypto 生成面试标识和随机面签官选择，移除浏览器端 `Math.random()` 安全告警；
+- 修正本机与 GitHub Actions 的 Windows 打包差异；
+- 修正 Windows 下第三方许可证清单的换行符误报；
+- 完成公开仓库 CodeQL、Gitleaks、Secret Scanning、推送保护和 Dependabot 安全配置。
+
 ## [1.0.0] - 2026-08-17
 
 首个开源准备版本：
