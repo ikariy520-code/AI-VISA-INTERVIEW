@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const root = process.cwd()
-const scanTargets = ['src', 'local', 'server', 'vite.config.ts']
+const scanTargets = ['src', 'local', 'server', 'desktop', 'vite.config.ts']
 const files = []
 
 function collect(path) {
@@ -23,9 +23,10 @@ const globallyForbidden = [
   ['ARK_TEXT_MODEL', 'legacy Ark text model'],
   ['ark.cn-beijing.volces.com/api/v3/chat/completions', 'legacy Ark text endpoint'],
   ['/api/feedback-report', 'legacy feedback route'],
-  ['api.openai.com', 'OpenAI API'],
   ['volc.bigasr', 'standalone ASR resource'],
   ['seed-tts-2.0', 'standalone TTS resource'],
+  ['/api/auth/', 'retired order or invite gate route'],
+  ['ADMIN_ORDER_NUMBERS', 'retired commercial order gate configuration'],
 ]
 
 for (const file of files) {
@@ -36,6 +37,26 @@ for (const file of files) {
   assert.equal(/sk-[a-zA-Z0-9_-]{16,}/.test(content), false, `API key-like secret found in ${relative(root, file)}`)
 }
 
+// Long-lived credentials and provider URLs remain in trusted server/desktop
+// processes. The desktop-only diagnostic may name public hosts but never receives
+// keys. Browser modules may only call same-origin session/report routes.
+const openAiProviderFiles = files
+  .map(file => ({ file, content: readFileSync(file, 'utf8') }))
+  .filter(item => item.content.includes('api.openai.com'))
+assert.deepEqual(
+  openAiProviderFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
+  ['desktop/configStore.mjs', 'desktop/networkDiagnostics.mjs', 'server/realtimeSessionApi.mjs', 'src/components/DesktopSetupGate.tsx'],
+  'OpenAI credentials and endpoints must remain in the trusted realtime session handler',
+)
+const geminiProviderFiles = files
+  .map(file => ({ file, content: readFileSync(file, 'utf8') }))
+  .filter(item => item.content.includes('generativelanguage.googleapis.com'))
+assert.deepEqual(
+  geminiProviderFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
+  ['desktop/networkDiagnostics.mjs', 'server/realtimeSessionApi.mjs'],
+  'Gemini credentials and endpoints must remain in the trusted realtime session handler',
+)
+
 // DeepSeek credentials and provider URLs stay in the server-only report handler.
 // The browser and Vite bridge call the same-origin /api/ai-report route.
 const providerFiles = files
@@ -43,22 +64,54 @@ const providerFiles = files
   .filter(item => item.content.includes('api.deepseek.com') || item.content.includes('/chat/completions'))
 assert.deepEqual(
   providerFiles.map(item => relative(root, item.file).replaceAll('\\', '/')).sort(),
-  ['server/reportApi.mjs'],
-  'DeepSeek provider access must remain in the shared server-side report handler',
+  ['desktop/configStore.mjs', 'server/reportApi.mjs', 'src/components/DesktopSetupGate.tsx'],
+  'default report provider access must remain in the shared server-side report handler',
 )
 
-assert.equal(existsSync(join(root, 'server/reportApi.mjs')), true, 'production DeepSeek report route is missing')
+assert.equal(existsSync(join(root, 'server/reportApi.mjs')), true, 'production model-neutral report route is missing')
 assert.equal(existsSync(join(root, 'local/deepseekReportBridge.ts')), true, 'local DeepSeek report bridge is missing')
 assert.equal(existsSync(join(root, 'server/deepseekFeedback.mjs')), false, 'legacy DeepSeek report implementation must be removed')
 assert.equal(existsSync(join(root, 'local/doubaoTextBridge.ts')), false, 'legacy Ark report bridge must be removed')
+assert.equal(existsSync(join(root, 'server/orderAuth.mjs')), false, 'retired order gate server must be removed')
+assert.equal(existsSync(join(root, 'src/components/OrderGate.tsx')), false, 'retired order gate UI must be removed')
+assert.equal(existsSync(join(root, 'src/shared/orderAccess.tsx')), false, 'retired order entitlement context must be removed')
+
+const desktopMain = readFileSync(join(root, 'desktop/main.mjs'), 'utf8')
+const serverMain = readFileSync(join(root, 'server/index.mjs'), 'utf8')
+const desktopDiagnostics = readFileSync(join(root, 'desktop/networkDiagnostics.mjs'), 'utf8')
+assert.ok(desktopMain.includes('requestSingleInstanceLock'), 'desktop app must prevent duplicate local server instances')
+assert.ok(desktopMain.includes('verifyLocalServer'), 'desktop app must verify the child server before loading the UI')
+assert.ok(serverMain.includes('/api/app-health'), 'local server process health endpoint is missing')
+assert.equal(/API_KEY|ACCESS_KEY|accessKey|apiKey/.test(desktopDiagnostics), false, 'network diagnostics must never receive or inspect provider credentials')
+
+for (const requiredReleaseFile of [
+  'AUTHORS.md',
+  'CHANGELOG.md',
+  'CODE_OF_CONDUCT.md',
+  'SECURITY.md',
+  '.github/workflows/ci.yml',
+  '.github/workflows/secret-scan.yml',
+  '.github/workflows/release.yml',
+  '.github/PULL_REQUEST_TEMPLATE.md',
+  'scripts/fullHistorySecretScan.mjs',
+]) {
+  assert.equal(existsSync(join(root, requiredReleaseFile)), true, `open-source release file is missing: ${requiredReleaseFile}`)
+}
+
+const packageMetadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+assert.equal(packageMetadata.repository?.url, 'git+https://github.com/ikariy520-code/ai-visa-interview.git', 'package repository URL is stale')
+assert.deepEqual(packageMetadata.contributors, ['ikariy520-code', 'LZC20040216-OSS'], 'both core authors must remain credited')
+const deploymentScript = readFileSync(join(root, 'scripts/deploy.sh'), 'utf8')
+assert.ok(deploymentScript.includes('DEPLOY_HOST'), 'deployment target must be explicitly configured')
+assert.equal(/\b\d{1,3}(?:\.\d{1,3}){3}\b/.test(deploymentScript), false, 'deployment script must not contain a fixed server IP')
 
 const reportHandler = readFileSync(join(root, 'server/reportApi.mjs'), 'utf8')
 assert.ok(reportHandler.includes('validateF1StructuredReport'), 'strict F-1 report validation is missing')
-assert.ok(reportHandler.includes("? 'evidence-only' : 'deepseek'"), 'model and evidence-only report modes must remain distinguishable')
+assert.ok(reportHandler.includes("? 'evidence-only' : provider"), 'model and evidence-only report modes must remain distinguishable')
 assert.ok(reportHandler.includes('BASIC_OUTPUT_TOKENS') && reportHandler.includes('STRONG_OUTPUT_TOKENS') && reportHandler.includes('FULL_OUTPUT_TOKENS'), 'tiered report output caps are missing')
-assert.equal(reportHandler.includes('createTokenBudget'), false, 'DeepSeek report token budget must remain disabled')
-assert.equal(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), false, 'DeepSeek report rate limit must remain disabled')
-assert.equal(reportHandler.includes('MAX_ACTIVE_REQUESTS'), false, 'DeepSeek report concurrency limit must remain disabled')
+assert.equal(reportHandler.includes('createTokenBudget'), false, 'report token budget must remain disabled')
+assert.equal(reportHandler.includes('MAX_REQUESTS_PER_WINDOW'), false, 'report rate limit must remain disabled')
+assert.equal(reportHandler.includes('MAX_ACTIVE_REQUESTS'), false, 'report concurrency limit must remain disabled')
 assert.equal(reportHandler.includes('ATTEMPT_TIMEOUT_MS'), false, 'report generation deadlines must remain disabled')
 assert.equal(reportHandler.includes('request.setTimeout'), false, 'upstream report requests must not be cut off by time')
 assert.ok(reportHandler.includes('activeReports'), 'duplicate in-flight reports must share one generation task')
@@ -66,9 +119,14 @@ assert.ok(reportHandler.includes('CLIENT_DISCONNECTED'), 'client disconnect canc
 assert.equal(reportHandler.includes('reportCache'), false, 'completed reports must not remain cached on the server')
 assert.equal(reportHandler.includes('REPORT_CACHE'), false, 'server-side completed report cache settings must remain disabled')
 assert.equal(reportHandler.includes('cached: true'), false, 'the report API must not return retained completed reports')
-assert.ok(reportHandler.includes('repairInvalidReportSections'), 'local structural report repair is missing')
 assert.ok(reportHandler.includes('validationIssues'), 'sanitized report validation diagnostics are missing')
-assert.ok(reportHandler.includes('repairF1ReportEvidence'), 'grounded evidence repair is missing')
+assert.ok(reportHandler.includes('MAX_F1_REPORT_ATTEMPTS = 2'), 'bounded model repair attempt is missing')
+assert.ok(reportHandler.includes('buildF1AnalysisMessages(input, repairContext)'), 'validation-guided structured analysis repair is missing')
+assert.ok(reportHandler.includes('validateF1AnalysisPacket'), 'structured evidence packet validation is missing')
+assert.ok(reportHandler.includes('composeF1ReportFromAnalysis'), 'application-owned final report composition is missing')
+assert.equal(reportHandler.includes('repairInvalidReportSections'), false, 'the model must not be asked to repair a large final-report schema')
+assert.equal(reportHandler.includes('repairF1ReportEvidence'), false, 'the production model path must use catalog ids instead of repairing generated quotes')
+assert.ok(reportHandler.includes('supportsJsonMode') && reportHandler.includes('supportsReasoningOptions'), 'OpenAI-compatible capability switches are missing')
 assert.ok(reportHandler.includes('buildDeterministicF1FallbackReport'), 'bounded evidence-only fallback is missing')
 assert.ok(reportHandler.includes("analysisMode: 'evidence_only'"), 'evidence-only fallback marker is missing')
 assert.ok(reportHandler.includes('if (!fallbackEligible) throw'), 'provider/network failures must not be disguised as completed analysis')
@@ -92,10 +150,15 @@ for (const file of deepSeekModelFiles) {
 const reportContract = readFileSync(join(root, 'server/shared/f1ReportContract.mjs'), 'utf8')
 assert.ok(reportContract.includes('F1_OFFICIAL_CRITERIA'), 'official F-1 criteria are missing from the report contract')
 assert.ok(reportContract.includes('Never invent facts'), 'evidence-only report rule is missing')
-assert.ok(reportContract.includes('approval/refusal probability'), 'visa prediction guardrail is missing')
+assert.ok(reportContract.includes('predict approval/refusal'), 'visa prediction guardrail is missing')
 assert.ok(reportContract.includes('strict machine validator'), 'validation repair instruction is missing')
 assert.ok(reportContract.includes('evidenceCatalog'), 'exact evidence reference catalog is missing')
 assert.ok(reportContract.includes('still return that dimension'), 'missing-information report guidance is missing')
+assert.ok(reportContract.includes('Officer reasoning path for every question review'), 'officer-style reasoning path is missing')
+assert.ok(reportContract.includes('Absence of evidence is not negative evidence'), 'missing-versus-adverse evidence boundary is missing')
+assert.ok(reportContract.includes('FAM_MISREPRESENTATION_EVIDENCE_STANDARD'), 'misrepresentation evidence boundary is missing')
+assert.ok(reportContract.includes('analysisType":"f1_evidence_packet'), 'structured model judgment contract is missing')
+assert.ok(reportContract.includes('application code—not you—will generate scores'), 'application-owned report composition boundary is missing')
 
 const providerNeutralUiFiles = [
   'src/modules/feedback/index.tsx',
@@ -123,6 +186,13 @@ assert.ok(analysisEngine.includes('overallScore: null'), 'unavailable report mus
 assert.ok(analysisEngine.includes("structuredReport.analysisMode === 'evidence_only'"), 'evidence-only reports must suppress synthetic scores')
 assert.equal(analysisEngine.includes('...analyzeInterview(record)'), false, 'unavailable F1 report must not run the local scoring engine')
 assert.equal(analysisEngine.includes('AbortSignal.timeout'), false, 'browser report request must not have a fixed timeout')
+
+const f1OfficerPolicy = readFileSync(join(root, 'src/modules/practice/services/f1OfficerPolicy.ts'), 'utf8')
+assert.equal(/Doubao|豆包|DeepSeek|openspeech\.bytedance/i.test(f1OfficerPolicy), false, 'the F-1 officer policy must remain provider-neutral')
+assert.ok(f1OfficerPolicy.includes('REFERENCE QUESTION BANK (NON-BINDING)'), 'the F-1 reference bank must not become a hard whitelist')
+assert.ok(f1OfficerPolicy.includes('You may author or paraphrase any natural'), 'model-authored F-1 questions are not enabled')
+const realtimeInterviewPrompt = readFileSync(join(root, 'src/modules/practice/services/realtimeInterviewPrompt.ts'), 'utf8')
+assert.ok(realtimeInterviewPrompt.includes('buildF1OfficerPolicy({'), 'the realtime provider adapter must inject the shared F-1 officer policy')
 
 const realtimeFiles = files
   .map(file => ({ file, content: readFileSync(file, 'utf8') }))
@@ -159,4 +229,4 @@ assert.ok(realtimeSmoke.includes('realtime-smoke=native-e2e-response-complete'),
 assert.equal(realtimeSmoke.includes('DOUBAO_EVENT.CHAT_TTS_TEXT'), false, 'native F1 smoke must not inject application-authored TTS')
 assert.equal(realtimeSmoke.includes('controlled-session-rotation-complete'), false, 'realtime smoke must not validate per-question Session rotation')
 
-console.log('deepseek-report-and-doubao-voice-architecture-audit=passed')
+console.log('model-neutral-report-and-multi-provider-voice-architecture-audit=passed')

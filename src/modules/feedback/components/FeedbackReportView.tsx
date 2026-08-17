@@ -26,7 +26,7 @@ function DimensionCard({ dimension }: { dimension: ReportDimension }) {
   const tone = scoreTone(dimension.score)
 
   return (
-    <article className="rounded-[22px] border border-black/[0.07] bg-white p-5 shadow-sm">
+    <article className="report-dimension-card rounded-[22px] border border-black/[0.07] bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[15px] font-semibold text-[#1d1d1f]">{dimension.label}</p>
@@ -51,8 +51,8 @@ function DimensionCard({ dimension }: { dimension: ReportDimension }) {
       {dimension.officialSources && dimension.officialSources.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {dimension.officialSources.map(source => (
-            <a key={source.url + source.title} href={source.url} target="_blank" rel="noreferrer" className="rounded-full bg-[#f0f6ff] px-2.5 py-1 text-[10px] font-semibold text-[#2769a8] hover:underline">
-              查看官方依据
+            <a key={source.url + source.title} href={source.url} target="_blank" rel="noreferrer" className="report-source-link rounded-full bg-[#f0f6ff] px-2.5 py-1 text-[10px] font-semibold text-[#2769a8] hover:underline">
+              {source.title}
             </a>
           ))}
         </div>
@@ -66,7 +66,7 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
   const tone = scoreTone(review.score)
 
   return (
-    <article className="overflow-hidden rounded-[22px] border border-black/[0.07] bg-white shadow-sm print:break-inside-avoid">
+    <article className="report-question-card overflow-hidden rounded-[22px] border border-black/[0.07] bg-white shadow-sm">
       <button
         type="button"
         onClick={() => setOpen(value => !value)}
@@ -84,7 +84,7 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
           <span className={`hidden rounded-full px-2.5 py-1 text-[11px] font-semibold sm:inline-flex ${tone.panel} ${tone.text}`}>
             {review.verdict}{review.score === null ? '' : ` · ${review.score}`}
           </span>
-          <HiOutlineChevronDown className={`h-4 w-4 text-[#86868b] transition-transform ${open ? 'rotate-180' : ''}`} />
+          <HiOutlineChevronDown className={`report-question-chevron h-4 w-4 text-[#86868b] transition-transform ${open ? 'rotate-180' : ''}`} />
         </span>
       </button>
 
@@ -92,7 +92,7 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
         initial={false}
         animate={open ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }}
         transition={{ duration: 0.22 }}
-        className="overflow-hidden print:!h-auto print:!overflow-visible print:!opacity-100"
+        className="report-question-details overflow-hidden print:!h-auto print:!overflow-visible print:!opacity-100"
         aria-hidden={!open}
       >
             <div className="border-t border-black/[0.06] px-5 py-5 sm:px-6 sm:py-6">
@@ -138,9 +138,28 @@ function QuestionReviewCard({ review, index }: { review: QuestionReview; index: 
 
 export default function FeedbackReportView({ report }: { report: FeedbackReport }) {
   const tone = scoreTone(report.overallScore)
+  const sourceLabel = report.source === 'deepseek'
+    ? '证据约束综合分析'
+    : report.source === 'evidence_only'
+      ? '基础证据复盘'
+      : report.source === 'sample'
+        ? '演示报告'
+        : report.source === 'insufficient'
+          ? '问答记录'
+          : '模拟面签反馈'
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="feedback-report space-y-4 sm:space-y-5">
+      <div className="report-print-brand" aria-hidden="true">
+        <div>
+          <p className="report-print-brand-name">AI VISA INTERVIEW</p>
+          <p className="report-print-brand-subtitle">美国签证模拟面签 · 复盘报告</p>
+        </div>
+        <div className="report-print-document-meta">
+          <p>{sourceLabel}</p>
+          <p>{report.date} {report.time}</p>
+        </div>
+      </div>
       {report.source === 'sample' && (
         <div className="print:hidden flex items-start gap-3 rounded-[18px] border border-blue-200/70 bg-[#eef6ff] px-4 py-3 text-[#315f8d]">
           <HiOutlineSparkles className="mt-0.5 h-4 w-4 flex-shrink-0" />
@@ -178,7 +197,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         </div>
       )}
 
-      <section className="app-card overflow-hidden print:border-0 print:shadow-none">
+      <section className="report-cover app-card overflow-hidden print:border-0 print:shadow-none">
         <div className="grid gap-0 lg:grid-cols-[1fr_270px]">
           <div className="px-5 py-6 sm:px-8 sm:py-9">
             <div className="flex flex-wrap items-center gap-2">
@@ -222,8 +241,8 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         ))}
       </nav>
 
-      {report.strengths.length > 0 && report.priorities.length > 0 && <section id="report-overview" className="scroll-mt-32 grid gap-5 md:grid-cols-2">
-        <div className="app-card p-5 sm:p-6">
+      {report.strengths.length > 0 && report.priorities.length > 0 && <section id="report-overview" className="report-section report-overview scroll-mt-32 grid gap-5 md:grid-cols-2">
+        <div className="report-overview-card app-card p-5 sm:p-6">
           <h2 className="flex items-center gap-2 text-[16px] font-semibold text-[#1d1d1f]"><HiOutlineShieldCheck className="h-5 w-5 text-[#158f65]" />这次做得好的地方</h2>
           <div className="mt-5 space-y-5">
             {report.strengths.map((item, index) => (
@@ -235,7 +254,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
           </div>
         </div>
 
-        <div className="app-card p-5 sm:p-6">
+        <div className="report-overview-card app-card p-5 sm:p-6">
           <h2 className="flex items-center gap-2 text-[16px] font-semibold text-[#1d1d1f]"><HiOutlineExclamationTriangle className="h-5 w-5 text-[#c47a16]" />最该优先改的地方</h2>
           <div className="mt-5 space-y-5">
             {report.priorities.map((item, index) => (
@@ -248,7 +267,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         </div>
       </section>}
 
-      {report.dimensions.length > 0 && <section id="report-dimensions" className="scroll-mt-32 pt-6">
+      {report.dimensions.length > 0 && <section id="report-dimensions" className="report-section report-dimensions scroll-mt-32 pt-6">
         <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">{report.evaluationLabel}</p><h2 className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">六项核心能力</h2></div>
           <p className="max-w-md text-[11px] leading-5 text-[#86868b]">{report.dimensionIntro}</p>
@@ -258,7 +277,7 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         </div>
       </section>}
 
-      <section id="report-questions" className="scroll-mt-32 pt-6">
+      <section id="report-questions" className="report-section report-questions scroll-mt-32 pt-6">
         <div className="mb-5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">Question review</p>
           <h2 className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-[#1d1d1f]">逐题复盘</h2>
@@ -269,15 +288,15 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         </div>
       </section>
 
-      {report.actionPlan.length > 0 && <section id="report-plan" className="scroll-mt-32 pt-6">
-        <div className="app-card overflow-hidden">
+      {report.actionPlan.length > 0 && <section id="report-plan" className="report-section report-plan scroll-mt-32 pt-6">
+        <div className="report-plan-card app-card overflow-hidden">
           <div className="border-b border-black/[0.06] bg-[#fbfbfd] px-5 py-5 sm:px-7">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">Next practice</p>
             <h2 className="mt-2 flex items-center gap-2 text-[22px] font-semibold tracking-[-0.04em] text-[#1d1d1f]"><HiOutlineFlag className="h-5 w-5 text-[#0071e3]" />下一轮练习计划</h2>
           </div>
           <div className="grid gap-0 md:grid-cols-3">
             {report.actionPlan.map((step, index) => (
-              <div key={step.title} className={`p-5 sm:p-6 ${index > 0 ? 'border-t border-black/[0.06] md:border-l md:border-t-0' : ''}`}>
+              <div key={step.title} className={`report-action-item p-5 sm:p-6 ${index > 0 ? 'border-t border-black/[0.06] md:border-l md:border-t-0' : ''}`}>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#0071e3]">{step.label}</p>
                 <p className="mt-2 text-[14px] font-semibold text-[#1d1d1f]">{step.title}</p>
                 <p className="mt-2 text-[12px] leading-5 text-[#6e6e73]">{step.detail}</p>
@@ -287,9 +306,12 @@ export default function FeedbackReportView({ report }: { report: FeedbackReport 
         </div>
       </section>}
 
-      <div className="flex items-start gap-3 rounded-[18px] border border-black/[0.07] bg-white px-4 py-4 text-[#6e6e73]">
+      <div className="report-disclaimer flex items-start gap-3 rounded-[18px] border border-black/[0.07] bg-white px-4 py-4 text-[#6e6e73]">
         <HiOutlineArrowTrendingUp className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#0071e3]" />
-        <p className="text-[11px] leading-5">本报告是练习辅助，不构成法律建议，也不预测真实签证结果。系统不会长期保存本次报告；离开前请保存为 PDF。</p>
+        <p className="text-[11px] leading-5">
+          本报告是练习辅助，不构成法律建议，也不预测真实签证结果。系统不会长期保存本次报告；离开前请保存为 PDF。
+          <span className="report-print-footer-meta"> 报告编号：{report.id} · {report.date} {report.time}</span>
+        </p>
       </div>
     </div>
   )

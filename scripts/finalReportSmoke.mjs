@@ -1,21 +1,27 @@
 import dotenv from 'dotenv'
 import {
-  buildF1ReportMessages,
+  buildF1AnalysisMessages,
+  composeF1ReportFromAnalysis,
   getModelMessageContent,
-  repairF1ReportEvidence,
   sanitizeReportRequest,
-  validateF1StructuredReport,
+  validateF1AnalysisPacket,
 } from '../server/shared/f1ReportContract.mjs'
 
 dotenv.config({ path: '.env.local', quiet: true })
 
-const apiKey = process.env.DEEPSEEK_API_KEY?.trim()
-const model = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-pro'
-const endpoint = new URL(process.env.DEEPSEEK_BASE_URL?.trim() || 'https://api.deepseek.com')
+const provider = process.env.REPORT_PROVIDER?.trim() || 'deepseek'
+const apiKey = (process.env.REPORT_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim()
+const model = (process.env.REPORT_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro').trim()
+const endpoint = new URL((process.env.REPORT_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').trim())
+const supportsJsonMode = process.env.REPORT_SUPPORTS_JSON_MODE !== 'false'
+const supportsReasoningOptions = process.env.REPORT_SUPPORTS_REASONING_OPTIONS
+  ? process.env.REPORT_SUPPORTS_REASONING_OPTIONS !== 'false'
+  : provider === 'deepseek'
 
-if (!apiKey) throw new Error('DeepSeek API key is not configured')
-if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'api.deepseek.com') {
-  throw new Error('DeepSeek endpoint is not allowed')
+const anonymousLoopback = endpoint.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(endpoint.hostname)
+if (!apiKey && !anonymousLoopback) throw new Error('Report model API key is not configured')
+if (endpoint.protocol !== 'https:' && !anonymousLoopback) {
+  throw new Error('Report model endpoint must use HTTPS or loopback HTTP')
 }
 endpoint.pathname = endpoint.pathname.replace(/\/$/, '')
 if (!endpoint.pathname.endsWith('/chat/completions')) {
@@ -53,62 +59,83 @@ let lastError
 let repairContext = ''
 let validationIssues = []
 let attempts = 0
-for (attempts = 1; attempts <= 3; attempts += 1) {
+const repairHistory = []
+const startedAt = Date.now()
+for (attempts = 1; attempts <= 2; attempts += 1) {
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify({
         model,
-        messages: buildF1ReportMessages(input, repairContext),
-        response_format: { type: 'json_object' },
-        thinking: { type: 'enabled' },
-        reasoning_effort: 'high',
-        max_tokens: 32_000,
+        messages: buildF1AnalysisMessages(input, repairContext),
+        ...(supportsJsonMode ? { response_format: { type: 'json_object' } } : {}),
+        ...(supportsReasoningOptions ? {
+          thinking: { type: 'enabled' },
+          reasoning_effort: 'high',
+        } : {}),
+        max_tokens: 24_000,
         stream: false,
       }),
     })
 
     const payload = await response.json().catch(() => null)
-    if (!response.ok) throw new Error(`DeepSeek final-report request failed with status ${response.status}`)
+    if (!response.ok) throw new Error(`Report model request failed with status ${response.status}`)
     const content = getModelMessageContent(payload)
-    if (!content) throw new Error('DeepSeek returned no final-report content')
-    const originalDraft = JSON.parse(content)
+    if (!content) throw new Error('Report model returned no evidence-analysis content')
+    const originalDraft = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
     parsed = originalDraft
     validationIssues = []
-    report = validateF1StructuredReport(parsed, input, {
+    const packet = validateF1AnalysisPacket(parsed, input, {
       onIssue: issue => { validationIssues.push(issue) },
     })
-    if (report) break
-    const repairEvents = []
-    const evidenceRepairedDraft = repairF1ReportEvidence(parsed, input, {
-      onRepair: event => { repairEvents.push(event) },
-    })
-    if (repairEvents.length > 0) {
-      const repairedIssues = []
-      report = validateF1StructuredReport(evidenceRepairedDraft, input, {
-        onIssue: issue => { repairedIssues.push(issue) },
-        allowMaterializedEvidence: true,
-      })
+    if (packet) {
+      report = composeF1ReportFromAnalysis(packet, input)
       if (report) break
-      parsed = evidenceRepairedDraft
-      validationIssues = repairedIssues
+      validationIssues.push('ANALYSIS_COMPOSITION_FAILED')
     }
     validationIssues = validationIssues.length > 0 ? [...new Set(validationIssues)] : ['UNKNOWN_VALIDATION_FAILURE']
+    repairHistory.push(validationIssues)
     repairContext = { issues: validationIssues, draft: parsed }
-    lastError = new Error(`DeepSeek report did not pass the evidence contract: ${validationIssues.join(',')}`)
+    lastError = new Error(`Report model output did not pass the structured evidence contract: ${validationIssues.join(',')}`)
   } catch (error) {
     lastError = error
-    if (error instanceof SyntaxError) repairContext = { issues: ['INVALID_JSON'], draft: null }
+    if (error instanceof SyntaxError) {
+      repairHistory.push(['INVALID_JSON'])
+      repairContext = { issues: ['INVALID_JSON'], draft: null }
+    }
   }
 }
 
 if (!report) {
   console.error(`final-report-validation-issues=${validationIssues.join(',') || 'unknown'}`)
-  throw lastError || new Error('DeepSeek report did not pass the evidence contract')
+  throw lastError || new Error('Report model output did not pass the evidence contract')
 }
 
-console.log(`deepseek-final-report-smoke=passed model=${model} attempts=${attempts} dimensions=${report.dimensions.length} questions=${report.questionReviews.length}`)
+const directSupportQuestionIds = new Set(['f1_01', 'f1_04', 'f1_11', 'f1_12', 'f1_13'])
+for (const review of report.questionReviews) {
+  if (!directSupportQuestionIds.has(review.questionId)) continue
+  if (review.verdict !== 'complete' || review.score < 85 || !review.summary.startsWith('支持资格：')) {
+    throw new Error(`Direct factual answer was not recognized as supporting evidence: ${review.questionId}`)
+  }
+}
+if (!report.questionReviews.every(review => review.preparationDirection.startsWith('下一步核查：'))) {
+  throw new Error('One or more question reviews did not state the next officer inquiry')
+}
+const academicPlan = report.dimensions.find(item => item.id === 'academic_plan')
+const financialCapacity = report.dimensions.find(item => item.id === 'financial_capacity')
+if (academicPlan?.status !== 'needs_evidence') {
+  throw new Error('Smoke fixture must not establish academic preparation from school and major names alone')
+}
+if (financialCapacity?.status !== 'needs_evidence') {
+  throw new Error('Smoke fixture must not establish the complete funding chain from sponsor and annual budget alone')
+}
+
+console.log(`model-neutral-final-report-smoke=passed provider=${provider} model=${model} attempts=${attempts} durationMs=${Date.now() - startedAt} packetBytes=${Buffer.byteLength(JSON.stringify(parsed))} dimensions=${report.dimensions.length} questions=${report.questionReviews.length} repairIssues=${JSON.stringify(repairHistory)}`)
+console.log(`model-neutral-final-report-quality=${JSON.stringify({
+  summary: report.summary,
+  dimensions: report.dimensions.map(item => ({ id: item.id, status: item.status, score: item.score, summary: item.summary })),
+})}`)

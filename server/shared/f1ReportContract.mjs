@@ -16,12 +16,49 @@ const DIMENSION_LABELS = {
 export const F1_REPORT_DIMENSION_IDS = Object.keys(DIMENSION_LABELS)
 
 const DIMENSION_DEFAULT_RULE_IDS = {
-  application_consistency: ['DOS_ACADEMIC_PREPARATION'],
-  study_authenticity: ['FAM_EDUCATION_HOME_COUNTRY_CALIBRATION'],
+  application_consistency: ['DOS_ACADEMIC_PREPARATION', 'FAM_MISREPRESENTATION_EVIDENCE_STANDARD'],
+  study_authenticity: ['FAM_STUDENT_VISA_QUALIFICATIONS', 'FAM_EDUCATION_HOME_COUNTRY_CALIBRATION'],
   academic_plan: ['DOS_ACADEMIC_PREPARATION'],
-  financial_capacity: ['DOS_FINANCIAL_CAPACITY'],
+  financial_capacity: ['DOS_FINANCIAL_CAPACITY', 'FAM_ADEQUATE_FINANCIAL_RESOURCES'],
   departure_intent: ['DOS_DEPARTURE_INTENT', 'FAM_RESIDENCE_ABROAD', 'FAM_PRESENT_INTENT_CALIBRATION'],
-  overall_credibility: ['FAM_PRESENT_INTENT_CALIBRATION'],
+  overall_credibility: ['DOS_INDIVIDUAL_ASSESSMENT', 'FAM_MISREPRESENTATION_EVIDENCE_STANDARD'],
+}
+
+const QUESTION_EFFECT_PREFIXES = ['支持资格：', '中性信息：', '尚未建立：', '实质疑点：']
+const NEXT_INQUIRY_PREFIX = '下一步核查：'
+const CORE_QUALIFICATION_DIMENSIONS = [
+  'study_authenticity',
+  'academic_plan',
+  'financial_capacity',
+  'departure_intent',
+]
+
+function hasCalibratedQuestionEffect(summary, score, verdict) {
+  const prefix = QUESTION_EFFECT_PREFIXES.find(candidate => summary.startsWith(candidate))
+  if (prefix === '支持资格：') return verdict === 'complete' && score >= 85
+  if (prefix === '中性信息：') return verdict === 'complete' && score >= 65 && score <= 84
+  if (prefix === '尚未建立：') return ['partial', 'needs_preparation'].includes(verdict) && score >= 40 && score <= 64
+  if (prefix === '实质疑点：') return verdict === 'needs_preparation' && score <= 39
+  return false
+}
+
+function hasCalibratedDimensionStatus(status, score) {
+  if (status === 'stable') return score >= 75
+  if (status === 'needs_evidence') return score >= 40 && score <= 74
+  return score <= 59
+}
+
+function hasCalibratedOverallReadiness(dimensions, overallScore, readiness) {
+  const anyPriority = dimensions.some(dimension => dimension.status === 'priority')
+  if (anyPriority) return readiness === '建议重点准备' && overallScore <= 59
+
+  const coreDimensions = CORE_QUALIFICATION_DIMENSIONS
+    .map(id => dimensions.find(dimension => dimension.id === id))
+    .filter(Boolean)
+  const coreNeedsEvidence = coreDimensions.some(dimension => dimension.status === 'needs_evidence')
+  if (coreNeedsEvidence && (readiness === '准备较充分' || overallScore > 74)) return false
+  if (readiness === '准备较充分') return overallScore >= 75 && coreDimensions.every(dimension => dimension.status === 'stable')
+  return true
 }
 
 const IDENTIFIER_PATTERNS = [
@@ -43,6 +80,10 @@ function isRecord(value) {
 
 function cleanText(value, maxLength) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
+}
+
+function isGenericAnalysisPlaceholder(value) {
+  return /^(?:信息不足|信息不够|尚不明确|无法判断|不能判断|建议补充|需要补充|需进一步核查|需要进一步核查)[。.!！]*$/i.test(value.replace(/\s+/g, ''))
 }
 
 function cleanStringArray(value, maxItems, maxLength) {
@@ -98,8 +139,8 @@ export function buildF1EvidenceCatalog(input) {
   ]
 }
 
-function hasForbiddenClaim(value) {
-  if (!isRecord(value)) return false
+function forbiddenClaimIssue(value) {
+  if (!isRecord(value)) return ''
   const generatedEvaluation = {
     readiness: value.readiness,
     headline: value.headline,
@@ -122,7 +163,13 @@ function hasForbiddenClaim(value) {
     actionPlan: value.actionPlan,
     disclaimer: value.disclaimer,
   }
-  return /(获签概率|过签率|一定(?:会)?通过|一定(?:会)?拒签|will be approved|will be refused|approval probability|回答过短|回答太短|字数太少|高级词汇|word count|too short)/i.test(JSON.stringify(generatedEvaluation))
+  const serialized = JSON.stringify(generatedEvaluation)
+  if (/(获签概率|过签率|一定(?:会)?通过|一定(?:会)?拒签|will be approved|will be refused|approval probability)/i.test(serialized)) return 'FORBIDDEN_OUTCOME_PREDICTION'
+  if (/(有利于过签|不利于过签)/i.test(serialized)) return 'FORBIDDEN_PASS_FRAMING'
+  if (/(回答过短|回答太短|字数太少|高级词汇|word count|too short)/i.test(serialized)) return 'FORBIDDEN_STYLE_SCORING'
+  if (/(欺诈|撒谎|说谎|造假|虚假陈述)/i.test(serialized)) return 'FORBIDDEN_ACCUSATION'
+  if (/(眼神|肢体语言|nervousness indicates|demeanor proves)/i.test(serialized)) return 'FORBIDDEN_DEMEANOR_INFERENCE'
+  return ''
 }
 
 function cleanFeedbackArray(value) {
@@ -210,7 +257,8 @@ export function validateF1StructuredReport(value, input, options = {}) {
   if (!isRecord(value)) return fail('REPORT_NOT_OBJECT')
   if (value.schemaVersion !== 2 || value.reportType !== 'practice_readiness') fail('REPORT_IDENTITY')
   if (value.criteriaVersion !== input.criteriaVersion) fail('CRITERIA_VERSION')
-  if (hasForbiddenClaim(value)) fail('FORBIDDEN_CLAIM')
+  const forbiddenIssue = forbiddenClaimIssue(value)
+  if (forbiddenIssue) fail(forbiddenIssue)
   const overallScore = cleanScore(value.overallScore)
   const readiness = ['准备较充分', '仍需补充', '建议重点准备'].includes(value.readiness) ? value.readiness : null
   if (overallScore === null) fail('OVERALL_SCORE')
@@ -240,6 +288,7 @@ export function validateF1StructuredReport(value, input, options = {}) {
     const mark = issue => { valid = false; fail(issue) }
     if (score === null) mark(`DIMENSION_SCORE:${id}`)
     if (!status) mark(`DIMENSION_STATUS:${id}`)
+    if (score !== null && status && !hasCalibratedDimensionStatus(status, score)) mark(`DIMENSION_CALIBRATION:${id}`)
     if (rawEvidence.length === 0) mark(`DIMENSION_EVIDENCE_MISSING:${id}`)
     if (rawEvidence.length > 5) mark(`DIMENSION_EVIDENCE_LIMIT:${id}`)
     if (evidence.length !== rawEvidence.length) mark(`DIMENSION_EVIDENCE_UNGROUNDED:${id}`)
@@ -281,7 +330,9 @@ export function validateF1StructuredReport(value, input, options = {}) {
     if (score === null) mark(`QUESTION_REVIEW_SCORE:${safeQuestionId}`)
     if (!verdict) mark(`QUESTION_REVIEW_VERDICT:${safeQuestionId}`)
     if (!summary) mark(`QUESTION_REVIEW_SUMMARY:${safeQuestionId}`)
+    if (score !== null && verdict && summary && !hasCalibratedQuestionEffect(summary, score, verdict)) mark(`QUESTION_REVIEW_CALIBRATION:${safeQuestionId}`)
     if (!preparationDirection) mark(`QUESTION_REVIEW_DIRECTION:${safeQuestionId}`)
+    if (preparationDirection && !preparationDirection.startsWith(NEXT_INQUIRY_PREFIX)) mark(`QUESTION_REVIEW_DIRECTION_PREFIX:${safeQuestionId}`)
     if (!answerEvidence) mark(`QUESTION_REVIEW_EVIDENCE:${safeQuestionId}`)
     if (!valid || !sourceAnswer) return null
     return {
@@ -297,6 +348,7 @@ export function validateF1StructuredReport(value, input, options = {}) {
     }
   })
   const validQuestionReviews = questionReviews.filter(Boolean)
+  if (validDimensions.length === F1_REPORT_DIMENSION_IDS.length && overallScore !== null && readiness && !hasCalibratedOverallReadiness(validDimensions, overallScore, readiness)) fail('OVERALL_CALIBRATION')
 
   const normalizeInsight = item => {
     if (!isRecord(item)) return null
@@ -432,11 +484,11 @@ export function buildDeterministicF1FallbackReport(input) {
       questionId: answer.questionId,
       score: 50,
       verdict: 'needs_preparation',
-      summary: '回答已记录；现有信息不足以确认是否覆盖该问题的全部关键事实。',
+      summary: '尚未建立：当前仅保留原始回答，证据模式无法确认其是否完整回应本题。',
       answerEvidence: answer.answer,
       strengths: ['回答内容已完整保留，可据此继续复盘。'],
       improvements: ['核对是否直接回答问题，并补充问题所需的真实人物、时间、金额或原因。'],
-      preparationDirection: '只使用自己的真实经历，按“直接结论—关键事实—与申请资料的一致性”检查回答。',
+      preparationDirection: '下一步核查：确认本题对应的签证要件，再核对回答中的真实人物、时间、金额或原因。',
     })),
     actionPlan: [
       { label: 'STEP 1', title: '逐题核对事实', detail: '把每个回答与申请表、I-20 和真实经历逐项核对。' },
@@ -447,6 +499,270 @@ export function buildDeterministicF1FallbackReport(input) {
   }
 }
 
+const ANALYSIS_QUESTION_EFFECTS = new Set(['supports', 'neutral', 'unestablished', 'concern'])
+const ANALYSIS_DIMENSION_EFFECTS = new Set(['supports', 'unestablished', 'concern'])
+const DIMENSION_WEIGHTS = {
+  application_consistency: 0.15,
+  study_authenticity: 0.20,
+  academic_plan: 0.15,
+  financial_capacity: 0.20,
+  departure_intent: 0.20,
+  overall_credibility: 0.10,
+}
+const QUESTION_EFFECT_OUTPUT = {
+  supports: { prefix: '支持资格：', score: 92, verdict: 'complete' },
+  neutral: { prefix: '中性信息：', score: 74, verdict: 'complete' },
+  unestablished: { prefix: '尚未建立：', score: 52, verdict: 'partial' },
+  concern: { prefix: '实质疑点：', score: 30, verdict: 'needs_preparation' },
+}
+const DIMENSION_EFFECT_OUTPUT = {
+  supports: { score: 85, status: 'stable', effectLabel: '支持资格' },
+  unestablished: { score: 55, status: 'needs_evidence', effectLabel: '尚未建立' },
+  concern: { score: 35, status: 'priority', effectLabel: '实质疑点' },
+}
+
+function generatedAnalysisIssue(value) {
+  const serialized = JSON.stringify(value)
+  if (/(获签概率|过签率|一定(?:会)?通过|一定(?:会)?拒签|will be approved|will be refused|approval probability)/i.test(serialized)) return 'ANALYSIS_OUTCOME_PREDICTION'
+  if (/(有利于过签|不利于过签)/i.test(serialized)) return 'ANALYSIS_PASS_FRAMING'
+  if (/(回答过短|回答太短|字数太少|高级词汇|word count|too short)/i.test(serialized)) return 'ANALYSIS_STYLE_SCORING'
+  if (/(欺诈|撒谎|说谎|造假|虚假陈述)/i.test(serialized)) return 'ANALYSIS_ACCUSATION'
+  if (/(眼神|肢体语言|nervousness indicates|demeanor proves)/i.test(serialized)) return 'ANALYSIS_DEMEANOR_INFERENCE'
+  return ''
+}
+
+export function validateF1AnalysisPacket(value, input, options = {}) {
+  const issues = new Set()
+  const fail = issue => {
+    if (!issues.has(issue)) {
+      issues.add(issue)
+      if (typeof options.onIssue === 'function') options.onIssue(issue)
+    }
+  }
+  if (!isRecord(value)) return null
+  if (value.schemaVersion !== 1 || value.analysisType !== 'f1_evidence_packet') fail('ANALYSIS_IDENTITY')
+  const caseSynthesis = cleanText(value.caseSynthesis, 3_000)
+  if (!caseSynthesis || isGenericAnalysisPlaceholder(caseSynthesis)) fail('ANALYSIS_CASE_SYNTHESIS')
+  const prohibited = generatedAnalysisIssue(value)
+  if (prohibited) fail(prohibited)
+
+  const rawQuestions = Array.isArray(value.questions) ? value.questions : []
+  if (rawQuestions.length !== input.answers.length) fail('ANALYSIS_QUESTION_COUNT')
+  const questions = rawQuestions.map((item, position) => {
+    const source = input.answers[position]
+    if (!isRecord(item) || !source) {
+      fail(`ANALYSIS_QUESTION_SHAPE:${position + 1}`)
+      return null
+    }
+    const factor = F1_REPORT_DIMENSION_IDS.includes(item.factor) ? item.factor : null
+    const effect = ANALYSIS_QUESTION_EFFECTS.has(item.effect) ? item.effect : null
+    const finding = cleanText(item.finding, 1_500)
+    const strengths = cleanStringArray(item.strengths, 3, 1_000)
+    const improvements = cleanStringArray(item.improvements, 3, 1_000)
+    const nextInquiry = cleanText(item.nextInquiry, 1_500)
+    if (item.questionId !== source.questionId) fail(`ANALYSIS_QUESTION_ORDER:${source.questionId}`)
+    if (!factor) fail(`ANALYSIS_QUESTION_FACTOR:${source.questionId}`)
+    if (!effect) fail(`ANALYSIS_QUESTION_EFFECT:${source.questionId}`)
+    if (!finding || isGenericAnalysisPlaceholder(finding)) fail(`ANALYSIS_QUESTION_FINDING:${source.questionId}`)
+    if ((effect === 'supports' || effect === 'neutral') && strengths.length === 0) fail(`ANALYSIS_QUESTION_STRENGTHS:${source.questionId}`)
+    if ((effect === 'unestablished' || effect === 'concern') && improvements.length === 0) fail(`ANALYSIS_QUESTION_IMPROVEMENTS:${source.questionId}`)
+    if (!nextInquiry || isGenericAnalysisPlaceholder(nextInquiry)) fail(`ANALYSIS_QUESTION_NEXT:${source.questionId}`)
+    return factor && effect && finding && nextInquiry && item.questionId === source.questionId
+      ? { questionId: source.questionId, factor, effect, finding, strengths, improvements, nextInquiry }
+      : null
+  }).filter(Boolean)
+
+  const catalog = buildF1EvidenceCatalog(input)
+  const rawDimensions = Array.isArray(value.dimensions) ? value.dimensions : []
+  if (rawDimensions.length !== F1_REPORT_DIMENSION_IDS.length) fail('ANALYSIS_DIMENSION_COUNT')
+  const dimensions = rawDimensions.map(item => {
+    if (!isRecord(item) || !F1_REPORT_DIMENSION_IDS.includes(item.id)) {
+      fail('ANALYSIS_DIMENSION_ID')
+      return null
+    }
+    const effect = ANALYSIS_DIMENSION_EFFECTS.has(item.effect) ? item.effect : null
+    const finding = cleanText(item.finding, 1_500)
+    const reasoning = cleanText(item.reasoning, 3_000)
+    const nextActions = cleanStringArray(item.nextActions, 3, 1_500)
+    const evidenceIds = cleanStringArray(item.evidenceIds, 5, 200)
+    const concernType = ['none', 'contradiction', 'eligibility_fact'].includes(item.concernType) ? item.concernType : null
+    const grounded = evidenceIds.length > 0 && evidenceIds.every(id => catalog.some(entry => entry.id === id))
+    if (!effect) fail(`ANALYSIS_DIMENSION_EFFECT:${item.id}`)
+    if (!finding || isGenericAnalysisPlaceholder(finding)) fail(`ANALYSIS_DIMENSION_FINDING:${item.id}`)
+    if (!reasoning || isGenericAnalysisPlaceholder(reasoning)) fail(`ANALYSIS_DIMENSION_REASONING:${item.id}`)
+    if (nextActions.length === 0 || nextActions.some(isGenericAnalysisPlaceholder)) fail(`ANALYSIS_DIMENSION_NEXT:${item.id}`)
+    if (!grounded) fail(`ANALYSIS_DIMENSION_EVIDENCE:${item.id}`)
+    if (!concernType || (effect === 'concern') !== (concernType !== 'none')) fail(`ANALYSIS_DIMENSION_CONCERN_TYPE:${item.id}`)
+    if (concernType === 'contradiction' && new Set(evidenceIds).size < 2) fail(`ANALYSIS_DIMENSION_CONTRADICTION_EVIDENCE:${item.id}`)
+    return effect && finding && reasoning && nextActions.length > 0 && grounded && concernType
+      ? { id: item.id, effect, finding, reasoning, nextActions, evidenceIds, concernType }
+      : null
+  }).filter(Boolean)
+  if (new Set(dimensions.map(item => item.id)).size !== F1_REPORT_DIMENSION_IDS.length) fail('ANALYSIS_DIMENSION_SET')
+  if (issues.size > 0) return null
+  return { schemaVersion: 1, analysisType: 'f1_evidence_packet', caseSynthesis, questions, dimensions }
+}
+
+const evidenceReference = evidence => evidence.source === 'answer' ? evidence.reference : 'profile'
+
+function dimensionScore(assessment, questions) {
+  const related = questions.filter(question => question.factor === assessment.id)
+  const supports = related.filter(question => question.effect === 'supports').length
+  const neutral = related.filter(question => question.effect === 'neutral').length
+  const concerns = related.filter(question => question.effect === 'concern').length
+  if (assessment.effect === 'supports') return Math.min(96, 82 + Math.min(12, supports * 3 + assessment.evidenceIds.length))
+  if (assessment.effect === 'unestablished') return Math.min(70, 50 + Math.min(20, supports * 4 + neutral * 2))
+  return Math.max(20, 38 - Math.min(18, concerns * 4 + (assessment.evidenceIds.length > 1 ? 2 : 0)))
+}
+
+export function composeF1ReportFromAnalysis(packet, input) {
+  const validatedPacket = validateF1AnalysisPacket(packet, input)
+  if (!validatedPacket) return null
+  const catalog = buildF1EvidenceCatalog(input)
+  const dimensions = F1_REPORT_DIMENSION_IDS.map(id => {
+    const assessment = validatedPacket.dimensions.find(item => item.id === id)
+    const calibration = DIMENSION_EFFECT_OUTPUT[assessment.effect]
+    const evidence = assessment.evidenceIds.map(evidenceId => {
+      const item = catalog.find(entry => entry.id === evidenceId)
+      return { source: item.source, reference: item.reference, quote: item.quote }
+    })
+    return {
+      id,
+      label: DIMENSION_LABELS[id],
+      score: dimensionScore(assessment, validatedPacket.questions),
+      status: calibration.status,
+      summary: assessment.finding,
+      evidence,
+      officialRuleIds: [...DIMENSION_DEFAULT_RULE_IDS[id]],
+      reasoning: `证据作用：${calibration.effectLabel}。${assessment.reasoning}`,
+      actions: assessment.nextActions,
+    }
+  })
+  let overallScore = Math.round(dimensions.reduce((total, dimension) => total + dimension.score * DIMENSION_WEIGHTS[dimension.id], 0))
+  const anyPriority = dimensions.some(dimension => dimension.status === 'priority')
+  const coreNeedsEvidence = dimensions.some(dimension => CORE_QUALIFICATION_DIMENSIONS.includes(dimension.id) && dimension.status === 'needs_evidence')
+  if (anyPriority) overallScore = Math.min(overallScore, 59)
+  else if (coreNeedsEvidence) overallScore = Math.min(overallScore, 74)
+  const readiness = anyPriority
+    ? '建议重点准备'
+    : dimensions.filter(dimension => CORE_QUALIFICATION_DIMENSIONS.includes(dimension.id)).every(dimension => dimension.status === 'stable') && overallScore >= 75
+      ? '准备较充分'
+      : '仍需补充'
+
+  const ranked = [...validatedPacket.dimensions].sort((left, right) => {
+    const rank = { concern: 0, unestablished: 1, supports: 2 }
+    return rank[left.effect] - rank[right.effect]
+  })
+  const supporting = validatedPacket.dimensions.filter(item => item.effect === 'supports').slice(0, 3)
+  const strengthSource = supporting.length > 0 ? supporting : [validatedPacket.dimensions[0]]
+  const strengths = strengthSource.map(item => {
+    const evidence = dimensions.find(dimension => dimension.id === item.id).evidence[0]
+    return {
+      title: `${DIMENSION_LABELS[item.id]}已有可核对事实`,
+      detail: item.finding,
+      evidenceRefs: [evidenceReference(evidence)],
+      officialRuleIds: [...DIMENSION_DEFAULT_RULE_IDS[item.id]],
+    }
+  })
+  const prioritySource = ranked.filter(item => item.effect !== 'supports').slice(0, 3)
+  const priorities = (prioritySource.length > 0 ? prioritySource : [ranked[0]]).map(item => {
+    const evidence = dimensions.find(dimension => dimension.id === item.id).evidence[0]
+    return {
+      title: item.effect === 'concern' ? `澄清${DIMENSION_LABELS[item.id]}` : `补充${DIMENSION_LABELS[item.id]}`,
+      detail: item.nextActions.join('；'),
+      evidenceRefs: [evidenceReference(evidence)],
+      officialRuleIds: [...DIMENSION_DEFAULT_RULE_IDS[item.id]],
+    }
+  })
+  const questionReviews = validatedPacket.questions.map((assessment, position) => {
+    const source = input.answers[position]
+    const calibration = QUESTION_EFFECT_OUTPUT[assessment.effect]
+    return {
+      index: source.index,
+      questionId: source.questionId,
+      score: calibration.score,
+      verdict: calibration.verdict,
+      summary: `${calibration.prefix}${assessment.finding}`,
+      answerEvidence: source.answer,
+      strengths: assessment.strengths,
+      improvements: assessment.improvements,
+      preparationDirection: `下一步核查：${assessment.nextInquiry}`,
+    }
+  })
+  const actionCandidates = [...ranked]
+  const actionPlan = actionCandidates.slice(0, 3).map((item, index) => ({
+    label: `STEP ${index + 1}`,
+    title: item.effect === 'concern' ? `先澄清${DIMENSION_LABELS[item.id]}` : item.effect === 'unestablished' ? `补齐${DIMENSION_LABELS[item.id]}` : `复核${DIMENSION_LABELS[item.id]}`,
+    detail: item.nextActions.join('；'),
+  }))
+  const headline = anyPriority
+    ? '本次回答已形成部分有效证据，但仍有实质疑点需要澄清。'
+    : coreNeedsEvidence
+      ? '本次回答已支持部分资格要件，仍有关键事实尚未建立。'
+      : '本次回答对核心 F-1 资格要件形成了较完整的支持。'
+  const report = {
+    schemaVersion: 2,
+    reportType: 'practice_readiness',
+    analysisMode: 'model',
+    criteriaVersion: input.criteriaVersion,
+    overallScore,
+    readiness,
+    headline,
+    summary: validatedPacket.caseSynthesis,
+    dimensions,
+    strengths,
+    priorities,
+    questionReviews,
+    actionPlan,
+    disclaimer: '本报告仅用于模拟面签准备，不预测真实签证结果，也不构成法律意见。',
+  }
+  return validateF1StructuredReport(report, input, { allowMaterializedEvidence: true })
+}
+
+export function buildF1AnalysisMessages(input, repairContext = '') {
+  const evidenceCatalog = buildF1EvidenceCatalog(input)
+  const compactCriteria = F1_OFFICIAL_CRITERIA.map(({ id, rule, coachingBoundary }) => ({ id, rule, coachingBoundary }))
+  const messages = [{
+    role: 'system',
+    content: `You analyze one F-1 practice interview. Return one structured JSON evidence-analysis object only. You provide the detailed substantive analysis; application code—not you—will generate scores, labels, official citations, evidence quotes, and page layout.
+
+Use only supplied safeContext, answers, and evidenceCatalog. Never invent facts or quote text. Never predict approval/refusal. Never judge length, vocabulary, grammar, accent, confidence, nervousness, eye contact, or demeanor. Missing information is not negative evidence. Do not label fraud, lying, or misrepresentation. Do not use accusation terms at all, even to say that no accusation applies. When supplied facts conflict, name only the exact provisional discrepancy and recommend a neutral clarification.
+
+For each answer, identify one primary factor and classify only its effect on the exact question asked. Analyze every answer individually and substantively; do not omit detail to save tokens:
+- supports: responsive, consistent, and supplies a fact supporting the targeted qualification element.
+- neutral: responsive but neither materially supports nor undermines a qualification element.
+- unestablished: nonresponsive, vague, or missing a fact needed for that exact question; not a negative finding.
+- concern: supplied facts create a specific material contradiction or concrete eligibility concern. Do not speculate.
+A direct concise answer can be complete. "My parents" fully answers who the sponsor is even when the overall financial dimension still needs income or funding-reliability evidence.
+
+For each of the six dimensions, synthesize the whole supplied record as supports, unestablished, or concern. Select up to 5 exact evidenceIds. Explain the evidence chain in detail: what the cited evidence establishes, how items corroborate or conflict, what remains unestablished, why that matters to the qualification element, and exactly what truthful information should be prepared next. A concern requires concrete supplied evidence; otherwise use unestablished.
+
+Apply these minimum evidence gates. Do not mark a dimension supports merely because no contradiction appears:
+- application_consistency: exact supplied facts can be cross-checked across two or more relevant sources or answers without a material discrepancy. Silence alone is not support.
+- study_authenticity: the record explains the actual study purpose or reasons connecting the school/program to the applicant. Merely naming a school and major is not enough.
+- academic_plan: the record establishes relevant preparation plus a coherent course/academic plan or fit. Admission, current student status, school, or major names alone are not enough.
+- financial_capacity: the record establishes approximate cost, identified funding source, and a concrete basis for availability/reliability across the relevant study period. Sponsor identity or a budget figure alone is not enough.
+- departure_intent: the record establishes present intent through a coherent post-study path or other supplied circumstances. Answers to unrelated harm/travel questions alone are neutral.
+- overall_credibility: the supplied record is sufficiently developed as well as internally coherent. A short record with major core dimensions unestablished is itself unestablished, not supports.
+
+Required JSON:
+{"schemaVersion":1,"analysisType":"f1_evidence_packet","caseSynthesis":"detailed Chinese whole-case synthesis connecting established evidence, unresolved qualification elements, and exact material conflicts without predicting outcome","questions":[{"questionId":"exact id","factor":"one dimension id","effect":"supports|neutral|unestablished|concern","finding":"detailed Chinese judgment explaining responsiveness, the facts supplied, consistency, and evidentiary effect","strengths":["specific thing this answer established or did well"],"improvements":["specific evidence gap, clarification, or truthful preparation need; empty when none"],"nextInquiry":"specific Chinese fact an officer would verify next or why no further inquiry is needed"}],"dimensions":[{"id":"dimension id","effect":"supports|unestablished|concern","concernType":"none|contradiction|eligibility_fact","finding":"detailed Chinese whole-record conclusion","reasoning":"detailed Chinese evidence chain explaining each cited item's role, corroboration or conflict, remaining gap, and qualification significance","evidenceIds":["exact catalog id"],"nextActions":["specific detailed Chinese preparation action"]}]}
+
+Return every question in input order and exactly these six unique dimension ids: ${JSON.stringify(F1_REPORT_DIMENSION_IDS)}. Set concernType="none" unless effect="concern". A contradiction concern requires at least two distinct evidenceIds showing the exact conflict; eligibility_fact identifies one concrete supplied fact that directly raises an eligibility issue. Use detailed, concrete Chinese analysis throughout. Do not pad with generic coaching, but do not shorten substantive analysis to conserve tokens. For a supports or neutral answer, strengths must be non-empty and explain the exact responsive or evidentiary value. For unestablished or concern, improvements must be non-empty. Every dimension must contain 1-3 nextActions. Silently self-check ids, counts, evidence grounding, and prohibited claims before returning. Official criteria: ${JSON.stringify(compactCriteria)}`,
+  }, { role: 'user', content: JSON.stringify({ safeContext: input.safeContext, answers: input.answers, evidenceCatalog }) }]
+  const repair = typeof repairContext === 'string'
+    ? { issues: repairContext ? [repairContext] : [], draft: null }
+    : { issues: Array.isArray(repairContext?.issues) ? repairContext.issues.filter(Boolean) : [], draft: isRecord(repairContext?.draft) ? repairContext.draft : null }
+  if (repair.issues.length > 0) {
+    if (repair.draft) messages.push({ role: 'assistant', content: JSON.stringify(repair.draft) })
+    messages.push({
+      role: 'user',
+      content: `The structured evidence analysis failed validation. Return the entire corrected detailed analysis packet only. Issues: ${JSON.stringify(repair.issues)}. Preserve valid detailed judgments, restore exact question order and six dimensions, use only exact evidenceIds, remove prohibited claims, and do not generate scores or page layout.`,
+    })
+  }
+  return messages
+}
+
 export function buildF1ReportMessages(input, repairContext = '') {
   const evidenceCatalog = buildF1EvidenceCatalog(input)
   const messages = [
@@ -454,17 +770,39 @@ export function buildF1ReportMessages(input, repairContext = '') {
       role: 'system',
       content: `You are an evidence-bound reviewer of an F-1 visa practice interview. Return one valid JSON object only.
 
-Purpose: assess practice readiness, not visa eligibility and never approval/refusal probability. A concise, conversational answer can earn a high score when it directly and clearly resolves the question. Never reward length, advanced vocabulary, formal wording, accent, or grammar. Never punish an answer merely for being short. Identify missing material facts, contradictions, or failure to answer instead.
+Purpose: reproduce the evidence-weighing path of a careful F-1 consular interview while assessing practice readiness. Do not decide legal eligibility, predict approval/refusal, or claim access to the applicant's DS-160, I-20, documents, government records, demeanor, or facts outside the supplied record. Describe whether the current answer supports a qualification element, is neutral, leaves the element unestablished, or raises a concrete material concern. Never say an answer is “有利于过签” or “不利于过签”.
+
+A concise, conversational answer can earn a high score when it directly and clearly resolves the exact question. Never reward length, advanced vocabulary, formal wording, accent, grammar, confidence, or performance style. Never punish an answer merely for being short. Identify missing material facts, concrete contradictions, or failure to answer instead.
 
 Evidence rules:
 1. Use only safeContext and answers supplied by the user. Never invent facts. Never invent a school, course, amount, job, family fact, plan, document fact, or contradiction.
 2. Every dimension requires at least one evidence item and at least one officialRuleId from the provided official criteria. Choose evidence only from evidenceCatalog and return it as {evidenceId:"exact catalog id"}. The server will materialize its source, reference, and exact quote; never write or paraphrase a quote yourself.
-3. If information needed for a dimension was not provided or was not discussed, still return that dimension. Cite the closest relevant evidenceCatalog item, set status="needs_evidence", and state the specific reason in summary and reasoning, such as “本次交流未提及资助人的职业和收入” or “现有信息不足以判断该项”. Missing information is an evidence gap, not proof of a negative fact.
+3. If information needed for a dimension was not provided or was not discussed, still return that dimension. Cite the closest relevant evidenceCatalog item, set status="needs_evidence", and state the specific reason in summary and reasoning, such as “本次交流未提及资助人的职业和收入” or “现有信息不足以判断该项”. Missing information, silence beyond the question asked, and an unasked detail are evidence gaps, not adverse facts.
 4. For young students, do not demand property, employment, or a rigid long-term career plan. Assess present intent to depart after study.
 5. A direct yes/no can fully answer a yes/no question. Do not demand extra detail unless the answer creates a material inconsistency or the question itself is compound.
-6. preparationDirection gives a fact-gathering and reasoning framework; it must not fabricate a polished answer for the applicant to memorize.
+6. preparationDirection must begin with “下一步核查：” and give the single most useful fact to verify or neutral follow-up to ask. It must not fabricate a polished answer for the applicant to memorize.
 7. Score each review only against the exact question asked. Never lower Q4 because Q5 was not answered, Q12 because Q14 was not answered, or because another unasked catalog question could add detail. Unasked information is not an answer defect.
+8. Do not treat relatives in the United States, a prior refusal, a study gap, lawful practical training, a community college or less-known school, lack of property or employment, or availability of the same subject at home as automatically adverse. Analyze only the concrete relevance in this applicant's record.
+9. Do not infer dishonesty or credibility from nervousness, pauses, accent, wording, brevity, eye contact, or other demeanor. When two supplied statements conflict, identify the exact conflict, keep the conclusion provisional, and recommend a neutral opportunity to explain it. Never label the applicant dishonest or characterize the record as fraud.
+
 Examples: Q1 answered with the matching school name is complete; Q4 answered "Data Science." is complete and the reason belongs to Q5; Q12 answered "My parents." is complete and parents' jobs belong to Q14; Q13 answered with a matching annual amount is complete. These direct answers should normally score 90-100 when consistent.
+
+Officer reasoning path for every question review:
+1. Identify the exact adjudicative purpose of the question: school/status coherence, bona fide full-course study purpose, academic preparation and plan, first-year and later-year funding, present departure intent/residence abroad, or a material consistency issue.
+2. Decide whether the answer responds to that exact question. Do not import requirements from a later or unasked question.
+3. Extract the concrete fact stated and compare it with safeContext and other answers. Absence of evidence is not negative evidence.
+4. Classify the answer's evidentiary effect and begin summary with exactly one prefix:
+   - “支持资格：” when the answer is responsive, consistent, and supplies a fact that supports the targeted qualification element.
+   - “中性信息：” when the answer resolves the question but neither materially supports nor undermines a qualification element.
+   - “尚未建立：” when the answer is nonresponsive, vague, or lacks a fact needed to assess the targeted element; this is not a negative finding.
+   - “实质疑点：” only when supplied facts create a specific material contradiction or indicate a concrete eligibility concern. Name the facts; do not speculate.
+5. State one next inquiry. If there is a conflict, ask for clarification before drawing a conclusion.
+
+Question calibration is mandatory: 支持资格=score 85-100 and verdict="complete"; 中性信息=65-84 and "complete"; 尚未建立=40-64 and "partial" or "needs_preparation"; 实质疑点=0-39 and "needs_preparation". The score measures the evidentiary effect of this answer to this question, not visa prospects.
+
+Dimension calibration is mandatory: status="stable" and score 75-100 only with concrete supporting evidence and no unresolved material conflict; status="needs_evidence" and score 40-74 when the record does not establish the factor; status="priority" and score 0-59 only for a concrete material concern or contradiction. Never use "priority" merely because the factor was not discussed.
+
+Whole-record synthesis: the four core qualification dimensions—study_authenticity, academic_plan, financial_capacity, and departure_intent—are not interchangeable. Use weights of 20%, 15%, 20%, and 20%, plus 15% for application_consistency and 10% for overall_credibility, then apply these guardrails: any priority dimension requires overallScore<=59 and readiness="建议重点准备"; any core needs_evidence dimension requires overallScore<=74 and readiness no higher than "仍需补充"; "准备较充分" is allowed only when all four core dimensions are stable and there is no material consistency concern. application_consistency compares exact profile and answer facts; overall_credibility evaluates whole-record coherence and evidence sufficiency, never demeanor.
 
 Required dimensions, exactly once each: ${JSON.stringify(DIMENSION_LABELS)}
 Allowed official criteria: ${JSON.stringify(F1_OFFICIAL_CRITERIA)}
@@ -473,7 +811,7 @@ Required JSON fields:
 schemaVersion=2; reportType="practice_readiness"; criteriaVersion="${F1_OFFICIAL_CRITERIA_VERSION}"; overallScore=0..100; readiness="准备较充分"|"仍需补充"|"建议重点准备"; headline; summary; dimensions; strengths; priorities; questionReviews; actionPlan (exactly 3); disclaimer.
 
 Each dimension: {id,label,score,status:"stable"|"needs_evidence"|"priority",summary,evidence:[{evidenceId}],officialRuleIds,reasoning,actions}.
-Each question review: {index,questionId,score,verdict:"complete"|"partial"|"needs_preparation",summary,answerEvidence,strengths,improvements,preparationDirection}.
+Each question review: {index,questionId,score,verdict:"complete"|"partial"|"needs_preparation",summary,answerEvidence,strengths,improvements,preparationDirection}. summary must begin with exactly one required evidentiary-effect prefix, and preparationDirection must begin with “下一步核查：”.
 Each strength/priority: {title,detail,evidenceRefs,officialRuleIds}.
 Each action-plan item: {label:"STEP 1"|"STEP 2"|"STEP 3",title,detail}. strengths and improvements in question reviews must be JSON arrays, even when empty.
 For strength and priority evidenceRefs, use "profile" or an exact questionId such as "f1_01"; do not use an evidenceId there.
@@ -487,13 +825,14 @@ Before returning, silently self-check all of these requirements:
 - dimensions contains exactly these six unique ids: ${JSON.stringify(F1_REPORT_DIMENSION_IDS)}.
 - questionReviews contains exactly ${input.answers.length} items in input order, with indexes 1..${input.answers.length} and questionIds ${JSON.stringify(input.answers.map(answer => answer.questionId))}.
 - every dimension evidenceId is copied character-for-character from evidenceCatalog; every answerEvidence is copied character-for-character from the supplied answer; every evidence reference and officialRuleId is allowed.
+- every question summary prefix, score, and verdict match the mandatory calibration; every preparationDirection begins with “下一步核查：”; every dimension status and score match its calibration; overallScore and readiness obey the whole-record guardrails.
 - strengths and priorities each contain 1-3 valid items, actionPlan contains exactly 3 valid items, and no required text or score is missing.
 - all six dimensions and every answered question receive useful feedback. When facts are insufficient, say exactly what is missing and how to prepare it instead of omitting the section or inventing an answer.
 - the JSON contains no commentary outside the single object and makes no visa-outcome prediction.
 
 The machine may reject a draft when its structure or evidence reference is invalid. That means the report draft is invalid, never that the applicant's answer is invalid. Repair such errors without lowering scores or changing conclusions merely because the draft failed validation.
 
-Evaluate the whole chain: profile and I-20-like summary consistency; genuine study purpose; prior background -> academic need -> school/major -> study plan -> post-study use; stated cost -> sponsor -> income/funds -> ability to cover costs; present departure intent; and cross-answer credibility. Explain conclusions in concise Chinese.`,
+Evaluate the whole chain: supplied profile and I-20-like summary consistency; genuine study purpose; prior background -> academic need -> school/major -> study plan -> post-study use; stated cost -> sponsor -> income/funds -> ability to cover costs; present departure intent; and cross-answer consistency. Judge what the supplied record establishes, not what a real officer might find in unavailable systems or documents. Explain conclusions in concise Chinese.`,
     },
     { role: 'user', content: JSON.stringify({ ...input, evidenceCatalog }) },
   ]
@@ -507,7 +846,7 @@ Evaluate the whole chain: profile and I-20-like summary consistency; genuine stu
     if (repair.draft) messages.push({ role: 'assistant', content: JSON.stringify(repair.draft) })
     messages.push({
       role: 'user',
-      content: `The preceding report draft was rejected by the strict machine validator. This is a defect in the report draft, not a defect in the applicant's answers. Fix every listed issue and return the entire corrected JSON object; do not merely explain the errors. Validation issues: ${JSON.stringify(repair.issues)}. Preserve every section and dimension not implicated by those issues; repair only the invalid or missing parts. Use only exact evidenceId values from evidenceCatalog, keep all six unique dimensions, keep every question review in input order, use only allowed officialRuleIds, include 1-3 strengths and priorities, and include exactly three action-plan items. If information is insufficient, keep the section and state the specific missing information and preparation advice. Do not change a score merely because the previous draft failed validation.`,
+      content: `The preceding report draft was rejected by the strict machine validator. This is a defect in the report draft, not a defect in the applicant's answers. Fix every listed issue and return the entire corrected JSON object; do not merely explain the errors. Validation issues: ${JSON.stringify(repair.issues)}. FORBIDDEN_OUTCOME_PREDICTION means remove any approval/refusal prediction; FORBIDDEN_PASS_FRAMING means replace “有利于过签/不利于过签” with the qualification-element effect; FORBIDDEN_STYLE_SCORING means remove length, vocabulary, grammar, accent, or performance-based scoring; FORBIDDEN_ACCUSATION means remove every fraud, lying, or misrepresentation label and state only the exact provisional discrepancy; FORBIDDEN_DEMEANOR_INFERENCE means remove eye-contact, body-language, pause, or nervousness inferences. Preserve every section and dimension not implicated by those issues; repair only the invalid or missing parts. Use only exact evidenceId values from evidenceCatalog, keep all six unique dimensions, keep every question review in input order, use only allowed officialRuleIds, include 1-3 strengths and priorities, and include exactly three action-plan items. Enforce the four question-effect prefixes with their score/verdict bands, begin every preparationDirection with “下一步核查：”, and keep dimension and overall calibration consistent. If information is insufficient, use “尚未建立：” or needs_evidence rather than creating a negative finding. Do not change a score merely because the previous draft failed validation.`,
     })
   }
   return messages

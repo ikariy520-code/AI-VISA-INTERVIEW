@@ -1,28 +1,52 @@
 {
   "name": "ai-visa-interview",
+  "description": "Local-first AI visa interview practice with pluggable realtime voice and report models.",
+  "author": "ikariy520-code and LZC20040216-OSS",
+  "contributors": [
+    "ikariy520-code",
+    "LZC20040216-OSS"
+  ],
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ikariy520-code/ai-visa-interview.git"
+  },
+  "homepage": "https://github.com/ikariy520-code/ai-visa-interview#readme",
+  "bugs": {
+    "url": "https://github.com/ikariy520-code/ai-visa-interview/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "main": "desktop/main.mjs",
   "scripts": {
-    "test": "npm run test:order && npm run test:officers && npm run test:f1-controller && npm run test:b2-controller && npm run test:realtime-turn && npm run test:interview-policy && npm run test:report-depth && npm run test:report-turn-grouping && npm run test:f1-report && npm run test:b2-report && npm run test:architecture",
+    "test": "npm run test:officers && npm run test:f1-controller && npm run test:b2-controller && npm run test:realtime-turn && npm run test:providers:offline && npm run test:desktop-network && npm run test:interview-policy && npm run test:report-depth && npm run test:report-turn-grouping && npm run test:f1-report && npm run test:b2-report && npm run test:architecture",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "start": "node server/index.mjs",
+    "desktop:run": "npm run build && electron .",
+    "desktop:dist": "npm run build && electron-builder --win dir",
+    "desktop:installer": "npm run build && electron-builder --win nsis",
     "deploy": "bash scripts/deploy.sh",
     "smoke:realtime": "node scripts/realtimeVoiceSmoke.mjs",
+    "check:provider-network": "node scripts/providerNetworkCheck.mjs",
+    "security:scan-history": "node scripts/fullHistorySecretScan.mjs",
+    "licenses:check": "node scripts/thirdPartyNotices.mjs --check",
+    "licenses:generate": "node scripts/thirdPartyNotices.mjs --check --write",
     "smoke:deepseek": "node scripts/deepseekConnectivitySmoke.mjs",
     "smoke:report": "node scripts/finalReportSmoke.mjs",
-    "order:add": "node scripts/orderAdmin.mjs add",
-    "order:status": "node scripts/orderAdmin.mjs status",
-    "order:enable": "node scripts/orderAdmin.mjs enable",
-    "order:disable": "node scripts/orderAdmin.mjs disable",
-    "order:reset": "node scripts/orderAdmin.mjs reset",
-    "test:order": "node scripts/orderAuth.test.mjs",
     "test:officers": "node --experimental-strip-types scripts/officerTypes.test.ts",
     "test:f1-controller": "node --experimental-strip-types scripts/f1InterviewController.test.ts",
     "test:b2-controller": "node --experimental-strip-types scripts/b2InterviewController.test.ts",
     "test:realtime-turn": "node --experimental-strip-types scripts/realtimeTurnGuard.test.ts",
+    "test:realtime-providers": "node scripts/realtimeProviderSession.test.mjs",
+    "test:realtime-events": "node --experimental-strip-types scripts/realtimeProviderEvents.test.ts",
+    "test:providers:offline": "npm run test:realtime-providers && npm run test:realtime-events",
+    "test:desktop-network": "node scripts/desktopNetworkDiagnostics.test.mjs",
     "test:interview-policy": "node --experimental-strip-types scripts/realtimeInterviewPolicy.test.ts",
     "test:report-depth": "node --experimental-strip-types scripts/reportDepth.test.ts",
     "test:report-turn-grouping": "node --experimental-strip-types scripts/reportTurnGrouping.test.ts",
@@ -36,7 +60,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.4.0",
-    "react-router-dom": "^6.28.0",
+    "react-router-dom": "7.18.2",
     "ws": "^8.21.0"
   },
   "devDependencies": {
@@ -44,9 +68,81 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
+    "postcss": "8.5.26",
     "tailwindcss": "^3.4.16",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "electron": "43.4.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.aivisainterview.desktop",
+    "productName": "AI Visa Interview",
+    "electronVersion": "43.4.0",
+    "electronDist": "node_modules/electron/dist",
+    "asar": true,
+    "files": [
+      "desktop/**",
+      "package.json",
+      "LICENSE",
+      "NOTICE",
+      "COMMERCIAL_LICENSE.md",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "dist"
+      },
+      {
+        "from": "server",
+        "to": "server"
+      },
+      {
+        "from": "node_modules/dotenv",
+        "to": "node_modules/dotenv"
+      },
+      {
+        "from": "node_modules/ws",
+        "to": "node_modules/ws"
+      },
+      {
+        "from": "LICENSE",
+        "to": "legal/LICENSE"
+      },
+      {
+        "from": "NOTICE",
+        "to": "legal/NOTICE"
+      },
+      {
+        "from": "COMMERCIAL_LICENSE.md",
+        "to": "legal/COMMERCIAL_LICENSE.md"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "legal/THIRD_PARTY_NOTICES.md"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "AI-Visa-Interview-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AI Visa Interview"
+    }
   }
 }

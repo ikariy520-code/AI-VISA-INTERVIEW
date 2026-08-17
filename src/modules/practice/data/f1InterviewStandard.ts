@@ -39,25 +39,25 @@ export const F1_EVALUATION_DIMENSIONS: readonly F1EvaluationDimension[] = [
     id: 'identity_eligibility',
     code: 'IDENTITY',
     promptRule:
-      'I-20/SEVIS/school/program clarity: check that the school, program, start/length, and I-20 understanding are coherent. Treat actual SEVIS status and fee payment as external system checks; never claim to verify them and never request an ID number.',
+      'School and status clarity: check that the accepted school, program, timing, and I-20-level study plan are coherent. Treat actual SEVIS status and fee payment as external system checks; never claim to verify them and never request an ID number.',
   },
   {
     id: 'study_authenticity',
     code: 'STUDY',
     promptRule:
-      'Genuine study purpose: why this program, why this school, why the United States, and why now must form a specific and plausible full-time study purpose.',
+      'Genuine full-course study purpose: why this program, why this school, why the United States, and why now should form a specific and plausible academic purpose rather than a pretext for another activity.',
   },
   {
     id: 'academic_readiness',
     code: 'ACADEMIC',
     promptRule:
-      'Academic preparation and fit: prior study/work, major choice, program knowledge, grades or language preparation only when volunteered or covered by an allowed follow-up. Do not re-adjudicate the school admission decision.',
+      'Academic preparation and fit: prior study or work, major choice, program knowledge, and relevant preparation may be explored when needed. Do not act as an admissions counselor, re-adjudicate the school decision, or reject a field merely because similar education exists at home.',
   },
   {
     id: 'financial_capacity',
     code: 'FUNDS',
     promptRule:
-      'Financial capacity: sponsor/source, credible source of income, and approximate available amount must plausibly cover the I-20 educational, living, and travel costs. Do not request bank/account identifiers.',
+      'Financial capacity: readily available first-year funding plus specifically identified reliable later-year sources should plausibly cover educational, living, and travel costs without unauthorized U.S. employment. Do not demand all years in cash or request bank/account identifiers.',
   },
   {
     id: 'departure_intent',
@@ -69,7 +69,7 @@ export const F1_EVALUATION_DIMENSIONS: readonly F1EvaluationDimension[] = [
     id: 'risk_consistency',
     code: 'RISK',
     promptRule:
-      'Risk and consistency: compare the form, earlier answers, and later answers for material contradictions, reliance on unauthorized work, immigration intent, or possible misrepresentation. Sensitive fields, lawful OPT, administrative/security review, or online-presence concerns are flags only, never automatic refusal; do not invent a concern or ask for social-media handles.',
+      'Material consistency: compare the snapshot, earlier answers, and later answers for concrete contradictions, reliance on unauthorized work, immigration intent, prior noncompliance, or possible material misrepresentation. Explore criminal, security, travel, or immigration issues only when case evidence triggers them; never invent a concern, infer deception from demeanor, or ask for social-media handles.',
   },
 ]
 

@@ -28,15 +28,14 @@ import {
   findB2ModelBoundaryViolation,
   findF1ModelBoundaryViolation,
   isExactRealtimeClosingLine,
+  isSafeF1RealtimeOfficerTurn,
   resolveRealtimeOfficerType,
   resolveRealtimeResumeOpeningLine,
   resolveRealtimeVoice,
 } from '../../practice/services/realtimeInterviewPrompt'
 import { resolveInterviewModePolicy } from '../../practice/services/interviewModePolicy'
 import {
-  approvedF1QuestionIds,
   createF1InterviewState,
-  isApprovedF1OfficerText,
   type F1InterviewState,
 } from '../../practice/services/f1InterviewController'
 import {
@@ -51,13 +50,15 @@ import {
   isApprovedB2OfficerText,
   type B2InterviewState,
 } from '../../practice/services/b2InterviewController'
+import { createRealtimeClient } from '../services/createRealtimeClient'
 import {
-  DoubaoRealtimeClient,
+  getRealtimeProviderHealth,
   realtimeEventText,
-  type DoubaoRealtimeEvent,
-} from '../services/doubaoRealtime'
+  type RealtimeVoiceClient,
+  type RealtimeVoiceEvent,
+  type RealtimeVoiceProviderId,
+} from '../services/realtimeProvider'
 import RealtimeVoiceOrb from './RealtimeVoiceOrb'
-import { useOrderAccess } from '../../../shared/orderAccess'
 import type { LiveInterviewProgress } from '../../shared/store/interviewRecovery'
 import { consumeControlledAnswer } from '../services/controlledTurnGuard'
 
@@ -87,7 +88,7 @@ type Phase =
   | 'error'
 
 let messageSequence = 0
-const nextMessageId = () => `doubao-message-${++messageSequence}-${Date.now()}`
+const nextMessageId = () => `realtime-message-${++messageSequence}-${Date.now()}`
 const formatElapsed = (seconds: number) => {
   const minutes = Math.floor(seconds / 60)
   const remainder = seconds % 60
@@ -132,9 +133,6 @@ export default function VoiceInterviewRoom({
   const officerConfig = officerTypes.find(officer => officer.id === officerType)
     ?? officerTypes.find(officer => officer.id === 'standard')!
   const realtimeOfficerType = useMemo(() => resolveRealtimeOfficerType(officerType), [officerType])
-  const { access, refreshAccess } = useOrderAccess()
-  const hasQuota = access.unlimited || Number(access.remainingUses) > 0
-
   const [phase, setPhase] = useState<Phase>('checking')
   const [messages, setMessages] = useState<RealtimeChatMessage[]>(() => initialProgress?.messages ?? [])
   const [errorMessage, setErrorMessage] = useState('')
@@ -144,7 +142,8 @@ export default function VoiceInterviewRoom({
   const [elapsed, setElapsed] = useState(() => initialProgress?.elapsedSeconds ?? 0)
   const [officerName] = useState(() => getRandomOfficerName())
 
-  const clientRef = useRef<DoubaoRealtimeClient | null>(null)
+  const clientRef = useRef<RealtimeVoiceClient | null>(null)
+  const providerRef = useRef<RealtimeVoiceProviderId>('doubao')
   const captionsScrollRef = useRef<HTMLElement>(null)
   const captionScrollFrameRef = useRef<number | null>(null)
   const lastCaptionToggleRef = useRef(0)
@@ -235,7 +234,7 @@ export default function VoiceInterviewRoom({
     }
   }, [onComplete])
 
-  const handleRealtimeEvent = useCallback((event: DoubaoRealtimeEvent) => {
+  const handleRealtimeEvent = useCallback((event: RealtimeVoiceEvent) => {
     switch (event.type) {
       case 'conversation.item.input_audio_transcription.started': {
         if ((context.visaType === 'F1' || context.visaType === 'B2') && !awaitingAnswerRef.current) break
@@ -305,7 +304,7 @@ export default function VoiceInterviewRoom({
         setPhase('thinking')
         if (context.visaType === 'F1' || context.visaType === 'B2') {
           // The native end-to-end model now owns the next spoken turn. The app
-          // supplies the role, catalog, review factors, and fail-safe only.
+          // supplies the role policy, review factors, and fail-safe only.
         }
         break
       }
@@ -314,7 +313,7 @@ export default function VoiceInterviewRoom({
         if (context.visaType !== 'F1' && context.visaType !== 'B2') break
         const text = realtimeEventText(event)
         const approved = context.visaType === 'F1'
-          ? Boolean(text && isApprovedF1OfficerText(text))
+          ? Boolean(text && isSafeF1RealtimeOfficerTurn(text))
           : Boolean(text && isApprovedB2OfficerText(text))
         if (!approved) {
           setErrorMessage('The controlled interview blocked an unapproved officer question.')
@@ -477,11 +476,6 @@ export default function VoiceInterviewRoom({
 
   const startInterview = useCallback(async (resume = false) => {
     const resumable = resume && attemptStartedRef.current
-    if (!hasQuota && !resumable) {
-      setErrorMessage('该订单号的面签次数已经用完。')
-      setPhase('error')
-      return
-    }
     clientRef.current?.destroy()
     setErrorMessage('')
     setMicLevel(0)
@@ -525,7 +519,7 @@ export default function VoiceInterviewRoom({
     mutedRef.current = resumeClosing
     setIsMuted(resumeClosing)
 
-    const client = new DoubaoRealtimeClient({
+    const client = createRealtimeClient(providerRef.current, {
       instructions: buildRealtimeInterviewPrompt(
         context,
         realtimeOfficerType,
@@ -534,7 +528,14 @@ export default function VoiceInterviewRoom({
               substantiveQuestionCount: substantiveQuestionCountRef.current,
               askedMainQuestionIds: context.visaType === 'B2'
                 ? approvedB2QuestionIds(messagesRef.current)
-                : approvedF1QuestionIds(messagesRef.current),
+                : [],
+              recentOfficerQuestions: context.visaType === 'F1'
+                ? messagesRef.current
+                    .filter(message => message.role === 'officer' && !isF1InterviewClosingLine(message.text))
+                    .map(message => message.text.trim())
+                    .filter(Boolean)
+                    .slice(-F1_INTERVIEW_MAX_TOTAL_QUESTIONS)
+                : undefined,
               resuming: resumable,
             }
           : undefined,
@@ -554,7 +555,6 @@ export default function VoiceInterviewRoom({
         if (state === 'connected') {
           connectedRef.current = true
           attemptStartedRef.current = true
-          void refreshAccess().catch(() => undefined)
         }
         if (state === 'closed') {
           connectedRef.current = false
@@ -577,18 +577,13 @@ export default function VoiceInterviewRoom({
       clientRef.current = null
       setPhase('error')
     }
-  }, [attemptId, context, handleRealtimeEvent, hasQuota, officerConfig.voiceProfile.gender, realtimeOfficerType, refreshAccess])
+  }, [attemptId, context, handleRealtimeEvent, officerConfig.voiceProfile.gender, realtimeOfficerType])
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch('/api/realtime-health', { cache: 'no-store', signal: controller.signal })
-      .then(async response => {
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null) as { message?: unknown } | null
-          throw new Error(typeof payload?.message === 'string'
-            ? payload.message
-            : '实时语音服务的 API Key 尚未配置。')
-        }
+    getRealtimeProviderHealth(controller.signal)
+      .then(health => {
+        providerRef.current = health.provider
         setPhase('ready')
       })
       .catch(error => {
@@ -679,7 +674,7 @@ export default function VoiceInterviewRoom({
   const status = phaseStatus(phase)
   const isConnected = ['listening', 'thinking', 'speaking', 'muted'].includes(phase)
   const hasResumableProgress = attemptStartedRef.current
-  const canStart = (hasQuota || hasResumableProgress) && (phase === 'ready' || phase === 'error' || phase === 'ended')
+  const canStart = phase === 'ready' || phase === 'error' || phase === 'ended'
 
   return (
     <div className="live-room app-card relative mx-auto flex h-[calc(100dvh-112px)] max-w-3xl flex-col overflow-hidden">
@@ -726,11 +721,6 @@ export default function VoiceInterviewRoom({
         </h1>
         <p className="text-[12px] text-[#86868b]">
           {officerConfig.label} · AI Realtime
-        </p>
-        <p className={`mt-1 text-[11px] font-semibold ${hasQuota ? 'text-[#158f65]' : 'text-[#c9342f]'}`}>
-          {access.unlimited
-            ? '管理员 · 无限次面签'
-            : `订单权益 · 剩余 ${access.remainingUses}/${access.totalUses} 次`}
         </p>
         <button
           type="button"
@@ -826,7 +816,7 @@ export default function VoiceInterviewRoom({
                 <p className="text-[12px] leading-5 text-[#a22d29]">{errorMessage}</p>
               </div>
               <div className="mt-3 flex gap-2">
-                <button type="button" onClick={() => void startInterview(hasResumableProgress)} disabled={!hasQuota && !hasResumableProgress} className="rounded-full bg-[#c9342f] px-4 py-1.5 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" onClick={() => void startInterview(hasResumableProgress)} className="rounded-full bg-[#c9342f] px-4 py-1.5 text-[12px] font-semibold text-white">
                   重新连接
                 </button>
                 <button type="button" onClick={() => setErrorMessage('')} className="rounded-full bg-white px-4 py-1.5 text-[12px] font-semibold text-[#6e6e73]">
@@ -841,12 +831,12 @@ export default function VoiceInterviewRoom({
       <footer className="shrink-0 px-4 pb-6 pt-2 sm:px-5">
         <div className="mx-auto flex max-w-lg flex-col items-center gap-3">
           <p className={`text-[13px] font-medium ${phase === 'speaking' ? 'text-[#7c3aed]' : phase === 'listening' ? 'text-[#0071e3]' : 'text-[#86868b]'}`}>
-            {!isConnected && !hasQuota ? '订单次数已用完，仍可查看本次报告。' : phaseHint(phase)}
+            {phaseHint(phase)}
           </p>
 
           <motion.button
             type="button"
-            disabled={!isConnected && !hasQuota && !hasResumableProgress || phase === 'checking' || phase === 'connecting' || phase === 'thinking' || phase === 'speaking' || phase === 'ending'}
+            disabled={phase === 'checking' || phase === 'connecting' || phase === 'thinking' || phase === 'speaking' || phase === 'ending'}
             onClick={isConnected ? toggleMute : () => void startInterview(hasResumableProgress)}
             whileTap={{ scale: 0.94 }}
             className={`relative flex h-[76px] w-[76px] items-center justify-center rounded-full shadow-xl transition-all ${
@@ -885,7 +875,7 @@ export default function VoiceInterviewRoom({
   )
 }
 
-function providerErrorMessage(event: DoubaoRealtimeEvent) {
+function providerErrorMessage(event: RealtimeVoiceEvent) {
   const nested = typeof event.error === 'object' && event.error
     ? event.error as Record<string, unknown>
     : null

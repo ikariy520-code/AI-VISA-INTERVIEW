@@ -44,11 +44,12 @@ const f1Record: InterviewRecord = {
 
 const f1Request = buildF1ReportRequest(f1Record)
 assert.ok(f1Request)
-assert.equal(f1Request.answers.length, 1)
-assert.equal(f1Request.answers[0].questionId, 'f1_12')
-assert.match(f1Request.answers[0].question, /Follow-up:/)
+assert.equal(f1Request.answers.length, 2)
+assert.equal(f1Request.answers[0].questionId, 'f1_01')
+assert.equal(f1Request.answers[1].questionId, 'f1_02')
 assert.match(f1Request.answers[0].answer, /My aunt will pay/)
-assert.match(f1Request.answers[0].answer, /mother's sister/)
+assert.match(f1Request.answers[1].question, /Who exactly is your sponsor/)
+assert.match(f1Request.answers[1].answer, /mother's sister/)
 
 const nativeFollowUpRecord: InterviewRecord = {
   ...f1Record,
@@ -62,10 +63,23 @@ const nativeFollowUpRecord: InterviewRecord = {
 }
 const nativeFollowUpRequest = buildF1ReportRequest(nativeFollowUpRecord)
 assert.ok(nativeFollowUpRequest)
-assert.equal(nativeFollowUpRequest.answers.length, 1)
-assert.equal(nativeFollowUpRequest.answers[0].questionId, 'f1_12')
-assert.match(nativeFollowUpRequest.answers[0].question, /Why has your aunt agreed/)
-assert.match(nativeFollowUpRequest.answers[0].answer, /supported my education/)
+assert.equal(nativeFollowUpRequest.answers.length, 2)
+assert.equal(nativeFollowUpRequest.answers[1].questionId, 'f1_02')
+assert.match(nativeFollowUpRequest.answers[1].question, /Why has your aunt agreed/)
+assert.match(nativeFollowUpRequest.answers[1].answer, /supported my education/)
+
+const fullyDynamicF1Record: InterviewRecord = {
+  ...f1Record,
+  id: 'f1-fully-dynamic-question',
+  messages: [
+    officer('How does this program build on the research you did last year?', 1),
+    user('It extends my undergraduate work in computer vision.', 2),
+  ],
+}
+const fullyDynamicF1Request = buildF1ReportRequest(fullyDynamicF1Record)
+assert.ok(fullyDynamicF1Request)
+assert.equal(fullyDynamicF1Request.answers[0].questionId, 'f1_01')
+assert.match(fullyDynamicF1Request.answers[0].question, /research you did last year/)
 
 const b2Messages: ChatMessage[] = []
 let messageIndex = 1

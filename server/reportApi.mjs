@@ -1,9 +1,10 @@
 import {
+  buildF1AnalysisMessages,
   buildDeterministicF1FallbackReport,
-  buildF1ReportMessages,
+  composeF1ReportFromAnalysis,
   getModelMessageContent,
-  repairF1ReportEvidence,
   sanitizeReportRequest as sanitizeF1ReportRequest,
+  validateF1AnalysisPacket,
   validateF1StructuredReport,
 } from './shared/f1ReportContract.mjs'
 import {
@@ -13,15 +14,17 @@ import {
   validateB2StructuredReport,
 } from './shared/b2ReportContract.mjs'
 import { createHash } from 'node:crypto'
+import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 
 const REPORT_PATH = '/api/ai-report'
 const HEALTH_PATH = '/api/report-health'
-const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
+const DEFAULT_REPORT_BASE_URL = 'https://api.deepseek.com'
 const MAX_BODY_BYTES = 96_000
-const BASIC_OUTPUT_TOKENS = 6_000
-const STRONG_OUTPUT_TOKENS = 9_000
-const FULL_OUTPUT_TOKENS = 12_000
+const BASIC_OUTPUT_TOKENS = 8_000
+const STRONG_OUTPUT_TOKENS = 16_000
+const FULL_OUTPUT_TOKENS = 24_000
+const MAX_F1_REPORT_ATTEMPTS = 2
 const MAX_B2_REPORT_ATTEMPTS = 2
 const MAX_B2_OUTPUT_TOKENS = 10_000
 const RETRYABLE_NETWORK_CODES = new Set([
@@ -59,10 +62,9 @@ async function readJsonBody(req) {
 
 function safeEndpoint(value) {
   try {
-    const url = new URL(String(value || DEFAULT_DEEPSEEK_BASE_URL).trim())
-    if (url.protocol !== 'https:' || url.hostname !== 'api.deepseek.com') {
-      return `${DEFAULT_DEEPSEEK_BASE_URL}/chat/completions`
-    }
+    const url = new URL(String(value || DEFAULT_REPORT_BASE_URL).trim())
+    const loopbackHttp = url.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(url.hostname)
+    if (url.protocol !== 'https:' && !loopbackHttp) return ''
     url.search = ''
     url.hash = ''
     url.pathname = url.pathname.replace(/\/$/, '')
@@ -71,7 +73,28 @@ function safeEndpoint(value) {
     }
     return url.toString()
   } catch {
-    return `${DEFAULT_DEEPSEEK_BASE_URL}/chat/completions`
+    return ''
+  }
+}
+
+function modelHeaders(apiKey) {
+  return {
+    'Content-Type': 'application/json',
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+  }
+}
+
+function modelRequestBody({ model, messages, config, supportsJsonMode, supportsReasoningOptions }) {
+  return {
+    model,
+    messages,
+    ...(supportsJsonMode ? { response_format: { type: 'json_object' } } : {}),
+    ...(supportsReasoningOptions ? {
+      thinking: config.thinking,
+      reasoning_effort: config.reasoningEffort,
+    } : {}),
+    max_tokens: config.maxTokens,
+    stream: false,
   }
 }
 
@@ -111,54 +134,23 @@ function tierConfig(tier) {
       thinking: { type: 'enabled' },
       reasoningEffort: 'high',
       maxTokens: FULL_OUTPUT_TOKENS,
-      instruction: 'FULL DEPTH: perform the complete cross-answer analysis. Check all evidence chains and contradictions carefully while keeping every field concise.',
+      instruction: 'FULL DEPTH: analyze every supplied answer and every cross-answer evidence chain in detail. Do not shorten analysis to save tokens. Return the complete structured evidence analysis packet.',
     }
   }
   if (tier === 'strong') {
     return {
       thinking: { type: 'enabled' },
-      reasoningEffort: 'medium',
+      reasoningEffort: 'high',
       maxTokens: STRONG_OUTPUT_TOKENS,
-      instruction: 'STRONG ANALYSIS: cross-check the supplied answers and profile, identify the strongest evidence and the most important preparation gaps, and keep the report concise.',
+      instruction: 'STRONG ANALYSIS: cross-check the supplied answers and profile in detail. Do not shorten analysis to save tokens. Return the complete structured evidence analysis packet.',
     }
   }
   return {
-    thinking: { type: 'disabled' },
-    reasoningEffort: 'low',
+    thinking: { type: 'enabled' },
+    reasoningEffort: 'high',
     maxTokens: BASIC_OUTPUT_TOKENS,
-    instruction: 'FAST BASIC ANALYSIS: assess each answered question directly, identify only the clearest strengths and gaps, and avoid unnecessary elaboration while completing the required JSON schema.',
+    instruction: 'BASIC-EVIDENCE ANALYSIS: the record is shorter, but analyze every supplied answer with full care and return a detailed structured evidence analysis packet. Do not infer facts that were not discussed.',
   }
-}
-
-function repairInvalidReportSections(draft, input, issues) {
-  const fallback = buildDeterministicF1FallbackReport(input)
-  const missingMostAnalysis = issues.some(issue => issue.startsWith('DIMENSION_'))
-    && issues.some(issue => issue.startsWith('QUESTION_REVIEW_'))
-    && issues.includes('HEADLINE')
-    && issues.includes('SUMMARY')
-  if (
-    !draft
-    || typeof draft !== 'object'
-    || Array.isArray(draft)
-    || issues.includes('FORBIDDEN_CLAIM')
-    || missingMostAnalysis
-  ) {
-    return { draft: fallback, evidenceOnly: true }
-  }
-  const repaired = JSON.parse(JSON.stringify(draft))
-  repaired.schemaVersion = 2
-  repaired.reportType = 'practice_readiness'
-  repaired.criteriaVersion = input.criteriaVersion
-  if (issues.includes('OVERALL_SCORE')) repaired.overallScore = fallback.overallScore
-  if (issues.includes('READINESS')) repaired.readiness = fallback.readiness
-  if (issues.includes('HEADLINE')) repaired.headline = fallback.headline
-  if (issues.includes('SUMMARY')) repaired.summary = fallback.summary
-  if (issues.includes('STRENGTHS')) repaired.strengths = fallback.strengths
-  if (issues.includes('PRIORITIES')) repaired.priorities = fallback.priorities
-  if (issues.includes('ACTION_PLAN')) repaired.actionPlan = fallback.actionPlan
-  if (issues.some(issue => issue.startsWith('DIMENSION_'))) repaired.dimensions = fallback.dimensions
-  if (issues.some(issue => issue.startsWith('QUESTION_REVIEW_'))) repaired.questionReviews = fallback.questionReviews
-  return { draft: repaired, evidenceOnly: false }
 }
 
 function postJsonWithoutDeadline(endpoint, { headers, body, signal }) {
@@ -175,7 +167,8 @@ function postJsonWithoutDeadline(endpoint, { headers, body, signal }) {
       signal?.removeEventListener('abort', abortRequest)
       callback(value)
     }
-    const request = httpsRequest(endpoint, {
+    const requestTransport = new URL(endpoint).protocol === 'http:' ? httpRequest : httpsRequest
+    const request = requestTransport(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -215,90 +208,88 @@ export async function generateF1Report({
   model,
   input,
   signal,
+  supportsJsonMode = true,
+  supportsReasoningOptions = true,
   requestJson = postJsonWithoutDeadline,
 }) {
   const tier = reportTierForAnswerCount(input.answers.length)
   const config = tierConfig(tier)
-  try {
-    const messages = buildF1ReportMessages(input)
-    messages[0] = { ...messages[0], content: `${messages[0].content}\n\n${config.instruction}` }
-    const upstream = await requestJson(endpoint, {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        response_format: { type: 'json_object' },
-        thinking: config.thinking,
-        reasoning_effort: config.reasoningEffort,
-        max_tokens: config.maxTokens,
-        stream: false,
-      }),
-      signal,
-    })
+  let lastError
+  let repairContext = ''
 
-    if (!upstream.ok) {
-      throw Object.assign(new Error('DEEPSEEK_REPORT_SERVICE_ERROR'), {
-        code: 'DEEPSEEK_REPORT_SERVICE_ERROR',
-        upstreamStatus: upstream.status,
+  for (let attempt = 0; attempt < MAX_F1_REPORT_ATTEMPTS; attempt += 1) {
+    try {
+      const messages = buildF1AnalysisMessages(input, repairContext)
+      messages[0] = { ...messages[0], content: `${messages[0].content}\n\n${config.instruction}` }
+      const upstream = await requestJson(endpoint, {
+        headers: modelHeaders(apiKey),
+        body: JSON.stringify(modelRequestBody({
+          model,
+          messages,
+          config,
+          supportsJsonMode,
+          supportsReasoningOptions,
+        })),
+        signal,
       })
-    }
 
-    const originalDraft = parseModelContent(upstream.payload)
-    const validationIssues = []
-    const report = validateF1StructuredReport(originalDraft, input, {
-      onIssue: issue => { validationIssues.push(issue) },
-    })
-    if (report) return report
+      if (!upstream.ok) {
+        throw Object.assign(new Error('REPORT_MODEL_SERVICE_ERROR'), {
+          code: 'REPORT_MODEL_SERVICE_ERROR',
+          upstreamStatus: upstream.status,
+        })
+      }
 
-    const repairEvents = []
-    const evidenceRepairedDraft = repairF1ReportEvidence(originalDraft, input, {
-      onRepair: event => { repairEvents.push(event) },
-    })
-    const repairedIssues = []
-    const evidenceRepairedReport = validateF1StructuredReport(evidenceRepairedDraft, input, {
-      onIssue: issue => { repairedIssues.push(issue) },
-      allowMaterializedEvidence: true,
-    })
-    if (evidenceRepairedReport) {
-      console.warn(`[report] Corrected report evidence references without another AI call: ${repairEvents.join(',')}`)
-      return evidenceRepairedReport
-    }
+      const originalDraft = parseModelContent(upstream.payload)
+      const validationIssues = []
+      const packet = validateF1AnalysisPacket(originalDraft, input, {
+        onIssue: issue => { validationIssues.push(issue) },
+      })
+      if (packet) {
+        const report = composeF1ReportFromAnalysis(packet, input)
+        if (report) return report
+        validationIssues.push('ANALYSIS_COMPOSITION_FAILED')
+      }
 
-    const issues = repairedIssues.length > 0 ? [...new Set(repairedIssues)] : [...new Set(validationIssues)]
-    const structuralRepair = repairInvalidReportSections(evidenceRepairedDraft, input, issues)
-    const structurallyRepairedReport = validateF1StructuredReport(structuralRepair.draft, input, {
-      allowMaterializedEvidence: true,
-      analysisMode: structuralRepair.evidenceOnly ? 'evidence_only' : undefined,
-    })
-    if (structurallyRepairedReport) {
-      console.warn(`[report] Corrected invalid report sections without another AI call: ${issues.join(',')}`)
-      return structurallyRepairedReport
+      const issues = validationIssues.length > 0 ? [...new Set(validationIssues)] : ['ANALYSIS_VALIDATION_FAILED']
+      lastError = Object.assign(new Error('REPORT_MODEL_VALIDATION_FAILED'), {
+        code: 'REPORT_MODEL_VALIDATION_FAILED',
+        validationIssues: issues,
+      })
+
+      if (attempt + 1 < MAX_F1_REPORT_ATTEMPTS) {
+        repairContext = { issues, draft: originalDraft }
+        continue
+      }
+      break
+    } catch (error) {
+      if (error?.code === 'CLIENT_DISCONNECTED' || signal?.aborted) throw error
+      lastError = error
+      const outputFailure = error?.code === 'EMPTY_MODEL_RESPONSE' || error instanceof SyntaxError
+      if (attempt + 1 < MAX_F1_REPORT_ATTEMPTS && outputFailure) {
+        repairContext = { issues: [error instanceof SyntaxError ? 'INVALID_JSON' : error.code], draft: null }
+        continue
+      }
+      break
     }
-    throw Object.assign(new Error('DEEPSEEK_REPORT_VALIDATION_FAILED'), {
-      code: 'DEEPSEEK_REPORT_VALIDATION_FAILED',
-    })
-  } catch (error) {
-    if (error?.code === 'CLIENT_DISCONNECTED' || signal?.aborted) throw error
-    const upstreamStatus = Number(error?.upstreamStatus)
-    const fallbackEligible = error?.code === 'DEEPSEEK_REPORT_VALIDATION_FAILED'
-      || error?.code === 'EMPTY_MODEL_RESPONSE'
-      || error instanceof SyntaxError
-      || RETRYABLE_NETWORK_CODES.has(error?.code)
-      || upstreamStatus === 429
-      || upstreamStatus >= 500
-    if (!fallbackEligible) throw error
-    const fallback = buildDeterministicF1FallbackReport(input)
-    const validatedFallback = validateF1StructuredReport(fallback, input, {
-      allowMaterializedEvidence: true,
-      analysisMode: 'evidence_only',
-    })
-    if (!validatedFallback) throw error
-    console.warn(`[report] Using evidence fallback after report generation failure: ${error?.code || error?.name || 'UNKNOWN'}`)
-    return validatedFallback
   }
+
+  const upstreamStatus = Number(lastError?.upstreamStatus)
+  const fallbackEligible = lastError?.code === 'REPORT_MODEL_VALIDATION_FAILED'
+    || lastError?.code === 'EMPTY_MODEL_RESPONSE'
+    || lastError instanceof SyntaxError
+    || RETRYABLE_NETWORK_CODES.has(lastError?.code)
+    || upstreamStatus === 429
+    || upstreamStatus >= 500
+  if (!fallbackEligible) throw lastError
+  const fallback = buildDeterministicF1FallbackReport(input)
+  const validatedFallback = validateF1StructuredReport(fallback, input, {
+    allowMaterializedEvidence: true,
+    analysisMode: 'evidence_only',
+  })
+  if (!validatedFallback) throw lastError
+  console.warn(`[report] Using evidence fallback after report generation failure: ${lastError?.code || lastError?.name || 'UNKNOWN'}`)
+  return validatedFallback
 }
 
 export async function generateB2Report({
@@ -307,6 +298,8 @@ export async function generateB2Report({
   model,
   input,
   signal,
+  supportsJsonMode = true,
+  supportsReasoningOptions = true,
   requestJson = postJsonWithoutDeadline,
 }) {
   let lastError
@@ -314,21 +307,23 @@ export async function generateB2Report({
   for (let attempt = 0; attempt < MAX_B2_REPORT_ATTEMPTS; attempt += 1) {
     try {
       const upstream = await requestJson(endpoint, {
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
+        headers: modelHeaders(apiKey),
+        body: JSON.stringify(modelRequestBody({
           model,
           messages: buildB2ReportMessages(input, repairContext),
-          response_format: { type: 'json_object' },
-          thinking: { type: 'enabled' },
-          reasoning_effort: 'high',
-          max_tokens: MAX_B2_OUTPUT_TOKENS,
-          stream: false,
-        }),
+          config: {
+            thinking: { type: 'enabled' },
+            reasoningEffort: 'high',
+            maxTokens: MAX_B2_OUTPUT_TOKENS,
+          },
+          supportsJsonMode,
+          supportsReasoningOptions,
+        })),
         signal,
       })
       if (!upstream.ok) {
-        const error = Object.assign(new Error('DEEPSEEK_REPORT_SERVICE_ERROR'), {
-          code: 'DEEPSEEK_REPORT_SERVICE_ERROR', upstreamStatus: upstream.status,
+        const error = Object.assign(new Error('REPORT_MODEL_SERVICE_ERROR'), {
+          code: 'REPORT_MODEL_SERVICE_ERROR', upstreamStatus: upstream.status,
         })
         if (upstream.status < 500 && upstream.status !== 429) throw error
         lastError = error
@@ -338,18 +333,18 @@ export async function generateB2Report({
       const issues = []
       const report = validateB2StructuredReport(draft, input, { onIssue: issue => issues.push(issue) })
       if (report) return report
-      throw Object.assign(new Error('DEEPSEEK_REPORT_VALIDATION_FAILED'), {
-        code: 'DEEPSEEK_REPORT_VALIDATION_FAILED', validationIssues: issues.length ? [...new Set(issues)] : ['UNKNOWN_VALIDATION_FAILURE'],
+      throw Object.assign(new Error('REPORT_MODEL_VALIDATION_FAILED'), {
+        code: 'REPORT_MODEL_VALIDATION_FAILED', validationIssues: issues.length ? [...new Set(issues)] : ['UNKNOWN_VALIDATION_FAILURE'],
       })
     } catch (error) {
       lastError = error
       if (error?.code === 'CLIENT_DISCONNECTED' || signal?.aborted) throw error
-      if (error?.code === 'DEEPSEEK_REPORT_VALIDATION_FAILED') repairContext = error.validationIssues
+      if (error?.code === 'REPORT_MODEL_VALIDATION_FAILED') repairContext = error.validationIssues
       else if (error instanceof SyntaxError) repairContext = ['INVALID_JSON']
       const status = Number(error?.upstreamStatus)
       const retryable = error instanceof SyntaxError
         || error?.code === 'EMPTY_MODEL_RESPONSE'
-        || error?.code === 'DEEPSEEK_REPORT_VALIDATION_FAILED'
+        || error?.code === 'REPORT_MODEL_VALIDATION_FAILED'
         || RETRYABLE_NETWORK_CODES.has(error?.code)
         || status === 429 || status >= 500
       if (!retryable) break
@@ -357,10 +352,10 @@ export async function generateB2Report({
   }
   if (!(lastError instanceof SyntaxError)
     && lastError?.code !== 'EMPTY_MODEL_RESPONSE'
-    && lastError?.code !== 'DEEPSEEK_REPORT_VALIDATION_FAILED') throw lastError || new Error('DEEPSEEK_REPORT_SERVICE_UNAVAILABLE')
+    && lastError?.code !== 'REPORT_MODEL_VALIDATION_FAILED') throw lastError || new Error('REPORT_MODEL_SERVICE_UNAVAILABLE')
   const fallback = buildDeterministicB2FallbackReport(input)
   const validated = validateB2StructuredReport(fallback, input, { analysisMode: 'evidence_only' })
-  if (!validated) throw lastError || new Error('DEEPSEEK_REPORT_SERVICE_UNAVAILABLE')
+  if (!validated) throw lastError || new Error('REPORT_MODEL_SERVICE_UNAVAILABLE')
   return validated
 }
 
@@ -368,7 +363,16 @@ export function createReportHandler(options = {}) {
   const apiKey = String(options.apiKey || '').trim()
   const model = String(options.model || 'deepseek-v4-pro').trim()
   const endpoint = safeEndpoint(options.baseUrl)
-  const configured = Boolean(apiKey && model)
+  const provider = String(options.provider || 'openai-compatible').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-') || 'openai-compatible'
+  const supportsJsonMode = options.supportsJsonMode !== false
+  const supportsReasoningOptions = options.supportsReasoningOptions !== false
+  const anonymousLoopback = endpoint
+    ? (() => {
+        const url = new URL(endpoint)
+        return url.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(url.hostname)
+      })()
+    : false
+  const configured = Boolean(model && endpoint && (apiKey || anonymousLoopback))
   const activeReports = new Map()
 
   function reportKey(ip, input) {
@@ -382,9 +386,9 @@ export function createReportHandler(options = {}) {
     if (pathname === HEALTH_PATH && (req.method === 'GET' || req.method === 'HEAD')) {
       writeJson(res, configured ? 200 : 503, {
         ok: configured,
-        provider: 'deepseek-report',
+        provider,
         model,
-        ...(configured ? {} : { error: 'DEEPSEEK_REPORT_NOT_CONFIGURED' }),
+        ...(configured ? {} : { error: 'REPORT_MODEL_NOT_CONFIGURED' }),
       })
       return true
     }
@@ -395,7 +399,7 @@ export function createReportHandler(options = {}) {
       return true
     }
     if (!configured) {
-      writeJson(res, 503, { error: 'DEEPSEEK_REPORT_NOT_CONFIGURED' })
+      writeJson(res, 503, { error: 'REPORT_MODEL_NOT_CONFIGURED' })
       return true
     }
     if (!isSameOrigin(req)) {
@@ -425,8 +429,8 @@ export function createReportHandler(options = {}) {
     if (!reportTask) {
       const startedAt = Date.now()
       reportTask = (input.visaType === 'B2'
-        ? generateB2Report({ apiKey, endpoint, model, input })
-        : generateF1Report({ apiKey, endpoint, model, input }))
+        ? generateB2Report({ apiKey, endpoint, model, input, supportsJsonMode, supportsReasoningOptions })
+        : generateF1Report({ apiKey, endpoint, model, input, supportsJsonMode, supportsReasoningOptions }))
         .then(report => {
           const tier = input.visaType === 'F1' ? reportTierForAnswerCount(input.answers.length) : 'b2'
           console.log(`[report] completed visaType=${input.visaType} tier=${tier} mode=${report.analysisMode} answers=${input.answers.length} durationMs=${Date.now() - startedAt}`)
@@ -443,7 +447,7 @@ export function createReportHandler(options = {}) {
       if (!res.writableEnded && !res.destroyed) {
         writeJson(res, 200, {
           report,
-          provider: report.analysisMode === 'evidence_only' ? 'evidence-only' : 'deepseek',
+          provider: report.analysisMode === 'evidence_only' ? 'evidence-only' : provider,
           model,
           schemaVersion: 2,
           analysisMode: report.analysisMode,
@@ -454,13 +458,13 @@ export function createReportHandler(options = {}) {
       const upstreamStatus = Number(error?.upstreamStatus)
       const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError'
       const status = upstreamStatus === 429 ? 429 : timeout ? 504 : 502
-      console.error('[report] DeepSeek final report failed:', error?.code || error?.name || 'UNKNOWN')
+      console.error(`[report] ${provider} final report failed:`, error?.code || error?.name || 'UNKNOWN')
       writeJson(res, status, {
         error: timeout
-          ? 'DEEPSEEK_REPORT_TIMEOUT'
+          ? 'REPORT_MODEL_TIMEOUT'
           : upstreamStatus === 429
-            ? 'DEEPSEEK_REPORT_RATE_LIMITED'
-            : error?.code || 'DEEPSEEK_REPORT_SERVICE_UNAVAILABLE',
+            ? 'REPORT_MODEL_RATE_LIMITED'
+            : error?.code || 'REPORT_MODEL_SERVICE_UNAVAILABLE',
       })
     }
     return true
@@ -468,5 +472,6 @@ export function createReportHandler(options = {}) {
 
   handleReport.configured = configured
   handleReport.model = model
+  handleReport.provider = provider
   return handleReport
 }

@@ -1,0 +1,37 @@
+name: Feature proposal
+description: 提议一个边界清楚、可以验证的改进。
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 现在的问题
+      description: 请说明真实使用场景，不要只写一个解决方案名称。
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 希望达到的结果
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 主要范围
+      options:
+        - 面签策略与追问
+        - 新语音模型适配
+        - 报告质量与证据规则
+        - Windows 与本地部署
+        - 隐私、安全或可访问性
+        - 文档与贡献体验
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 如何验收
+      description: 写出能够判断改动是否成功的具体例子或测试。
+

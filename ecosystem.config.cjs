@@ -1,13 +1,13 @@
-// ========================================
-// PM2 ecosystem config for AI Visa Interview
-// ========================================
+const path = require('node:path')
+
+const projectRoot = __dirname
 
 module.exports = {
   apps: [
     {
       name: 'visa-interview',
       script: 'server/index.mjs',
-      cwd: '/home/ubuntu/visa-interview',
+      cwd: projectRoot,
       instances: 1,
       exec_mode: 'fork',
       env: {
@@ -18,8 +18,8 @@ module.exports = {
       kill_timeout: 10_000,
       listen_timeout: 5_000,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      error_file: '/home/ubuntu/visa-interview/logs/error.log',
-      out_file: '/home/ubuntu/visa-interview/logs/out.log',
+      error_file: path.join(projectRoot, 'logs', 'error.log'),
+      out_file: path.join(projectRoot, 'logs', 'out.log'),
       merge_logs: true,
       autorestart: true,
       watch: false,

@@ -4,7 +4,7 @@
 // Responsibilities:
 //   1. Serve Vite-built static files (dist/) with SPA fallback
 //   2. WebSocket proxy  /api/realtime-voice → Doubao
-//   3. Final report     /api/ai-report → DeepSeek constrained evaluator
+//   3. Final report     /api/ai-report → model-neutral constrained evaluator
 //   4. Health checks    /api/realtime-health, /api/report-health
 // ========================================
 
@@ -16,8 +16,8 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 
 import { createWSProxy } from './wsProxy.mjs'
-import { createOrderAuth } from './orderAuth.mjs'
 import { createReportHandler } from './reportApi.mjs'
+import { createRealtimeSessionHandler } from './realtimeSessionApi.mjs'
 
 // ── config ───────────────────────────────────────────────
 
@@ -25,7 +25,8 @@ dotenv.config({
   path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env',
 })
 
-const PORT = Number(process.env.PORT) || 3000
+const requestedPort = Number(process.env.PORT)
+const PORT = Number.isInteger(requestedPort) && requestedPort >= 0 ? requestedPort : 3000
 const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0')
 const DIST_DIR = join(fileURLToPath(import.meta.url), '..', '..', 'dist')
 
@@ -33,13 +34,22 @@ const DOUBAO_APP_ID = process.env.DOUBAO_APP_ID || ''
 const DOUBAO_ACCESS_KEY = process.env.DOUBAO_ACCESS_KEY || ''
 const UPSTREAM_URL = process.env.DOUBAO_REALTIME_URL || undefined
 const WS_MAX_CONNECTIONS = Number(process.env.WS_MAX_CONNECTIONS) || 30
+const VOICE_PROVIDER = String(process.env.VOICE_PROVIDER || 'doubao').trim().toLowerCase()
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ''
+const GEMINI_LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-3.1-flash-live-preview'
+const GEMINI_LIVE_VOICE = process.env.GEMINI_LIVE_VOICE || 'Kore'
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1'
+const OPENAI_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin'
 
-const ADMIN_ORDER_NUMBERS = process.env.ADMIN_ORDER_NUMBERS || process.env.INVITE_CODES || ''
-const ORDER_SESSION_SECRET = process.env.ORDER_SESSION_SECRET || process.env.INVITE_SESSION_SECRET || ''
-
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || ''
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro'
-const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || ''
+const REPORT_PROVIDER = process.env.REPORT_PROVIDER || 'deepseek'
+const REPORT_API_KEY = process.env.REPORT_API_KEY || process.env.DEEPSEEK_API_KEY || ''
+const REPORT_MODEL = process.env.REPORT_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro'
+const REPORT_BASE_URL = process.env.REPORT_BASE_URL || process.env.DEEPSEEK_BASE_URL || ''
+const REPORT_SUPPORTS_JSON_MODE = process.env.REPORT_SUPPORTS_JSON_MODE !== 'false'
+const REPORT_SUPPORTS_REASONING_OPTIONS = process.env.REPORT_SUPPORTS_REASONING_OPTIONS
+  ? process.env.REPORT_SUPPORTS_REASONING_OPTIONS !== 'false'
+  : REPORT_PROVIDER === 'deepseek'
 
 // ── MIME map ─────────────────────────────────────────────
 
@@ -126,21 +136,42 @@ async function serveIndexFallback(res) {
 
 // ── health endpoint ──────────────────────────────────────
 
-function handleHealth(_req, res) {
-  const ok = Boolean(DOUBAO_APP_ID && DOUBAO_ACCESS_KEY)
+function handleHealth(_req, res, realtimeSessionHandler) {
+  const ok = realtimeSessionHandler.configured
   res.statusCode = ok ? 200 : 503
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
   res.end(
     JSON.stringify({
       ok,
-      provider: 'realtime-voice',
+      provider: VOICE_PROVIDER,
       ...(ok ? {} : {
         code: 'REALTIME_NOT_CONFIGURED',
-        message: 'Realtime voice App ID or Access Token is not configured.',
+        message: VOICE_PROVIDER === 'doubao'
+          ? '请配置豆包 App ID 和 Access Token。'
+          : VOICE_PROVIDER === 'gemini'
+            ? '请配置 Gemini API Key。'
+            : VOICE_PROVIDER === 'openai'
+              ? '请配置 OpenAI API Key。'
+              : 'VOICE_PROVIDER 必须是 doubao、gemini 或 openai。',
       }),
     }),
   )
+}
+
+function handleAppHealth(req, res, realtimeSessionHandler, reportHandler) {
+  res.statusCode = 200
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  if (req.method === 'HEAD') return res.end()
+  res.end(JSON.stringify({
+    ok: true,
+    service: 'ai-visa-interview-local',
+    uptimeSeconds: Math.round(process.uptime()),
+    voice: { provider: VOICE_PROVIDER, configured: realtimeSessionHandler.configured },
+    report: { provider: reportHandler.provider, configured: reportHandler.configured },
+  }))
 }
 
 // ── main ─────────────────────────────────────────────────
@@ -154,17 +185,24 @@ async function main() {
     process.exit(1)
   }
 
-  const orderAuth = createOrderAuth({
-    adminOrderNumbers: ADMIN_ORDER_NUMBERS,
-    sessionSecret: ORDER_SESSION_SECRET,
-    secureCookies: process.env.NODE_ENV === 'production',
-    ordersFile: process.env.ORDER_NUMBERS_FILE || 'data/orders.json',
-    usageFile: process.env.ORDER_USAGE_FILE || 'data/order-usage.json',
-  })
   const reportHandler = createReportHandler({
-    apiKey: DEEPSEEK_API_KEY,
-    model: DEEPSEEK_MODEL,
-    baseUrl: DEEPSEEK_BASE_URL,
+    apiKey: REPORT_API_KEY,
+    model: REPORT_MODEL,
+    baseUrl: REPORT_BASE_URL,
+    provider: REPORT_PROVIDER,
+    supportsJsonMode: REPORT_SUPPORTS_JSON_MODE,
+    supportsReasoningOptions: REPORT_SUPPORTS_REASONING_OPTIONS,
+  })
+  const realtimeSessionHandler = createRealtimeSessionHandler({
+    provider: VOICE_PROVIDER,
+    doubaoAppId: DOUBAO_APP_ID,
+    doubaoAccessKey: DOUBAO_ACCESS_KEY,
+    geminiApiKey: GEMINI_API_KEY,
+    geminiModel: GEMINI_LIVE_MODEL,
+    geminiVoice: GEMINI_LIVE_VOICE,
+    openaiApiKey: OPENAI_API_KEY,
+    openaiModel: OPENAI_REALTIME_MODEL,
+    openaiVoice: OPENAI_REALTIME_VOICE,
   })
 
   const server = createServer(async (req, res) => {
@@ -172,23 +210,15 @@ async function main() {
       const pathname = req.url?.split('?')[0] ?? ''
       res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
 
-      const authHandled = await orderAuth.handleRequest(req, res, pathname)
-      if (authHandled) return
-
       // ── API routes ──
-      if (pathname.startsWith('/api/') && !orderAuth.isAuthorized(req)) {
-        return orderAuth.unauthorized(res)
+      if (pathname === '/api/app-health' && (req.method === 'GET' || req.method === 'HEAD')) {
+        return handleAppHealth(req, res, realtimeSessionHandler, reportHandler)
       }
-
-      if (pathname === '/api/ai-report') {
-        const reportAccess = orderAuth.reportAccess(req, req.headers['x-interview-attempt'])
-        if (!reportAccess.allowed) return orderAuth.unauthorized(res, reportAccess)
-      }
-
       if (pathname === '/api/realtime-health' && (req.method === 'GET' || req.method === 'HEAD')) {
-        return handleHealth(req, res)
+        return handleHealth(req, res, realtimeSessionHandler)
       }
 
+      if (await realtimeSessionHandler(req, res)) return
       if (await reportHandler(req, res)) return
 
       // ── Static files + SPA fallback ──
@@ -215,14 +245,12 @@ async function main() {
   })
 
   // ── WebSocket proxy ──
-  const wsProxy = createWSProxy(server, {
+  const wsProxy = VOICE_PROVIDER === 'doubao' ? createWSProxy(server, {
     appId: DOUBAO_APP_ID,
     accessKey: DOUBAO_ACCESS_KEY,
     upstreamUrl: UPSTREAM_URL,
     maxConnections: WS_MAX_CONNECTIONS,
-    realtimeAccess: orderAuth.realtimeAccess,
-    reserveInterview: orderAuth.reserveInterview,
-  })
+  }) : { close() {} }
 
   // ── graceful shutdown ──
   function shutdown() {
@@ -242,13 +270,17 @@ async function main() {
 
   // ── listen ──
   server.listen(PORT, HOST, () => {
-    console.log(`[server] AI Visa Interview running at http://${HOST}:${PORT}`)
+    const address = server.address()
+    const activePort = typeof address === 'object' && address ? address.port : PORT
+    console.log(`[server] AI Visa Interview running at http://${HOST}:${activePort}`)
     console.log(`[server] Static files: ${DIST_DIR}`)
-    console.log(`[server] WebSocket   : ws://${HOST}:${PORT}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
-    console.log(`[server] Health      : http://${HOST}:${PORT}/api/realtime-health`)
-    console.log(`[server] AI report   : ${reportHandler.configured ? `DeepSeek ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
-    console.log(`[server] Order gate  : ${orderAuth.configured ? 'enabled' : 'NOT CONFIGURED'}`)
-    console.log(`[server] Orders      : ${orderAuth.orderCount} customer orders from ${orderAuth.ordersFile}; usage at ${orderAuth.usageFile}`)
+    console.log(`[server] WebSocket   : ws://${HOST}:${activePort}/api/realtime-voice (max ${WS_MAX_CONNECTIONS} connections)`)
+    console.log(`[server] Health      : http://${HOST}:${activePort}/api/realtime-health`)
+    console.log(`[server] App health  : http://${HOST}:${activePort}/api/app-health`)
+    console.log(`[server] AI report   : ${reportHandler.configured ? `${reportHandler.provider} ${reportHandler.model}` : 'NOT CONFIGURED'} at /api/ai-report`)
+    const readyMessage = { type: 'server-ready', port: activePort }
+    process.send?.(readyMessage)
+    process.parentPort?.postMessage?.(readyMessage)
   })
 }
 
