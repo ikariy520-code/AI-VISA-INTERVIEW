@@ -1,0 +1,7 @@
+# Public, fixed X-Api-App-Key required by the Doubao realtime protocol.
+# This is not a user credential; App ID and Access Token come from the environment.
+# Reference: https://docs.volcengine.com/docs/DoubaoVoice/End-to-endreal-timespeechlargemodelAPIaccessdocument?lang=zh
+# Ignore only these historical findings, keeping all other secret detection active.
+cb715091b894d1e311870ed4fa411db37a164c0d:scripts/realtimeVoiceSmoke.mjs:generic-api-key:85
+cb715091b894d1e311870ed4fa411db37a164c0d:server/wsProxy.mjs:generic-api-key:132
+cb715091b894d1e311870ed4fa411db37a164c0d:local/doubaoRealtimeBridge.ts:generic-api-key:161
